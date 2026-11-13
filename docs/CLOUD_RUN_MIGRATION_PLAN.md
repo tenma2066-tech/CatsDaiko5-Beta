@@ -1074,3 +1074,16 @@ F. execution完了:
 - 専用branch / Draft PR #9のみ。Beta main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは変更なし。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新HEADのCI全工程・Firestore Emulator・Docker build結果を確認する。その後、管理者向けのunknown launch復旧手順とbounded log chunksを進め、実データdry-runで注文DB/ledgerの件数・digest coverageが整合することを確認する。旧ledger snapshotがない場合は、ユーザーによる安全なデータ確認が必要になるまでimportを行わない。
+
+
+## 30. Worker実行identityをCloud Run標準値に固定（2026-11-13）
+
+- Cloud Run Workerが `CLOUD_RUN_EXECUTION` を取得できない場合にランダムownerへfallbackしていた経路を廃止。
+- Google Cloud公式のCloud Run container runtime contractで、Jobsには `CLOUD_RUN_EXECUTION`（実行名）が自動設定されることを確認。
+- Workerはこの値が未設定・不正ならゲーム処理開始前に停止し、pre-claim reserved slotを安全に解放して注文をreviewへ移す。ランダムownerを記録しない。
+- Reconciler側の `worker-*` fallback owner skipも削除。Cloud Run execution nameを使ってExecution APIを照合する経路へ統一。
+- test_cloud_run_worker.pyに環境変数未設定時の拒否と有効値の取得テストを追加。
+- 最新コードcommit `a6a2f330e161a892634862a8390a1658dcd3dcc2`。CI run `43439651151` と並列回帰run `43439651140` は確認時点でqueued/pending。直前のcommit `5250b731` のCI run `43439247626` と並列回帰run `43439247620` は全ステップsuccess。新Worker identity変更を含む最新CI成功とは区別する。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CI全工程とFirestore Emulator testを確認する。Cloud Run実環境では `CLOUD_RUN_EXECUTION` は自動注入値なので、Job設定で手動追加しない。引き続きbounded log chunks、unknown launchの手動解除手順、Security Rules/IAM、実データdry-run照合を進める。
