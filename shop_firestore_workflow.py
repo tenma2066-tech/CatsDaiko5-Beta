@@ -249,6 +249,47 @@ class FirestoreWorkflowRepository:
 
         mark(transaction)
 
+    def fail_reserved_execution(self, order_id: str, execution_id: str, slot_id: str, reason: str) -> None:
+        """Release only a slot reserved by this execution before it claimed a worker."""
+        order_ref = self._orders.document(order_id)
+        execution_ref = self._executions.document(execution_id)
+        outbox_ref = self._outbox.document(execution_id)
+        slot_ref = self._slots.document(slot_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def fail(tx):
+            order = order_ref.get(transaction=tx)
+            execution = execution_ref.get(transaction=tx)
+            outbox = outbox_ref.get(transaction=tx)
+            slot = slot_ref.get(transaction=tx)
+            if not execution.exists or not slot.exists:
+                return
+            ex, slot_data = execution.to_dict(), slot.to_dict()
+            if (ex.get("state") != "starting"
+                    or ex.get("slot_id") != slot_id
+                    or slot_data.get("state") != "reserved"
+                    or slot_data.get("owner") != "dispatch:" + execution_id):
+                return
+            now = self._clock()
+            tx.update(execution_ref, {
+                "state": "review", "error_code": (reason or "worker_claim_failed")[:80],
+                "finished": now, "updated": now,
+            })
+            if order.exists:
+                tx.update(order_ref, {
+                    "status": "review", "job_id": execution_id,
+                    "payment_note": (reason or "worker_claim_failed")[:120],
+                    "updated": now,
+                })
+            if outbox.exists:
+                tx.update(outbox_ref, {"state": "review", "updated": now})
+            tx.update(slot_ref, {
+                "state": "released", "released": now, "updated": now,
+            })
+
+        fail(transaction)
+
     def claim_execution(
         self, order_id: str, execution_id: str, owner: str,
         transfer_digest: str, slot_id: str,
