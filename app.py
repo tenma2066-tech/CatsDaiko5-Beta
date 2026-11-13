@@ -1597,6 +1597,10 @@ def api_cats():
 
 @app.post("/api/cats/latest")
 def api_cats_latest():
+    rate_key = "catalog:" + (request.remote_addr or "")
+    if _too_many_fails(rate_key):
+        return jsonify(error="カタログ更新が続いています。10分ほど待ってからお試しください。"), 429
+    _fail.setdefault(rate_key, []).append(time.time())
     if not _run_lock.acquire(blocking=False):
         return jsonify(error="データを準備中です。完了してからもう一度押してください。"), 409
     _catalog_update.update(status="loading", error=None)
@@ -1611,6 +1615,10 @@ def api_cats_latest():
 
 @app.post("/api/cats/refresh")
 def api_cats_refresh():
+    rate_key = "catalog-refresh:" + (request.remote_addr or "")
+    if _too_many_fails(rate_key):
+        return jsonify(error="キャラ一覧の再取得が続いています。10分ほど待ってからお試しください。"), 429
+    _fail.setdefault(rate_key, []).append(time.time())
     if _names["state"] in ("ready", "error", "none"):
         _names.update(state="none", items=[], method=None, error=None)
         _start_names()
