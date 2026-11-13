@@ -55,7 +55,7 @@ class CloudRunDispatcherTests(unittest.TestCase):
             "execution_id": "exec_12345678",
         })
         with self.assertRaises(ValueError):
-            build_task_payload("0123456789", "exec_12345678", "transfer-code")
+            build_task_payload("invalid-order", "exec_12345678")
 
     def test_dispatch_launches_once_and_duplicate_delivery_is_noop(self):
         repository = FakeRepository()
