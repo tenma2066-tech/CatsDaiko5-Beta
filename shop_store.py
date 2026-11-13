@@ -16,6 +16,8 @@ from cryptography.fernet import Fernet, InvalidToken
 import shop_storage
 from shop_payment_repository import PaymentRepositoryError, SQLitePaymentRepository
 from shop_order_repository import SQLiteOrderRepository
+from shop_firestore_repository import FirestoreOrderRepository, FirestorePaymentRepository
+from shop_firestore_workflow import FirestoreWorkflowRepository
 
 DB_PATH = Path(os.environ.get("SHOP_DB_PATH", "instance/shop.sqlite3"))
 ORDER_ID_RE = re.compile(r"^[A-Z0-9]{10}$")
@@ -69,8 +71,153 @@ def _db():
     except shop_storage.ShopStorageError as exc:
         raise ShopError(str(exc)) from exc
 
-_payment_repository = SQLitePaymentRepository(_db)
-_order_repository = SQLiteOrderRepository(_db)
+_SHOP_BACKEND = shop_storage.selected_backend()
+if _SHOP_BACKEND == "firestore":
+    _firestore_client = shop_storage.firestore_client()
+    _payment_repository = FirestorePaymentRepository(_firestore_client)
+    _order_repository = FirestoreOrderRepository(_firestore_client)
+    _workflow_repository = FirestoreWorkflowRepository(_firestore_client)
+else:
+    _firestore_client = None
+    _payment_repository = SQLitePaymentRepository(_db)
+    _order_repository = SQLiteOrderRepository(_db)
+    _workflow_repository = None
+
+
+def uses_firestore():
+    return _SHOP_BACKEND == "firestore"
+
+
+def claim_payment_attempt(order_id: str, payment_digest: str):
+    if not uses_firestore():
+        raise ShopError("リンク単位の決済管理はFirestore環境でのみ利用できます。")
+    try:
+        return _payment_repository.claim_payment_attempt(order_id, payment_digest)
+    except PaymentRepositoryError as exc:
+        raise ShopError(str(exc)) from exc
+
+
+def transition_payment_attempt(order_id: str, payment_digest: str, state: str, note: str = ""):
+    if not uses_firestore():
+        raise ShopError("リンク単位の決済管理はFirestore環境でのみ利用できます。")
+    try:
+        return _payment_repository.transition_payment_attempt(
+            order_id, payment_digest, state, note
+        )
+    except (PaymentRepositoryError, ValueError) as exc:
+        raise ShopError(str(exc)) from exc
+
+
+def enqueue_execution(order_id: str, access_token: str):
+    if not uses_firestore():
+        raise ShopError("Cloud Run実行キューはFirestore環境でのみ利用できます。")
+    row = _row(order_id)
+    access_hash = hashlib.sha256((access_token or "").encode()).hexdigest()
+    if not row or not secrets.compare_digest(row["access_hash"], access_hash):
+        raise ShopError("注文が見つかりません。")
+    execution_id = secrets.token_hex(12)
+    try:
+        _workflow_repository.enqueue_execution(order_id, execution_id)
+    except Exception as exc:
+        raise ShopError("処理要求を安全に登録できませんでした。") from exc
+    return execution_id
+
+
+def publish_execution(execution_id: str):
+    if not uses_firestore():
+        raise ShopError("Cloud Run実行キューはFirestore環境でのみ利用できます。")
+    required = {
+        "project": os.environ.get("CLOUD_TASKS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT"),
+        "location": os.environ.get("CLOUD_TASKS_LOCATION", "asia-northeast1"),
+        "queue": os.environ.get("CLOUD_TASKS_QUEUE"),
+        "dispatcher_url": os.environ.get("CLOUD_RUN_DISPATCHER_URL"),
+        "service_account": os.environ.get("CLOUD_TASKS_SERVICE_ACCOUNT"),
+    }
+    if not all(required.values()):
+        # The transactional outbox remains pending and can be swept after config.
+        return False
+    try:
+        from google.cloud import tasks_v2
+        from shop_cloud_run_dispatcher import CloudTasksOutboxPublisher
+
+        publisher = CloudTasksOutboxPublisher(
+            tasks_v2.CloudTasksClient(), _workflow_repository,
+            project=required["project"], location=required["location"],
+            queue=required["queue"], dispatcher_url=required["dispatcher_url"],
+            oidc_service_account=required["service_account"],
+            audience=os.environ.get("CLOUD_RUN_DISPATCHER_AUDIENCE"),
+        )
+        return publisher.publish(execution_id)
+    except Exception as exc:
+        # Keep the outbox pending for deterministic recovery; never discard it.
+        raise ShopError("処理要求は保存されましたが、実行キューへの登録を確認できません。") from exc
+
+
+def execution_progress(order_id: str, access_token: str):
+    if not uses_firestore():
+        return None
+    row = _row(order_id)
+    expected = hashlib.sha256((access_token or "").encode()).hexdigest()
+    if not row or not secrets.compare_digest(row["access_hash"], expected):
+        return None
+    execution_id = row.get("active_execution_id") or row.get("job_id")
+    if not execution_id or execution_id in {"queued", "starting"}:
+        return {"status": "queued", "job_status": "not_started"}
+    execution = _workflow_repository.get_execution(execution_id)
+    if not execution:
+        return {"status": "queued", "job_status": "not_started"}
+    state = execution.get("state")
+    worker_status = execution.get("worker_status")
+    if state == "completed":
+        status = "done"
+    elif state == "review":
+        status = "error"
+    elif state == "running" and worker_status in {"running", "done", "error"}:
+        status = worker_status
+    elif state in {"queued", "starting"}:
+        status = "queued"
+    else:
+        status = "error"
+    result = None
+    encrypted_result = execution.get("result_enc")
+    if encrypted_result:
+        try:
+            result = json.loads(_cipher().decrypt(encrypted_result))
+        except Exception:
+            result = None
+    return {
+        "status": status,
+        "step": execution.get("step", 0),
+        "log": execution.get("log", []),
+        "warn": execution.get("warn", []),
+        "report": execution.get("report", []),
+        "skipped": execution.get("skipped", []),
+        "dry": execution.get("dry", False),
+        "clone": execution.get("clone", False),
+        "integrity_only": execution.get("integrity_only", False),
+        "result": result,
+        "error": execution.get("error") or ("管理者による確認が必要です。" if state == "review" else None),
+        "created": execution.get("created"),
+        "finished": execution.get("finished") or execution.get("worker_finished"),
+        "outcome_unknown": execution.get("outcome_unknown", False),
+        "job": execution_id,
+    }
+
+
+def cancel_queued_execution(order_id: str, access_token: str):
+    if not uses_firestore():
+        return False
+    row = _row(order_id)
+    expected = hashlib.sha256((access_token or "").encode()).hexdigest()
+    if not row or not secrets.compare_digest(row["access_hash"], expected):
+        return False
+    execution_id = row.get("active_execution_id")
+    if not execution_id:
+        return False
+    try:
+        return _workflow_repository.cancel_queued_execution(order_id, execution_id)
+    except Exception as exc:
+        raise ShopError("待機中の処理を安全にキャンセルできませんでした。") from exc
 
 
 def catalog():
