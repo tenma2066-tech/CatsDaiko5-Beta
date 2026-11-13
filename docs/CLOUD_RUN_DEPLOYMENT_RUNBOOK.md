@@ -324,3 +324,10 @@ python shop_cloud_run_recovery.py \
 ## 20. Dispatcher operation名のみ保存された曖昧起動
 
 Cloud Run Job起動のlong-running operation名はFirestoreに保存できたが、Execution名がまだ取得できない状態が600秒以上続く場合、reconcilerは `launching` / `dispatched` のどちらからでも注文・executionをreview/outcome_unknownへ移す。slotは解放せず、transfer lockがある場合も保持する。その後はsection 19の読み取り専用InspectorでExecution引数を照合する。
+
+
+## 21. Runtime service account IAM
+
+実環境を作成する前に [Cloud Run IAM matrix](CLOUD_RUN_IAM_MATRIX.md) を確認する。Web / Dispatcher / Worker / Cloud Tasks OIDC / Scheduler OIDCはidentityを分離する。runtime service accountへOwner / Editor / Project-wide run.admin / Project-wide Secret Accessorを付与しない。Firestore server SDKは `roles/datastore.user`、Inspectorはread-onlyの `roles/datastore.viewer` を使い、Secret Managerは個別Secret単位で付与する。
+
+Dispatcherには対象QueueのCloud Tasks Enqueuerと対象Worker Jobの実行権限、Executions照合用のread権限だけを付与する。Cloud Tasks/Scheduler OIDC identityはPrivate Dispatcher ServiceのInvokerのみ。実際のIAM Policy Simulatorと実リソース単位の権限テストが完了するまで本番切替しない。
