@@ -1233,3 +1233,15 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はIAM matrix/Runbookを再fetchし、Web/Dispatcher両publisherとOIDC actAs権限が整合していることを確認する。Project作成後はQueue resource単位のIAMをPolicy Simulatorで検証する。
+
+
+## 42. Dispatcher ServiceをGunicorn起動へ修正（2026-11-13）
+
+- Deployment runbookを再監査し、Dispatcher Serviceが `python shop_cloud_run_dispatcher_service.py` で起動され、Flask組み込み開発サーバーを本番で使う記述になっていた点を発見。
+- Dispatcher ServiceはGunicornで起動するようRunbookを修正。`gunicorn --workers 1 --threads 4 --bind 0.0.0.0:$PORT shop_cloud_run_dispatcher_service:app`。Cloud Run Job Workerは引き続き `python shop_cloud_run_worker.py` で実行する。
+- Dockerfileの既定CMDはWeb Service用Gunicornのまま。Dispatcher Serviceだけcommand/argsをoverrideする。
+- これはRunbook修正のみでコード変更なし。GCP resources未作成、実環境起動未実施。
+- 直前コードHEAD `43c6629a5687a15048434365147750ce563ff68e` はCI/parallel success。IAM/runbook docsの最新HEAD CIは確認待ち。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はRunbookのGunicorn起動記述を再fetchし、latest CI/parallel statusを確認する。
