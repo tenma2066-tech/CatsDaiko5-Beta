@@ -173,6 +173,43 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
             "status": "paid", "job_id": None, "active_execution_id": None,
         })
 
+    def test_unknown_dispatch_after_operation_persist_but_without_execution_name(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        workflow.mark_task_enqueued(execution_id)
+        workflow.begin_dispatch(execution_id)
+        workflow.mark_dispatch_started(execution_id, {
+            "operation_name": "operations/metadata-not-ready",
+            "execution_name": None,
+        })
+        workflow.mark_dispatch_unknown(
+            execution_id, "execution_name_missing_after_dispatch"
+        )
+        execution = workflow.get_execution(execution_id)
+        outbox = workflow.get_outbox_item(execution_id)
+        order = self.orders.get_order(self.order_id)
+        self.assertEqual(execution["state"], "review")
+        self.assertTrue(execution["outcome_unknown"])
+        self.assertEqual(outbox["state"], "outcome_unknown")
+        self.assertEqual(
+            outbox["cloud_run_operation"], "operations/metadata-not-ready"
+        )
+        self.assertEqual(order["status"], "review")
+        self.assertEqual(
+            self.client.collection("worker_slots").document("slot-0").get().to_dict()["state"],
+            "reserved",
+        )
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("worker_slots").document("slot-0").delete()
+        self.client.collection("orders").document(self.order_id).delete()
+
     def test_outbox_single_launch_and_unknown_game_result_keeps_transfer_lock(self):
         workflow = FirestoreWorkflowRepository(self.client)
         self.assertTrue(self.payments.claim_payment(self.order_id))
