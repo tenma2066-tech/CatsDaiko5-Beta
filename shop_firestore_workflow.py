@@ -868,6 +868,23 @@ class FirestoreWorkflowRepository:
 
         clear(transaction)
 
+    def cleanup_expired_otp_sessions(self, limit: int = 100) -> int:
+        """Delete a bounded batch of expired OTP state without paid TTL policies."""
+        if type(limit) is not int:
+            raise ValueError("limit must be an integer")
+        limit = max(1, min(limit, 500))
+        now = self._clock()
+        expired = list(
+            self._otp.where("expires_at", "<=", now).limit(limit).stream()
+        )
+        if not expired:
+            return 0
+        batch = self._client.batch()
+        for snapshot in expired:
+            batch.delete(snapshot.reference)
+        batch.commit()
+        return len(expired)
+
     def consume_otp_session(self, session_id: str) -> str | None:
         reference = self._otp.document(session_id)
         transaction = self._client.transaction(max_attempts=5)
