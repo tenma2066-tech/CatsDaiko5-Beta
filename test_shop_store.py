@@ -22,8 +22,19 @@ class ShopStoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
-        for key in ("SHOP_DB_PATH", "PAYPAY_ENCRYPTION_KEY", "SHOP_CATALOG_JSON"):
+        for key in ("SHOP_DB_PATH", "PAYPAY_ENCRYPTION_KEY", "SHOP_CATALOG_JSON", "SHOP_STORAGE_BACKEND"):
             os.environ.pop(key, None)
+
+    def test_firestore_selection_fails_closed_without_falling_back(self):
+        os.environ["SHOP_STORAGE_BACKEND"] = "firestore"
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_order("svc-a")
+        self.assertFalse((Path(self.tmp.name) / "orders.sqlite3").exists())
+
+    def test_unknown_storage_backend_is_rejected(self):
+        os.environ["SHOP_STORAGE_BACKEND"] = "typo"
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_order("svc-a")
 
     def test_order_uses_server_catalog_and_hides_credentials_from_public_view(self):
         order = self.store.create_order("svc-a")
