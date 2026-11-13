@@ -389,6 +389,46 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.client.collection("executions").document(execution_id).delete()
         self.client.collection("worker_slots").document("slot-0").delete()
 
+    def test_legacy_import_is_create_only_and_marks_old_active_job_for_review(self):
+        values = {
+            "id": self.order_id,
+            "access_hash": self.access_hash,
+            "sku": "legacy",
+            "title": "legacy order",
+            "amount": 25,
+            "unit_price_yen": 25,
+            "quantity": 1,
+            "credential_enc": b"encrypted-legacy-credentials",
+            "operation_enc": b"encrypted-legacy-operation",
+            "service_type": "other-service",
+            "job_id": "old-in-memory-job",
+            "credentials_submitted": True,
+            "status": "completed",
+            "payment_digest": None,
+            "payment_note": "",
+            "created": 1_800_000_000,
+        }
+        self.assertTrue(self.orders.import_legacy_order(values))
+        self.assertFalse(self.orders.import_legacy_order(values))
+        imported = self.orders.get_order(self.order_id)
+        self.assertEqual(imported["status"], "review")
+        self.assertIsNone(imported["job_id"])
+        self.assertIsNone(imported["active_execution_id"])
+        self.assertTrue(imported["legacy_imported"])
+
+    def test_legacy_paypay_attempt_import_maps_attempted_to_unknown(self):
+        digest = secrets.token_hex(32)
+        self.assertTrue(self.payments.import_legacy_attempt(
+            digest, self.order_id, "attempted", 1_800_000_000
+        ))
+        self.assertFalse(self.payments.import_legacy_attempt(
+            digest, self.order_id, "attempted", 1_800_000_000
+        ))
+        attempt = self.client.collection("payment_attempts").document(digest).get().to_dict()
+        self.assertEqual(attempt["state"], "outcome_unknown")
+        self.assertTrue(attempt["legacy_imported"])
+        self.client.collection("payment_attempts").document(digest).delete()
+
 
 if __name__ == "__main__":
     unittest.main()
