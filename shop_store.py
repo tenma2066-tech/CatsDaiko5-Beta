@@ -61,17 +61,13 @@ def _db():
                 con.execute("ALTER TABLE orders ADD COLUMN job_id TEXT")
             # Finish one-time schema migration before any caller starts an explicit transaction.
             con.commit()
-            if not github_runtime_store.enabled():
+            if not shop_storage.uses_remote_snapshot():
                 os.chmod(DB_PATH, 0o600)
             yield con
     except shop_storage.ShopStorageError as exc:
         raise ShopError(str(exc)) from exc
-    except Exception as exc:
-        # Preserve the existing GitHub runtime store's safe failure behavior.
-        import github_runtime_store
-        if isinstance(exc, github_runtime_store.RuntimeStoreError):
-            raise ShopError(str(exc)) from exc
-        raise
+    except shop_storage.ShopStorageError as exc:
+        raise ShopError(str(exc)) from exc
 
 def catalog():
     raw = os.environ.get("SHOP_CATALOG_JSON", "").strip()
