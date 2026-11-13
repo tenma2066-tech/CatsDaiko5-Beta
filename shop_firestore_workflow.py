@@ -258,6 +258,8 @@ class FirestoreWorkflowRepository:
                     if order_data.get("active_execution_id") == execution_id:
                         tx.update(order_ref, {
                             "status": "review",
+                            "job_id": execution_id,
+                            "payment_note": "cloud_tasks_retry_exhausted",
                             "updated": now,
                         })
                 tx.update(reference, {
