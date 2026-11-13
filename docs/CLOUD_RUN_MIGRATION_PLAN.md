@@ -1375,3 +1375,13 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はDispatcher endpoint説明と最新CI statusを確認する。
+
+
+## 52. Dispatcher moduleのInvoker説明をCloud Schedulerと統一（2026-11-13）
+
+- `shop_cloud_run_dispatcher_service.py` のmodule docstringがCloud Tasks OIDC SAのみをInvokerとして記載し、Cloud Scheduler OIDC SAを記載していなかった。実際の内部endpointはCloud Tasksが `/dispatch`、Schedulerが `/sweep` / `/reconcile` を呼ぶ。
+- DocstringをCloud Tasks + Cloud Scheduler OIDC service accountへ修正し、role名も `roles/run.invoker` から `roles/run.servicesInvoker` に統一。機能変更なし。
+- 最新コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` はCI/parallel success。今回のcomment修正を含む最新HEAD CIはこれから確認する。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEAD CI/parallelを確認し、dispatcher module docstringとIAM matrixの一致を確認する。
