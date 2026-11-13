@@ -2,7 +2,7 @@
 
 <!-- coderabbit-ai-generated-section:v1:bca14bcc995e4edcb31cba81431de87ae8ec832f29ffa738a583517046f946ef -->
 
-# にゃんこ代行 Web版（個人用）
+# にゃんこ代行 Web版（ベータ版・個人用）
 
 ブラウザから使える版です。課金・PayPay・Discordは入っていません。
 
@@ -94,10 +94,10 @@ Blueprintがうまくいかないとき（New → Web Service で手動）
 
 <!-- coderabbit-ai-generated-section:v1:ce7da130416f07374016f8c9dd3ae577d9d2ad32e8d654b790e7d03c3c75a35f -->
 
-- 無料のRenderで保持する場合は、既存の非公開リポジトリ `tenma2066-tech/CatsDaiko5` の `main` に `auth/passwords.json` を保存します。パスワードそのものは保存しません。
+- 無料のRenderで保持する場合は、既存の非公開リポジトリ `tenma2066-tech/CatsDaiko5-Beta` の `main` に `auth/passwords.json` を保存します。パスワードそのものは保存しません。
 - このファイルのみの更新ではRenderが再デプロイしないよう、Blueprintの `render.yaml` でビルド対象から除外しています。Blueprintを使わずにRenderを設定している場合は、RenderのBuild Filterにも `auth/passwords.json` を除外パスとして設定してください。別の保存ファイルに変える場合は、そのパスも除外してください。
 - GitHubの [fine-grained personal access token作成画面](https://github.com/settings/personal-access-tokens/new) で、このリポジトリだけを選び、リポジトリの `Contents: Read and write` 権限を付けます。この権限ではアプリのソースコードも変更できるため、トークンは厳重に保管してください。
-- Renderの環境変数に `AUTH_GITHUB_TOKEN`（上記トークン）、`AUTH_GITHUB_BOOTSTRAP=1`、`ADMIN_PASSWORD`（管理者用パスコード）を設定します。`AUTH_GITHUB_REPO` はBlueprintで `tenma2066-tech/CatsDaiko5` に設定済みです。保存先を変更する場合は `AUTH_GITHUB_REPO`、`AUTH_GITHUB_BRANCH`、`AUTH_GITHUB_PATH` を指定できます。
+- Renderの環境変数に `AUTH_GITHUB_TOKEN`（上記トークン）、`AUTH_GITHUB_BOOTSTRAP=1`、`ADMIN_PASSWORD`（管理者用パスコード）を設定します。`AUTH_GITHUB_REPO` はBlueprintで `tenma2066-tech/CatsDaiko5-Beta` に設定済みです。保存先を変更する場合は `AUTH_GITHUB_REPO`、`AUTH_GITHUB_BRANCH`、`AUTH_GITHUB_PATH` を指定できます。
 
 <!-- /coderabbit-ai-generated:v1 -->
 - 初回に `APP_PASSWORD` でログインすると保存ファイルが作成されます。ログインを確認したら、必ず `AUTH_GITHUB_BOOTSTRAP` をRenderの環境変数から削除してください。以後、保存ファイルが見つからない場合はログインを止め、初期パスワードを自動復活させません。トークンやパスワードはGitHubのファイルに書き込まないでください。
