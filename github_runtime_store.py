@@ -136,12 +136,21 @@ def read_blob(name: str, local_path=None):
             return raw
         if local_path and Path(local_path).is_file():
             legacy = Path(local_path).read_bytes()
-            write_blob(name, legacy)
-            return legacy
+            try:
+                write_blob(name, legacy, create_only=True)
+                return legacy
+            except RuntimeStoreError:
+                # Another writer may have initialized the remote file between our
+                # first read and create attempt. Prefer that remote copy; never
+                # replace it with the older local snapshot.
+                current, _ = _read_remote(name)
+                if current is not None:
+                    return current
+                raise
         return None
 
 
-def write_blob(name: str, raw: bytes):
+def write_blob(name: str, raw: bytes, *, create_only: bool = False):
     """Atomically create/update one file using the current Git blob SHA."""
     cfg = _config()
     if cfg is None:
@@ -153,6 +162,8 @@ def write_blob(name: str, raw: bytes):
     url, _ = _url(path)
     with _GITHUB_WRITE_LOCK, _lock("blob:" + name):
         _, sha = _read_remote(name)
+        if create_only and sha is not None:
+            raise RuntimeStoreError("GitHub側に既存データがあるため、ローカルデータの移行を中止しました。")
         payload = {
             "message": "Update encrypted beta runtime data",
             "branch": branch,
