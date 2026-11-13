@@ -21,8 +21,10 @@ from shop_firestore_repository import (
 )
 
 
-def _snapshot_database(name: str, local_path: str | None):
-    encrypted = github_runtime_store.read_blob(name, local_path)
+def _snapshot_database(name: str):
+    # Read only the encrypted remote snapshot. Never auto-upload an unencrypted
+    # local SQLite file as a side effect of migration inspection.
+    encrypted = github_runtime_store.read_blob(name)
     if encrypted is None:
         return None
     try:
@@ -80,18 +82,12 @@ def main():
                         help="write create-only documents to Firestore")
     parser.add_argument("--shop-snapshot", default="shop.sqlite3")
     parser.add_argument("--ledger-snapshot", default="paypay-ledger.sqlite3")
-    parser.add_argument("--shop-local-path", default=os.environ.get(
-        "SHOP_DB_PATH", "instance/shop.sqlite3"
-    ))
-    parser.add_argument("--ledger-local-path", default=os.environ.get(
-        "PAYPAY_LEDGER_PATH", "/tmp/paypay/payments.sqlite3"
-    ))
     args = parser.parse_args()
 
     if not github_runtime_store.enabled():
         raise RuntimeError("GitHub runtime-data configuration is required")
-    shop_db = _snapshot_database(args.shop_snapshot, args.shop_local_path)
-    ledger_db = _snapshot_database(args.ledger_snapshot, args.ledger_local_path)
+    shop_db = _snapshot_database(args.shop_snapshot)
+    ledger_db = _snapshot_database(args.ledger_snapshot)
     try:
         orders = load_orders(shop_db)
         attempts = load_payment_attempts(ledger_db)
