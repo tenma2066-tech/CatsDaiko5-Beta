@@ -108,45 +108,64 @@ def payment_digest_coverage(orders, attempts):
         if re.fullmatch(r"[A-Z0-9]{10}", str(row.get("id") or ""))
     }
     ledger_by_digest = {}
+    ledger_by_order = {}
     invalid_attempts = 0
     orphaned_attempts = 0
+    allowed_attempt_states = {"attempted", "pending", "paid", "review"}
     for row in attempts:
         digest = row.get("digest")
         order_id = row.get("order_id")
+        state = row.get("state")
         if (not isinstance(digest, str)
                 or not re.fullmatch(r"[0-9a-f]{64}", digest)
                 or not isinstance(order_id, str)
-                or not re.fullmatch(r"[A-Z0-9]{10}", order_id)):
+                or not re.fullmatch(r"[A-Z0-9]{10}", order_id)
+                or state not in allowed_attempt_states):
             invalid_attempts += 1
             continue
         if order_id not in order_ids:
             orphaned_attempts += 1
-        ledger_by_digest.setdefault(digest, set()).add(order_id)
+        ledger_by_digest.setdefault(digest, []).append((order_id, state))
+        ledger_by_order.setdefault(order_id, []).append(digest)
 
     missing = set()
     invalid = 0
     mismatched = 0
+    state_mismatch = 0
     paid_without_digest = 0
     for row in orders:
         order_id = str(row.get("id") or "")
         digest = row.get("payment_digest")
+        status = row.get("status")
         if digest in (None, ""):
-            if row.get("status") in {"paid", "fulfilling", "completed"}:
+            if status in {"paid", "fulfilling", "completed"}:
                 paid_without_digest += 1
             continue
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             invalid += 1
-        elif digest not in ledger_by_digest:
+            continue
+        entries = ledger_by_digest.get(digest)
+        if not entries:
             missing.add(digest)
-        elif order_id not in ledger_by_digest[digest]:
+            continue
+        matching = [state for ledger_order, state in entries if ledger_order == order_id]
+        if not matching:
             mismatched += 1
+        elif status in {"paid", "fulfilling", "completed"} and "paid" not in matching:
+            state_mismatch += 1
+
+    duplicate_digest_records = sum(1 for entries in ledger_by_digest.values() if len(entries) > 1)
+    duplicate_order_records = sum(1 for digests in ledger_by_order.values() if len(digests) > 1)
     return {
         "missing": len(missing),
         "invalid": invalid,
         "mismatched": mismatched,
+        "state_mismatch": state_mismatch,
         "paid_without_digest": paid_without_digest,
         "invalid_attempts": invalid_attempts,
         "orphaned_attempts": orphaned_attempts,
+        "duplicate_digest_records": duplicate_digest_records,
+        "duplicate_order_records": duplicate_order_records,
     }
 
 
@@ -200,13 +219,15 @@ def main():
         for row in attempts:
             digest = str(_row_value(row, "digest", ""))
             order_id = str(_row_value(row, "order_id", ""))
+            state = str(_row_value(row, "state", ""))
             if (re.fullmatch(r"[0-9a-f]{64}", digest)
                     and re.fullmatch(r"[A-Z0-9]{10}", order_id)
-                    and order_id in valid_order_ids):
+                    and order_id in valid_order_ids
+                    and state in {"attempted", "pending", "paid", "review"}):
                 valid_attempts.append({
                     "digest": digest,
                     "order_id": order_id,
-                    "state": str(_row_value(row, "state", "review")),
+                    "state": state,
                     "created": float(_row_value(row, "created", 0) or 0),
                 })
 
@@ -222,8 +243,11 @@ def main():
         print(f"Invalid order payment digests: {digest_coverage['invalid']}")
         print(f"Paid orders without a payment digest: {digest_coverage['paid_without_digest']}")
         print(f"Payment digest/order mismatches: {digest_coverage['mismatched']}")
+        print(f"Paid-order/payment-state mismatches: {digest_coverage['state_mismatch']}")
         print(f"Invalid payment ledger rows: {digest_coverage['invalid_attempts']}")
         print(f"Orphaned payment ledger rows: {digest_coverage['orphaned_attempts']}")
+        print(f"Duplicate payment digest records: {digest_coverage['duplicate_digest_records']}")
+        print(f"Orders with multiple payment attempts: {digest_coverage['duplicate_order_records']}")
         if args.apply:
             require_ledger_snapshot_for_apply(ledger_db)
             if len(valid_orders) != len(orders):
