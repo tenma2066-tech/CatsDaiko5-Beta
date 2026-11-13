@@ -224,7 +224,7 @@ class FirestoreWorkflowRepository:
             if not snapshot.exists:
                 return None
             data = snapshot.to_dict()
-            if data.get("state") != "pending":
+            if data.get("state") not in {"pending", "task_enqueued"}:
                 return None
             current = int(data.get("task_generation") or 0)
             if current != expected_generation:
@@ -247,7 +247,7 @@ class FirestoreWorkflowRepository:
     def list_pending_outbox(self, limit: int = 100) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= 500:
             raise ValueError("outbox limit must be between 1 and 500")
-        query = self._outbox.where("state", "==", "pending").limit(limit)
+        query = self._outbox.where("state", "in", ["pending", "task_enqueued"]).limit(limit)
         return [snapshot.to_dict() for snapshot in query.stream()]
 
     def mark_task_enqueued(self, execution_id: str) -> None:
