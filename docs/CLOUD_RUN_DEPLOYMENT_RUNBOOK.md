@@ -207,3 +207,26 @@ Scheduler用サービスアカウントにはDispatcher ServiceへのInvokerだ�
 ## 14. 予算と安全停止
 
 Cloud Billing予算アラートは通知であり、サービスの自動停止を保証しない。Cloud Run max instances、Job並列数、Cloud Tasks queue rate、Firestore読み書き、Logging量を制限する。月額1,000円を超える見込みが出た場合は実注文を有効化しない。Jobの実行時間・CPU/メモリ・progress write頻度を実測してから費用を再計算する。
+
+
+## 15. Cloud Run Job終了状態の照合スケジュール
+
+Dispatcherには /reconcile エンドポイントも実装されている。Workerが強制終了し、Firestoreに最終状態を書けなかった場合に、Cloud Run Job Executionの実際の終了状態を照合して注文をreviewへ移す。
+
+Cloud Schedulerに catsdaiko-execution-reconcile を追加し、1分ごとに非公開Dispatcherの POST /reconcile をOIDC認証で呼ぶ。Scheduler用サービスアカウントにはDispatcher Serviceのroles/run.invokerのみを付与する。
+
+この照合は成功扱い・自動再実行を行わない。Cloud Run Executionが終了済みなのにFirestoreがrunningのままの場合は、結果不明としてreviewにし、worker slotのみ解放する。transfer lockは保持し、管理者がゲーム側の状態を確認するまで同じ引継ぎコードを再利用しない。
+
+Schedulerの登録例:
+
+```bash
+gcloud scheduler jobs create http catsdaiko-execution-reconcile \\
+  --location=asia-northeast1 \\
+  --schedule="* * * * *" \\
+  --uri="$DISPATCHER_URL/reconcile" \\
+  --http-method=POST \\
+  --oidc-service-account="$SCHEDULER_SA" \\
+  --project="$PROJECT_ID"
+```
+
+Cloud Run JobのExecution APIを読むため、Dispatcher Service Accountには対象Job/Projectの実行状態を取得できる最小権限を追加する。roles/run.viewerをProject全体へ付与する前に、可能なら対象リソース単位の権限境界を確認する。
