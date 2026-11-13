@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -76,6 +77,26 @@ def load_payment_attempts(connection):
     )]
 
 
+def payment_digest_coverage(orders, attempts):
+    """Count order payment digests that cannot be proven present in the old ledger."""
+    ledger_digests = {
+        str(row.get("digest") or "")
+        for row in attempts
+        if re.fullmatch(r"[0-9a-f]{64}", str(row.get("digest") or ""))
+    }
+    missing = set()
+    invalid = 0
+    for row in orders:
+        digest = row.get("payment_digest")
+        if digest in (None, ""):
+            continue
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            invalid += 1
+        elif digest not in ledger_digests:
+            missing.add(digest)
+    return {"missing": len(missing), "invalid": invalid}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true",
@@ -131,6 +152,7 @@ def main():
                     "created": float(_row_value(row, "created", 0) or 0),
                 })
 
+        digest_coverage = payment_digest_coverage(orders, attempts)
         print("Dry-run summary" if not args.apply else "Import summary")
         print(f"Shop order rows found: {len(orders)}")
         print(f"Valid order rows: {len(valid_orders)}")
@@ -138,6 +160,13 @@ def main():
         print(f"PayPay ledger rows found: {len(attempts)}")
         print(f"Valid payment attempts: {len(valid_attempts)}")
         print(f"Invalid payment rows skipped: {len(attempts) - len(valid_attempts)}")
+        print(f"Order payment digests missing from ledger: {digest_coverage['missing']}")
+        print(f"Invalid order payment digests: {digest_coverage['invalid']}")
+        if args.apply and (digest_coverage["missing"] or digest_coverage["invalid"]):
+            raise RuntimeError(
+                "payment ledger does not cover every order payment digest; "
+                "resolve the mismatch before importing"
+            )
         if not args.apply:
             print("No Firestore writes performed. Re-run with --apply only after reviewing backups.")
             return 0
