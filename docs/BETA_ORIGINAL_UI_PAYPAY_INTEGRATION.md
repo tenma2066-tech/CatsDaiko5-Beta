@@ -15,7 +15,7 @@ The stable `CatsDaiko5` repository is not modified by this work.
 2. The original UI selection is posted to `POST /api/shop/operation-orders`. The server stores the operation payload encrypted; it does not trust a client-supplied amount or unit price.
 3. The server creates a private order URL with a high-entropy access token. The order page shows the amount and accepts the PayPay send-money link.
 4. `POST /api/shop/order/<id>/paypay` verifies and receives the PayPay payment. The existing PayPay gateway remains the receipt authority. Uncertain or duplicate outcomes remain in manual review and are never retried automatically.
-5. Only after the order state is `paid` can the customer submit the transfer code and PIN.
+5. Only after the order state is `paid` can the customer submit credentials. Both fields may be left blank for a new account, matching the original UI. Clone and integrity-check modes require both fields.
 6. The server decrypts the stored operation and credentials, then reuses the existing `/run` validation, queue, concurrency controls and worker path internally. Customers cannot call `/run` directly.
 7. The order token scopes the customer's order status and worker progress. It does not grant access to other orders.
 
