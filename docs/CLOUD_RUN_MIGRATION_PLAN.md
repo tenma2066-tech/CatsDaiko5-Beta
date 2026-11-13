@@ -938,3 +938,50 @@ F. execution完了:
 - SHOP_LIVE_ORDERS_ENABLED=0 を維持。安定版CatsDaiko5とBeta mainは未変更。
 
 次の実装は最新CIのEmulator transaction結果を確認し、失敗を修正する。その後、Cloud Run Executionのreconciliation、既存runtime-dataの読み取り専用export/import照合、Firestoreのadmin review解決手順を実装する。これらが終わって初めてGCP Project/Billing設定をユーザーに依頼する。
+
+## 24. Cloud Run実行基盤の初期配線・原子性レビュー（2026-11-13）
+
+### 24.1 追加済み実装（ブランチ上）
+
+- Firestore Workflow Repositoryにtransactional outbox、Cloud Tasks配送状態、4枠のglobal worker slot予約、HMAC transfer lock、実行claim/進捗/終了、短時間暗号化OTP stateの初期実装を追加。
+- Cloud Tasks publisherはexecution IDから決定的なTask名を作り、payloadにはorder_id / execution_idだけを含める。AlreadyExistsは配送再試行として扱う。
+- Private Dispatcher ServiceとCloud Run Job launcher / Worker entrypointを追加。Job引数はorder ID・execution ID・slot IDのみ。
+- WorkerはFirestoreから暗号化済み注文情報を読み、既存のBCSFE worker entrypointを再利用する。ゲーム処理開始後の例外は結果不明としてreviewにし、transfer lockを保持する。
+- Firestore backend選択時のPayPay決済attempt stateとOTP stateをFirestoreへ置く初期経路を追加。PayPayアカウント本体と既存SQLite ledgerはまだ移行していない。
+- Cloud Run用Dockerfile、.dockerignore、Firestore rules、CI Emulator起動、Cloud Run Deployment Runbookを追加。
+- RunbookはTokyo region、min instances 0、Web max instances 1、Worker maxRetries 0、Cloud Tasks 4 concurrent dispatch、Scheduler outbox sweepを前提にする。
+
+### 24.2 今回見つけて修正した原子性の問題
+
+- 以前のFirestore注文画面は、引継ぎ情報保存とexecution/outbox作成を別々のtransactionで実行していた。
+- その間にWeb processが停止すると、credentials_submittedだけがtrueになり、execution/outboxが存在しない孤立注文になる可能性があった。
+- FirestoreWorkflowRepository.submit_credentials_and_enqueue() を追加し、暗号化引継ぎ情報、credentials_submitted、active_execution_id、job_id=queued、execution document、task_outbox documentを単一Firestore transactionで作成するよう変更。
+- Firestore注文画面は新しい shop_store.submit_credentials_and_enqueue() を呼び、従来の2段階更新を使わない。
+- Firestore Emulator統合テスト test_credentials_and_outbox_are_created_atomically を追加し、成功時の注文・execution・outbox整合性と二重送信拒否を検証する。
+
+### 24.3 現在のCI状況
+
+- 直近の既存コード検証ではCloud Run Dispatcher tests、Worker tests、Shop store testsまで成功。
+- Firestore Emulatorを含むCI run 43434924529 は進行中だった（Firebase CLI導入・Emulator test前）。
+- 今回の原子性修正後、GitHub Actions run 43435141360（parallel regression）は進行中。修正後のCI結果は完了を確認するまで成功扱いしない。
+- Emulator統合テストはCIで実行する設定を追加済みだが、最新runの最終結果待ち。
+
+### 24.4 残っている重要な移行ゲート
+
+- PayPay payments.sqlite3 のattempted / pending / paid / review / outcome_unknown / rejected lifecycle全体、重複リンク履歴の移行と照合。
+- PayPay account.enc のGitHub runtime-data保管をSecret/Firestore等へ移すか、単一writer制約を維持して安全に継続するかの最終設計。
+- OTP状態のconsumeを実際のSMS認証処理フローに接続し、同時要求・再送・期限切れのテストを追加。
+- Workerの進捗・結果・監査レポートをFirestore document上限内で保持する設計。現在の配列ログ保存は上限到達リスクがあるため、bounded chunksへの移行が必要。
+- Dispatcherの起動APIタイムアウト時、Cloud Run Job実行一覧との照合・回復手順を追加する。結果不明時にJobを再起動しない安全方針は維持。
+- Cloud Tasks task retry exhausted / outbox task_enqueued滞留の回復、reserved slotのreaper、Cloud Run実行状態を照合したslot解放を実装する。lease期限だけでslotを再利用しない。
+- Firestore Security Rules / IAMの最小権限レビュー、データ移行ツール、旧データとの照合、Cloud Run実機・費用検証。
+- Firestore backendはPayPay ledger移行、OTP consume、outbox回復、Workerログ分割、Emulator試験が完了するまで本番切替しない。
+
+### 24.5 安全状態と次の作業
+
+- 変更先は引き続き feature/cloud-run-firestore-foundation / Draft PR #9のみ。mainへ未マージ。
+- CatsDaiko5安定版、Beta main、Render設定・デプロイ、GitHub runtime-dataは変更していない。
+- GCP project/billing/IAM/Secret Manager/Firestore/Cloud Tasks/Cloud Runリソースは未作成。
+- PayPay実ログイン・実決済・実注文は未実施。SHOP_LIVE_ORDERS_ENABLED=0 を維持。
+- PAYPAY_ENCRYPTION_KEY は変更していない。
+- 次は今回の最新CIとFirestore Emulator結果を確認し、失敗修正後にPayPay ledgerの完全なRepository化、OTP single-use接続、bounded execution log chunks、outbox/slot recoveryへ進む。
