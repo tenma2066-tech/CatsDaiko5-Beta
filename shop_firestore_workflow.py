@@ -523,28 +523,46 @@ class FirestoreWorkflowRepository:
 
         finish(transaction)
 
-    def list_running_executions(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_active_executions(self, limit: int = 100) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= 500:
             raise ValueError("execution limit must be between 1 and 500")
-        query = self._executions.where("state", "==", "running").limit(limit)
-        return [snapshot.to_dict() for snapshot in query.stream()]
+        results = []
+        for state in ("starting", "running"):
+            remaining = limit - len(results)
+            if remaining <= 0:
+                break
+            query = self._executions.where("state", "==", state).limit(remaining)
+            results.extend(snapshot.to_dict() for snapshot in query.stream())
+        return results
 
     def reconcile_terminal_execution(
-        self, order_id: str, execution_id: str, owner: str,
+        self, order_id: str, execution_id: str,
+        *, owner: str | None, cloud_run_execution_name: str,
     ) -> bool:
-        """Mark a Cloud Run-terminal worker with missing DB completion as unknown."""
+        """Reconcile a confirmed terminal Cloud Run execution without replaying it."""
         order_ref = self._orders.document(order_id)
         execution_ref = self._executions.document(execution_id)
+        outbox_ref = self._outbox.document(execution_id)
         transaction = self._client.transaction(max_attempts=5)
 
         @firestore.transactional
         def reconcile(tx):
             order = order_ref.get(transaction=tx)
             execution = execution_ref.get(transaction=tx)
+            outbox = outbox_ref.get(transaction=tx)
             if not order.exists or not execution.exists:
                 return False
             ex = execution.to_dict()
-            if ex.get("state") != "running" or ex.get("owner") != owner:
+            if ex.get("cloud_run_execution_name") != cloud_run_execution_name:
+                return False
+            state = ex.get("state")
+            if state == "starting":
+                expected_slot_owner = "dispatch:" + execution_id
+                outcome_unknown = False
+            elif state == "running" and ex.get("owner") == owner:
+                expected_slot_owner = owner
+                outcome_unknown = True
+            else:
                 return False
             slot_id = ex.get("slot_id")
             slot_ref = self._slots.document(slot_id) if slot_id else None
@@ -552,22 +570,32 @@ class FirestoreWorkflowRepository:
             now = self._clock()
             tx.update(execution_ref, {
                 "state": "review",
-                "outcome_unknown": True,
-                "error_code": "job_terminal_without_final_state",
+                "outcome_unknown": outcome_unknown,
+                "error_code": (
+                    "job_terminal_before_worker_claim" if not outcome_unknown
+                    else "job_terminal_without_final_state"
+                ),
                 "finished": now,
                 "updated": now,
             })
             tx.update(order_ref, {
                 "status": "review",
                 "job_id": execution_id,
-                "payment_note": "job_terminal_without_final_state",
+                "payment_note": (
+                    "job_terminal_before_worker_claim" if not outcome_unknown
+                    else "job_terminal_without_final_state"
+                ),
                 "updated": now,
             })
-            if slot_ref and slot and slot.exists and slot.to_dict().get("owner") == owner:
+            if outbox.exists:
+                tx.update(outbox_ref, {"state": "review", "updated": now})
+            if (slot_ref and slot and slot.exists
+                    and slot.to_dict().get("owner") == expected_slot_owner):
                 tx.update(slot_ref, {
                     "state": "released", "released": now, "updated": now,
                 })
-            # Never release the transfer lock: game-side outcome is unknown.
+            # Running executions retain their transfer lock because game-side
+            # side effects may have happened. A pre-claim failure has no lock.
             return True
 
         return reconcile(transaction)
