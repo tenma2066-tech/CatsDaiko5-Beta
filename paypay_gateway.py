@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -42,6 +43,7 @@ _ACCOUNT_FILE = _ROOT / "account.enc"
 _LEDGER_FILE = Path(os.environ.get("PAYPAY_LEDGER_PATH", str(_ROOT / "payments.sqlite3")))
 _LOCK = threading.Lock()
 _pending_otp: dict = {}
+_logger = logging.getLogger(__name__)
 
 class PayPayError(Exception):
     def __init__(self, code: str, message: str):
@@ -125,8 +127,12 @@ async def _oauth(payload: dict, referer: str, cookies: dict | None = None):
                 try:
                     body = await response.json(content_type=None)
                 except Exception:
+                    _logger.warning("PayPay OAuth response was not JSON (http_status=%s content_type=%s)",
+                                    response.status, (response.headers.get("Content-Type", "") or "")[:80])
                     raise PayPayError("oauth_response", "PayPayの認証応答を読み取れません。") from None
                 if not isinstance(body, dict):
+                    _logger.warning("PayPay OAuth response had unexpected JSON type (http_status=%s body_type=%s)",
+                                    response.status, type(body).__name__)
                     raise PayPayError("oauth_response", "PayPayの認証応答が不正です。")
                 jar = session.cookie_jar.filter_cookies(URL("https://www.paypay.ne.jp/"))
                 cookie_values = {name: morsel.value for name, morsel in jar.items()}
@@ -141,7 +147,23 @@ async def _oauth(payload: dict, referer: str, cookies: dict | None = None):
                 if isinstance(otp_id, str) and otp_id and isinstance(prefix, str) and re.fullmatch(r"[A-Za-z]{2,8}", prefix):
                     return {"kind": "otp", "otp_reference_id": otp_id, "otp_prefix": prefix,
                             "cookies": cookie_values}
-                raise PayPayError("oauth_rejected", "PayPayログインに失敗しました。電話番号・パスワードを確認してください。")
+                # Record only protocol metadata. Never log response values, credentials,
+                # tokens, cookies, OTPs, phone numbers, or the raw provider body.
+                provider_code = None
+                for source in (body, body.get("header"), body.get("error"),
+                               body.get("resultInfo"), body.get("result_info")):
+                    if isinstance(source, dict):
+                        for field in ("resultCode", "result_code", "errorCode", "error_code", "code"):
+                            value = source.get(field)
+                            if isinstance(value, (str, int)) and re.fullmatch(r"[0-9]{4,12}", str(value)):
+                                provider_code = str(value)
+                                break
+                    if provider_code:
+                        break
+                _logger.warning("PayPay OAuth rejected (http_status=%s provider_code=%s response_fields=%s)",
+                                response.status, provider_code or "unavailable",
+                                ",".join(sorted(k for k in body.keys() if isinstance(k, str))[:20]))
+                raise PayPayError("oauth_rejected", "PayPayログインに失敗しました。認証情報が正しい場合もあります。管理者ログのPayPay OAuth診断情報を確認してください。")
     except PayPayError:
         raise
     except (aiohttp.ClientError, asyncio.TimeoutError):
