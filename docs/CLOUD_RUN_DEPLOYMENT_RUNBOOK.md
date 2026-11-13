@@ -182,7 +182,8 @@ Webはmin instances 0、max instances 1で開始する。max 1はGitHub runtime-
 
 Cloud Schedulerから1分ごとに非公開Dispatcherの `POST /sweep` と `POST /reconcile` を呼ぶ。
 
-- `/sweep`: Firestore transactionでoutboxを作成した直後にWebプロセスが終了しても、未publishのTaskを再作成する。タスク名はexecution IDから決定的に生成し、Cloud Tasks側のAlreadyExistsは成功扱いにする。
+- `/sweep`: Firestore transactionでoutboxを作成した直後にWebプロセスが終了しても、未publishのTaskを再作成する。タスク名はexecution IDとFirestoreの `task_generation` から決定的に生成する。
+- Cloud Tasks `create_task` がAlreadyExistsを返した場合は、必ず `get_task` で実Taskの存在を確認する。存在する場合だけtask_enqueuedに進める。削除済みTask名の予約期間中で `get_task` がNotFoundならFirestore generationをtransactionで増やし、新しいTask名で再作成する。get_task自体の通信/権限エラーではoutboxをpendingのまま残す。
 - Cloud Tasksはcreate直後に配送される可能性があるため、Dispatcherはoutboxが `pending` の状態でもtransactional claimを許可する。Task作成後のpublisher更新は、既に `launching` 以降へ進んだ状態を巻き戻さない。
 - `/reconcile`: Cloud Run Job Executionの完了状態を確認し、Firestoreに最終結果が残らなかった実行をreviewへ移す。worker claim前の終了ならslotのみ解放し、claim後の終了ならslotを解放してtransfer lockは保持する。
 
