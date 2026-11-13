@@ -61,8 +61,9 @@ class RuntimeMigrationParserTests(unittest.TestCase):
             payment_digest_coverage(orders, attempts),
             {
                 "missing": 1, "invalid": 1, "mismatched": 0,
-                "paid_without_digest": 0, "invalid_attempts": 0,
-                "orphaned_attempts": 0,
+                "state_mismatch": 0, "paid_without_digest": 0,
+                "invalid_attempts": 0, "orphaned_attempts": 0,
+                "duplicate_digest_records": 0, "duplicate_order_records": 0,
             },
         )
 
@@ -73,12 +74,13 @@ class RuntimeMigrationParserTests(unittest.TestCase):
         self.assertEqual(
             payment_digest_coverage(
                 [{"id": "0000000001", "status": "paid", "payment_digest": digest}],
-                [{"digest": digest, "order_id": "0000000001"}],
+                [{"digest": digest, "order_id": "0000000001", "state": "paid"}],
             ),
             {
                 "missing": 0, "invalid": 0, "mismatched": 0,
-                "paid_without_digest": 0, "invalid_attempts": 0,
-                "orphaned_attempts": 0,
+                "state_mismatch": 0, "paid_without_digest": 0,
+                "invalid_attempts": 0, "orphaned_attempts": 0,
+                "duplicate_digest_records": 0, "duplicate_order_records": 0,
             },
         )
 
@@ -97,7 +99,7 @@ class RuntimeMigrationParserTests(unittest.TestCase):
         digest = "d" * 64
         result = payment_digest_coverage(
             [{"id": "0000000001", "status": "paid", "payment_digest": digest}],
-            [{"digest": digest, "order_id": "0000000002"}],
+            [{"digest": digest, "order_id": "0000000002", "state": "paid"}],
         )
         self.assertEqual(result["mismatched"], 1)
 
@@ -107,12 +109,47 @@ class RuntimeMigrationParserTests(unittest.TestCase):
         result = payment_digest_coverage(
             [{"id": "0000000001", "status": "awaiting_payment"}],
             [
-                {"digest": "not-a-digest", "order_id": "0000000001"},
-                {"digest": "e" * 64, "order_id": "0000000002"},
+                {"digest": "not-a-digest", "order_id": "0000000001", "state": "paid"},
+                {"digest": "e" * 64, "order_id": "0000000002", "state": "paid"},
             ],
         )
         self.assertEqual(result["invalid_attempts"], 1)
         self.assertEqual(result["orphaned_attempts"], 1)
+
+    def test_paid_order_requires_paid_ledger_attempt_state(self):
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        digest = "f" * 64
+        result = payment_digest_coverage(
+            [{"id": "0000000001", "status": "paid", "payment_digest": digest}],
+            [{"digest": digest, "order_id": "0000000001", "state": "attempted"}],
+        )
+        self.assertEqual(result["state_mismatch"], 1)
+
+    def test_duplicate_digest_and_order_attempt_records_are_rejected(self):
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        digest = "1" * 64
+        result = payment_digest_coverage(
+            [
+                {"id": "0000000001", "status": "paid", "payment_digest": digest},
+                {"id": "0000000002", "status": "review", "payment_digest": None},
+            ],
+            [
+                {"digest": digest, "order_id": "0000000001", "state": "paid"},
+                {"digest": digest, "order_id": "0000000002", "state": "review"},
+            ],
+        )
+        self.assertEqual(result["duplicate_digest_records"], 1)
+
+    def test_unknown_payment_attempt_state_is_invalid(self):
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        result = payment_digest_coverage(
+            [{"id": "0000000001", "status": "review"}],
+            [{"digest": "2" * 64, "order_id": "0000000001", "state": "mystery"}],
+        )
+        self.assertEqual(result["invalid_attempts"], 1)
 
     def test_apply_requires_complete_global_paypay_ledger_snapshot(self):
         from migrate_runtime_data_to_firestore import require_ledger_snapshot_for_apply
