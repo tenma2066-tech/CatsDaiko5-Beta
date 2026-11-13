@@ -119,7 +119,7 @@ class ShopStoreTests(unittest.TestCase):
             "chars": "", "cat_settings": {}, "safe": True,
             "dry": False, "clone": False, "integrity_only": False,
         }
-        order = self.store.create_operation_order(operation, "other-service", 4)
+        order = self.store.create_operation_order(operation, 4)
         self.assertEqual(order["unit_price_yen"], 25)
         self.assertEqual(order["quantity"], 4)
         self.assertEqual(order["amount"], 100)
@@ -142,34 +142,30 @@ class ShopStoreTests(unittest.TestCase):
         self.store.set_status(order["id"], "fulfilling")
         self.store.set_status(order["id"], "completed")
 
-    def test_character_specific_operation_is_always_50_yen_per_character(self):
-        order = self.store.create_operation_order(
-            {"chars": "12,13,14"}, "character-specific", 3
-        )
+    def test_character_specific_quantity_and_price_are_derived_from_operation(self):
+        # A forged client quantity of 1 cannot reduce three selected characters to 50 yen.
+        order = self.store.create_operation_order({"chars": "12,13,14"}, 1)
         self.assertEqual(order["unit_price_yen"], 50)
+        self.assertEqual(order["quantity"], 3)
         self.assertEqual(order["amount"], 150)
 
-    def test_operation_order_rejects_invalid_service_and_quantity(self):
+    def test_operation_order_rejects_invalid_quantity_and_character_input(self):
         with self.assertRaises(self.store.ShopError):
-            self.store.create_operation_order({}, "unknown", 1)
+            self.store.create_operation_order({}, 0)
         with self.assertRaises(self.store.ShopError):
-            self.store.create_operation_order({}, "other-service", 0)
+            self.store.create_operation_order({}, 101)
         with self.assertRaises(self.store.ShopError):
-            self.store.create_operation_order({}, "other-service", 101)
+            self.store.create_operation_order({"chars": "not-a-number"}, 1)
 
     def test_operation_order_requires_valid_order_token(self):
-        order = self.store.create_operation_order(
-            {"items": ["XP"]}, "other-service", 1
-        )
+        order = self.store.create_operation_order({"items": ["XP"]}, 1)
         self.assertIsNone(
             self.store.operation_for_execution(order["id"], "wrong-token")
         )
 
-
     def test_new_account_order_accepts_both_credentials_blank(self):
         order = self.store.create_operation_order(
-            {"items": ["XP"], "clone": False, "integrity_only": False},
-            "other-service", 1
+            {"items": ["XP"], "clone": False, "integrity_only": False}, 1
         )
         self.store.claim_payment(order["id"])
         self.store.complete_payment(order["id"], "new-account-digest")
@@ -179,14 +175,13 @@ class ShopStoreTests(unittest.TestCase):
         self.assertEqual(operation["confirm"], "")
 
     def test_existing_save_modes_require_both_credentials(self):
-        order = self.store.create_operation_order(
-            {"clone": True}, "other-service", 1
-        )
+        order = self.store.create_operation_order({"clone": True}, 1)
         self.store.claim_payment(order["id"])
         self.store.complete_payment(order["id"], "clone-digest")
         self.store.save_credentials(order["id"], order["access_token"], "", "")
         with self.assertRaises(self.store.ShopError):
             self.store.operation_for_execution(order["id"], order["access_token"])
+
 
 if __name__ == "__main__":
     unittest.main()
