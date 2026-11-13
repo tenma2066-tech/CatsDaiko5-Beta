@@ -164,6 +164,21 @@ class CloudRunDispatcherTests(unittest.TestCase):
             }, repository, launcher)
         self.assertEqual(launcher.calls, [])
 
+    def test_dispatch_defers_without_consuming_task_when_no_global_slot(self):
+        class NoSlotRepository(FakeRepository):
+            def begin_dispatch(self, execution_id):
+                self.launch_claims += 1
+                return {"state": "no_slot"}
+
+        repository = NoSlotRepository()
+        launcher = FakeLauncher()
+        result = handle_dispatch_payload(
+            {"order_id": "0123456789", "execution_id": "exec_12345678"},
+            repository, launcher,
+        )
+        self.assertEqual(result["state"], "no_slot")
+        self.assertEqual(launcher.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()
