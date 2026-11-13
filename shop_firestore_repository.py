@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from google.cloud import firestore
+from google.api_core.exceptions import AlreadyExists
 
 from shop_payment_repository import PaymentRepositoryError
 
@@ -33,9 +34,8 @@ class FirestoreOrderRepository:
             "awaiting_payment", "paid", "review", "completed", "cancelled",
         }:
             status = "review"
-        if values.get("job_id"):
-            if status == "paid":
-                status = "review"
+        if values.get("job_id") and status in {"paid", "completed"}:
+            status = "review"
         document = self._orders.document(order_id)
         try:
             document.create({
@@ -60,10 +60,8 @@ class FirestoreOrderRepository:
                 "legacy_imported": True,
             })
             return True
-        except Exception as exc:
-            if type(exc).__name__ == "AlreadyExists":
-                return False
-            raise
+        except AlreadyExists:
+            return False
 
     def create_order(self, values: dict[str, Any]) -> None:
         document = self._orders.document(values["id"])
