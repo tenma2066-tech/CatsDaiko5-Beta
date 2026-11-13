@@ -23,6 +23,7 @@ class RuntimeStoreError(RuntimeError):
 
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
+_GITHUB_WRITE_LOCK = threading.RLock()
 
 
 def _config():
@@ -150,7 +151,7 @@ def write_blob(name: str, raw: bytes):
     repo, token, branch, prefix = cfg
     path = prefix + "/" + name.lstrip("/")
     url, _ = _url(path)
-    with _lock("blob:" + name):
+    with _GITHUB_WRITE_LOCK, _lock("blob:" + name):
         _, sha = _read_remote(name)
         payload = {
             "message": "Update encrypted beta runtime data",
