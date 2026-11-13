@@ -249,10 +249,10 @@ def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: 
     ).encode("utf-8"))
     with _db() as db:
         updated = db.execute("""UPDATE orders SET credential_enc=?,credentials_submitted=1,updated=?
-                                WHERE id=? AND status='paid'""",
+                                WHERE id=? AND status='paid' AND credentials_submitted=0 AND job_id IS NULL""",
                              (encrypted, time.time(), order_id))
         if updated.rowcount != 1:
-            raise ShopError("注文状態が変わりました。注文画面を再読み込みしてください。")
+            raise ShopError("引継ぎ情報は既に送信済み、または注文状態が変わりました。注文画面を再読み込みしてください。")
 
 def _row(order_id):
     if not ORDER_ID_RE.fullmatch(order_id or ""):
@@ -287,7 +287,7 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
             "payment_processing": {"review"},
             "paid": {"fulfilling", "cancelled"},
             "review": {"paid", "cancelled"},
-            "fulfilling": {"completed"},
+            "fulfilling": {"completed", "review"},
             "completed": set(), "cancelled": set()
         }
         if status not in transitions.get(current, set()):
