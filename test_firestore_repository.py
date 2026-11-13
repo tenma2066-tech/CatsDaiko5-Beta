@@ -211,7 +211,7 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
             self.client.collection("task_outbox").document(execution_id).delete()
             self.client.collection("executions").document(execution_id).delete()
             self.client.collection("orders").document(self.order_id).update({
-                "status": "paid", "job_id": None, "active_execution_id": firestore.DELETE_FIELD,
+                "status": "paid", "job_id": None, "active_execution_id": None,
             })
 
     def test_reserved_slot_can_be_released_before_worker_claim(self):
