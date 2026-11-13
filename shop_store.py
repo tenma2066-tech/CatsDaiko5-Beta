@@ -302,9 +302,7 @@ def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: 
 def _row(order_id):
     if not ORDER_ID_RE.fullmatch(order_id or ""):
         return None
-    with _db() as db:
-        row = db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
-    return dict(row) if row else None
+    return _order_repository.get_order(order_id)
 
 def public_order(order_id: str, access_token: str):
     row = _row(order_id)
@@ -329,8 +327,7 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
         raise ShopError(str(exc)) from exc
 
 def admin_orders(limit=100):
-    with _db() as db:
-        rows = db.execute("SELECT * FROM orders ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
+    rows = _order_repository.list_orders(limit)
     result = []
     for row in rows:
         item = dict(row)
