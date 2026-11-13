@@ -1115,3 +1115,16 @@ F. execution完了:
 - 専用branch / Draft PR #9のみ。Beta main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新HEADのCI/parallel結果、とくにFirestore Emulatorのchunk置換テストを確認する。続いて、管理者向けunknown launch復旧ツール、Cloud Run Job実行ID照合、IAM/Security Rulesをレビューする。実データdry-run前にGCP Project/Billing/ADCが必要になるが、ユーザー承認前にリソース作成やデータ移行はしない。
+
+
+## 33. Chunk移行テストの期待値修正とPayPay ledger schema検証（2026-11-13）
+
+- 最新CI `43441028043` でFirestore Emulator test 19件中、旧テスト `test_execution_snapshot_rejects_payload_over_safe_document_limit` のみ失敗。実装不具合ではなく、従来「1MiB超は拒否」を期待したテストが、新仕様「配列をbounded chunksへ分割」と矛盾していた。
+- テストを `test_execution_snapshot_splits_large_report_into_bounded_chunks` に変更。大きなreportを保存し、全100項目が復元され、chunk数が1～32であることを検証。
+- Chunk readerはchunkが存在する場合のみchunkから復元し、chunk未作成の旧Executionはinline配列を維持。最初のchunk保存時にFirestore `DELETE_FIELD` で旧inline配列を削除し、旧データと新chunkの二重表示を防止。入力配列の型も検証。
+- 移行スクリプトの追加監査で、ledger snapshotファイルが存在してもSQLite内に `links` テーブルや必要な列がなければ、空台帳として誤認してapplyできる懸念を発見。apply前にlinks tableとdigest/order_id/state/created列の存在を必須化。dry-runは引き続き調査可能。
+- 追加テスト: chunk化仕様に合わせた大容量reportテスト、PayPay ledger links table/schema欠損のapply拒否テスト。
+- 最新のコード/テスト変更: `d3da9f581d946bb6250e19310c6ec716cf252e1e`, `eb74151f12c35176fb37fb837e208f7a765e6d52`, `af2e7dd54474d64079644007e290142afa3a1ea9`。CI run `43441028043` はchunk機能のテスト期待値が古く1件failure（他18件success）。その後の修正を含む最新HEAD CI結果はこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADで全CI、特にFirestore EmulatorとDocker buildを確認。失敗があれば原因を修正し再実行する。PayPay ledger schema検証後も、実データdry-runが必要になるまでapplyは行わない。
