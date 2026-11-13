@@ -321,29 +321,12 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
     allowed = {"paid", "review", "fulfilling", "completed", "cancelled"}
     if status not in allowed:
         raise ShopError("不正な注文状態です。")
-    with _db() as db:
-        db.execute("BEGIN IMMEDIATE")
-        row = db.execute("SELECT status,credentials_submitted FROM orders WHERE id=?", (order_id,)).fetchone()
-        if not row:
-            raise ShopError("注文が見つかりません。")
-        current = row["status"]
-        transitions = {
-            "awaiting_payment": {"review", "cancelled"},
-            "payment_processing": {"review"},
-            "paid": {"fulfilling", "cancelled"},
-            "review": {"paid", "cancelled"},
-            "fulfilling": {"completed", "review"},
-            "completed": set(), "cancelled": set()
-        }
-        if status not in transitions.get(current, set()):
-            raise ShopError("この注文状態からは変更できません。")
-        if status == "fulfilling" and not row["credentials_submitted"]:
-            raise ShopError("購入者の引継ぎ情報が未入力です。")
-        changed = db.execute("""UPDATE orders SET status=?,payment_digest=COALESCE(?,payment_digest),
-                                payment_note=?,updated=? WHERE id=? AND status=?""",
-                             (status, payment_digest, (note or "")[:300], time.time(), order_id, current))
-        if changed.rowcount != 1:
-            raise ShopError("注文状態が同時に更新されました。再読み込みしてください。")
+    try:
+        _order_repository.set_status(
+            order_id, status, payment_digest=payment_digest, note=note
+        )
+    except ValueError as exc:
+        raise ShopError(str(exc)) from exc
 
 def admin_orders(limit=100):
     with _db() as db:
