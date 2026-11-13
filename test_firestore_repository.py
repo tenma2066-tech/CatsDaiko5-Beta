@@ -85,6 +85,39 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.orders.set_status(self.order_id, "completed")
         self.assertEqual(self.orders.get_order(self.order_id)["status"], "completed")
 
+    def test_worker_claim_preserves_dispatch_cloud_run_execution_resource_name(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.submit_credentials_and_enqueue(
+            self.order_id, self.access_hash, b"encrypted-transfer", execution_id
+        )
+        claim = workflow.begin_dispatch(execution_id)
+        self.assertEqual(claim["state"], "launch")
+        resource_name = (
+            "projects/demo-catsdaiko-test/locations/asia-northeast1/"
+            "jobs/catsdaiko-worker/executions/run-123"
+        )
+        workflow.mark_dispatch_started(execution_id, {
+            "operation_name": "operations/123",
+            "execution_name": resource_name,
+        })
+        owner = "run-123"
+        transfer_digest = secrets.token_hex(32)
+        self.assertTrue(workflow.claim_execution(
+            self.order_id, execution_id, owner, transfer_digest, claim["slot_id"]
+        ))
+        execution = workflow.get_execution(execution_id)
+        self.assertEqual(execution["owner"], owner)
+        self.assertEqual(execution["cloud_run_execution_name"], resource_name)
+        self.assertEqual(execution["state"], "running")
+        # The worker owner token and the Cloud Run resource name are distinct.
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("worker_slots").document(claim["slot_id"]).delete()
+        self.client.collection("transfer_locks").document(transfer_digest).delete()
+
     def test_credentials_and_outbox_are_created_atomically(self):
         workflow = FirestoreWorkflowRepository(self.client)
         self.assertTrue(self.payments.claim_payment(self.order_id))
