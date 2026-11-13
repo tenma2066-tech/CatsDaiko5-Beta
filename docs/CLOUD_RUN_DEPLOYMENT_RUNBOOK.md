@@ -134,7 +134,6 @@ Jobは次の条件を必ず守る。
 
 WorkerはJob引数として注文ID・実行ID・slot IDだけを受け取る。注文の引継ぎ情報と操作内容はFirestoreから暗号化Blobとして取得し、Job内でのみ復号する。
 WorkerはCloud Run標準環境変数 `CLOUD_RUN_EXECUTION`（実行名）をownerとして必須にする。この値はCloud Run Jobsが自動注入するため、Job設定で手動定義しない。未設定・不正ならゲーム処理開始前に停止し、予約slotを安全に解放してreviewにする。ランダムownerへのfallbackは行わない。仕様：[Cloud Run container runtime contract](https://cloud.google.com/run/docs/container-contract)。
-WorkerはCloud Run標準環境変数 `CLOUD_RUN_EXECUTION` を実行ownerとして必須にする。未設定・不正ならゲーム処理を開始せず、予約slotを安全に解放してreviewにする。ランダムなownerへfallbackしないため、異常終了時もreconcilerが実Executionを照合できる。
 
 ## 9. 非公開Dispatcher Service
 
@@ -255,9 +254,23 @@ python migrate_runtime_data_to_firestore.py --apply
 
 このツールはGitHub上の暗号化snapshotだけを読み取り、ローカルSQLiteをGitHubへ自動uploadしない。Firestoreへはcreate-onlyで書き込み、既存docを上書きしない。途中で止まった場合は同じコマンドを再実行できる。旧job_idが残る注文やpayment_processing中の注文はreviewへ移し、実行を自動再開しない。旧PayPay ledgerのattempted状態はoutcome_unknownとして取り込む。
 
-dry-run summaryには、注文DBの `payment_digest` とPayPay ledgerの `links.digest` の照合件数が表示される。**「Order payment digests missing from ledger」と「Invalid order payment digests」が両方0であることを確認するまで `--apply` を実行しない。** 1件でもあればimportはfail-closedで停止する。digestの中身は表示されないため、旧snapshotを安全な環境で照合してから再実行する。
+dry-run summaryでは、注文DBとPayPay ledgerの対応を複数方向から検査する。次のすべてが **0** であることを確認するまで `--apply` は実行できない。
 
-また、PayPay ledger snapshot自体が見つからない場合も `--apply` は拒否される。注文DBだけを移行して過去のPayPayリンク利用履歴を欠落させないため。dry-runで不足状況を確認し、正しい暗号化ledger snapshotを用意するまで本番importを行わない。
+- Order payment digests missing from ledger
+- Invalid order payment digests
+- Paid orders without a payment digest
+- Payment digest/order mismatches
+- Paid-order/payment-state mismatches
+- Invalid payment ledger rows
+- Orphaned payment ledger rows
+- Duplicate payment digest records
+- Orders with multiple payment attempts
+
+さらに、不正な注文行または不正な決済台帳行が1件でもあれば、部分的なimportを拒否する。決済済み注文は同一注文IDのledger行に対応し、そのattempt stateも `paid` でなければならない。digestの中身や注文IDは表示しないため、旧snapshotを安全な環境で照合してから再実行する。
+
+snapshot取得は `read_blob_readonly` を使い、移行dry-run時にローカルSQLiteをGitHubへ自動upload・初期化しない。PayPayのFirestore決済経路も旧ledgerを読み取り専用で確認し、snapshotが欠落・復号不能・スキーマ不正の場合は決済結果を `review` に固定して自動再受付しない。
+
+PayPay ledger snapshot自体が見つからない場合も `--apply` は拒否される。注文DBだけを移行して過去のPayPayリンク利用履歴を欠落させないため。正しい暗号化ledger snapshotを用意し、すべての照合項目が0であることを確認するまで本番importを行わない。
 
 **本番移行前に、dry-runの件数と管理画面の注文数を照合すること。** 取り込み後もPayPay account.encはGitHub runtime-dataに残す。暗号化キーは変更しない。
 
