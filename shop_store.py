@@ -171,10 +171,12 @@ def operation_for_execution(order_id: str, access_token: str):
         credentials = json.loads(_cipher().decrypt(row["credential_enc"]))
     except Exception:
         raise ShopError("注文内容を安全に読み取れません。管理者へお問い合わせください。") from None
-    if not isinstance(operation, dict) or not credentials.get("transfer_code") or not credentials.get("pin"):
-        raise ShopError("注文内容または引継ぎ情報が不足しています。")
-    operation["transfer"] = credentials["transfer_code"]
-    operation["confirm"] = credentials["pin"]
+    if not isinstance(operation, dict) or bool(credentials.get("transfer_code")) != bool(credentials.get("pin")):
+        raise ShopError("注文内容または引継ぎ情報が正しくありません。")
+    if (operation.get("clone") or operation.get("integrity_only")) and not credentials.get("transfer_code"):
+        raise ShopError("複製・保全チェックには既存セーブの引継ぎコードと暗証番号が必要です。")
+    operation["transfer"] = credentials.get("transfer_code", "")
+    operation["confirm"] = credentials.get("pin", "")
     return operation
 
 
@@ -233,8 +235,8 @@ def complete_payment(order_id: str, payment_digest: str):
 
 def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: str):
     transfer_code, pin = (transfer_code or "").strip(), (pin or "").strip()
-    if not transfer_code or not pin or len(transfer_code) > 128 or len(pin) > 32:
-        raise ShopError("引継ぎコードと暗証番号を正しく入力してください。")
+    if bool(transfer_code) != bool(pin) or len(transfer_code) > 128 or len(pin) > 32:
+        raise ShopError("引継ぎコードと暗証番号は、両方入力するか両方空欄にしてください。")
     if any(ord(ch) < 32 for ch in transfer_code + pin):
         raise ShopError("入力内容に使用できない文字が含まれています。")
     row = _row(order_id)
