@@ -61,6 +61,11 @@ class FirestoreOrderRepository:
             })
             return True
         except AlreadyExists:
+            existing = document.get()
+            if not existing.exists or not existing.to_dict().get("legacy_imported"):
+                raise RuntimeError(
+                    "existing Firestore order conflicts with create-only legacy import"
+                )
             return False
 
     def create_order(self, values: dict[str, Any]) -> None:
@@ -232,10 +237,15 @@ class FirestorePaymentRepository:
                 "legacy_imported": True,
             })
             return True
-        except Exception as exc:
-            if type(exc).__name__ == "AlreadyExists":
-                return False
-            raise
+        except AlreadyExists:
+            existing = reference.get()
+            existing_data = existing.to_dict() if existing.exists else {}
+            if (not existing_data.get("legacy_imported")
+                    or existing_data.get("order_id") != order_id):
+                raise RuntimeError(
+                    "existing Firestore payment attempt conflicts with create-only legacy import"
+                )
+            return False
 
     def claim_payment_attempt(self, order_id: str, payment_digest: str) -> bool:
         """Atomically reserve one payment link digest for one awaiting order."""
