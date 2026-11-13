@@ -37,14 +37,12 @@ APP_VERSION = "1.15"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
-if not APP_PASSWORD:
-    raise RuntimeError("環境変数 APP_PASSWORD が空です。Renderの Environment で設定してください。")
+# APP_PASSWORD is optional: the public storefront must not require a site password.
+# When omitted, create an unguessable seed for the legacy /console password store.
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "") or secrets.token_urlsafe(32)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
-    ("nyanko-web:" + APP_PASSWORD + ":" + os.environ.get("ADMIN_PASSWORD", "")).encode()
-).hexdigest()
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 if os.environ.get("AUTH_GITHUB_REPO") or os.environ.get("AUTH_GITHUB_TOKEN"):
     password_store = GitHubPasswordStore(
@@ -1125,8 +1123,7 @@ def logout():
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
-    if not _logged_in():
-        return redirect("/login")
+    # The admin area has its own ADMIN_PASSWORD gate; no customer/site login is needed.
     msg = ""
     token = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
     if request.method == "POST":
@@ -1353,7 +1350,6 @@ def shop_paypay_submit(order_id):
 
 @app.get("/admin/paypay")
 def admin_paypay_page():
-    if not _logged_in(): return redirect("/login")
     if not session.get("admin"): return redirect("/admin")
     try: pp_status = paypay_gateway.status()
     except paypay_gateway.PayPayError as exc: pp_status = {"connected":False,"ready":False,"error":exc.message}
@@ -1368,7 +1364,7 @@ def admin_paypay_page():
 
 @app.post("/admin/paypay/connect")
 def admin_paypay_connect():
-    if not _logged_in() or not session.get("admin"): return "管理者モードが必要です。", 403
+    if not session.get("admin"): return "管理者モードが必要です。", 403
     if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1": return "永続ストレージと商品設定を確認してから注文受付を有効にしてください。", 503
     token=session.get("admin_csrf","")
     if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
@@ -1380,7 +1376,7 @@ def admin_paypay_connect():
 
 @app.post("/admin/paypay/otp")
 def admin_paypay_otp():
-    if not _logged_in() or not session.get("admin"): return "管理者モードが必要です。", 403
+    if not session.get("admin"): return "管理者モードが必要です。", 403
     token=session.get("admin_csrf","")
     if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
     try:
@@ -1391,7 +1387,6 @@ def admin_paypay_otp():
 
 @app.get("/admin/orders")
 def admin_orders_page():
-    if not _logged_in(): return redirect("/login")
     if not session.get("admin"): return redirect("/admin")
     rows=shop_store.admin_orders()
     csrf=session.setdefault("admin_csrf",secrets.token_urlsafe(32))
@@ -1404,7 +1399,7 @@ def admin_orders_page():
 
 @app.post("/admin/orders/<order_id>/status")
 def admin_order_status(order_id):
-    if not _logged_in() or not session.get("admin"): return "管理者モードが必要です。",403
+    if not session.get("admin"): return "管理者モードが必要です。",403
     token=session.get("admin_csrf","")
     if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
     try:
