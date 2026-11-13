@@ -30,6 +30,7 @@ sys.modules["bcsfe.core.game.catbase.cat"] = _cat_mod
 os.environ["APP_PASSWORD"] = "pw"
 os.environ["PAYPAY_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
 os.environ["SHOP_DB_PATH"] = "/tmp/catsdaiko-selftest-shop.sqlite3"
+os.environ["SHOP_LIVE_ORDERS_ENABLED"] = "1"
 os.environ["SHOP_CATALOG_JSON"] = json.dumps([{"id": "sample", "title": "テスト商品", "price_yen": 500}], ensure_ascii=False)
 try:
     os.remove(os.environ["SHOP_DB_PATH"])
