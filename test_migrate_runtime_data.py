@@ -74,6 +74,17 @@ class RuntimeMigrationParserTests(unittest.TestCase):
             {"missing": 0, "invalid": 0},
         )
 
+    def test_apply_refuses_to_run_without_global_paypay_ledger_snapshot(self):
+        from migrate_runtime_data_to_firestore import require_ledger_snapshot_for_apply
+
+        with self.assertRaisesRegex(RuntimeError, "ledger snapshot is missing"):
+            require_ledger_snapshot_for_apply(None)
+        connection = sqlite3.connect(":memory:")
+        try:
+            require_ledger_snapshot_for_apply(connection)
+        finally:
+            connection.close()
+
     def test_missing_tables_return_empty_lists(self):
         connection = sqlite3.connect(":memory:")
         self.assertEqual(load_orders(connection), [])
