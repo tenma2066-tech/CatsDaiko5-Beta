@@ -108,6 +108,34 @@ def transition_payment_attempt(order_id: str, payment_digest: str, state: str, n
         raise ShopError(str(exc)) from exc
 
 
+def submit_credentials_and_enqueue(
+    order_id: str, access_token: str, transfer_code: str, pin: str,
+):
+    """Atomically save encrypted credentials and enqueue a Firestore execution."""
+    if not uses_firestore():
+        raise ShopError("原子的な処理キューはFirestore環境でのみ利用できます。")
+    transfer_code, pin = (transfer_code or "").strip(), (pin or "").strip()
+    if bool(transfer_code) != bool(pin) or len(transfer_code) > 128 or len(pin) > 32:
+        raise ShopError("引継ぎコードと暗証番号は、両方入力するか両方空欄にしてください。")
+    if any(ord(ch) < 32 for ch in transfer_code + pin):
+        raise ShopError("入力内容に使用できない文字が含まれています。")
+    row = _row(order_id)
+    access_hash = hashlib.sha256((access_token or "").encode()).hexdigest()
+    if not row or not secrets.compare_digest(row["access_hash"], access_hash):
+        raise ShopError("注文が見つかりません。")
+    encrypted = _cipher().encrypt(json.dumps(
+        {"transfer_code": transfer_code, "pin": pin}, ensure_ascii=False
+    ).encode("utf-8"))
+    execution_id = secrets.token_hex(12)
+    try:
+        _workflow_repository.submit_credentials_and_enqueue(
+            order_id, access_hash, encrypted, execution_id
+        )
+    except Exception as exc:
+        raise ShopError("引継ぎ情報と処理要求を安全に登録できませんでした。") from exc
+    return execution_id
+
+
 def enqueue_execution(order_id: str, access_token: str):
     if not uses_firestore():
         raise ShopError("Cloud Run実行キューはFirestore環境でのみ利用できます。")
