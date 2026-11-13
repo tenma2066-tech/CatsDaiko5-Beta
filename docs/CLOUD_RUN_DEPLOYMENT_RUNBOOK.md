@@ -298,3 +298,24 @@ Firestore Execution本体には進捗メタデータのみを保存し、`log` /
 ## 18. Worker reportのsecret redaction
 
 Workerはlog/warn/errorだけでなく、Firestoreに保存するreport/skipped配列のネストしたdict/listも再帰的にsecret redactionする。転送コード・PINなどを含む文字列を置換し、reportの構造と長さは維持する。単一itemや総chunk数がFirestore chunk上限を超える場合は自動切り捨てせずreviewへ回す。
+
+
+## 19. Unknown Job launchの読み取り専用調査
+
+Dispatcherの `run_job` 呼び出しがタイムアウトすると、Cloud Run側でJobが受理されたかどうか分からないまま、Firestoreは `review / outcome_unknown` になる。この場合はslotとtransfer lockを保持し、自動再実行しない。
+
+Cloud Shell等でADCを用意し、読み取り専用の調査コマンドを実行できる。
+
+```bash
+python shop_cloud_run_recovery.py \
+  --execution-id "exec_..." \
+  --job-resource "projects/PROJECT_ID/locations/asia-northeast1/jobs/WORKER_JOB"
+```
+
+このコマンドはFirestoreのexecution/outbox状態を確認し、Cloud Run Executions一覧を全ページ走査して、注文ID・execution ID・slot IDの3つが一致するJobを検索する。表示するのはExecution名・作成/開始/完了時刻・task countだけで、引継ぎコードやPINなどは取得・表示しない。
+
+- `matching_execution_found`: 対応するJob Executionが存在する。Cloud Run Console/Logsと注文の状態を照合する。
+- `multiple_matching_executions_found`: 複数一致。二重起動の可能性を調査し、slot/lockは保持する。
+- `no_matching_execution_found`: 一致が見つからなかっただけで、Job APIが未受理だった証拠ではない。APIの反映遅延やExecution retentionもあるため、slot/lockを解除しない。
+
+**このコマンドは読み取り専用であり、slot解放・transfer lock解除・Job再実行は一切行わない。** no-matchを根拠に手動解除もしない。別途Cloud Run ConsoleのExecutions、Cloud Audit Logs、Firestoreのorder/execution/outboxを照合し、二重実行がないと確証を得るまでreviewを維持する。
