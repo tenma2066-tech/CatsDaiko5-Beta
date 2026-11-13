@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -85,6 +86,22 @@ class ShopStoreTests(unittest.TestCase):
         self.assertTrue(self.store.claim_payment(order["id"]))
         self.store.complete_payment(order["id"], "digest-race")
         self.assertFalse(self.store.claim_payment(order["id"]))
+
+    def test_concurrent_payment_claims_allow_exactly_one_winner(self):
+        order = self.store.create_order("svc-a")
+        barrier = threading.Barrier(3)
+        results = []
+        def claim():
+            barrier.wait()
+            results.append(self.store.claim_payment(order["id"]))
+        workers = [threading.Thread(target=claim) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        barrier.wait()
+        for worker in workers:
+            worker.join()
+        self.assertEqual(results.count(True), 1)
+        self.assertEqual(results.count(False), 1)
 
     def test_quantity_limits_are_enforced(self):
         with self.assertRaises(self.store.ShopError):
