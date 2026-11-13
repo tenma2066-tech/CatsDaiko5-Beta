@@ -513,6 +513,55 @@ class FirestoreWorkflowRepository:
 
         finish(transaction)
 
+    def list_running_executions(self, limit: int = 100) -> list[dict[str, Any]]:
+        if type(limit) is not int or not 1 <= limit <= 500:
+            raise ValueError("execution limit must be between 1 and 500")
+        query = self._executions.where("state", "==", "running").limit(limit)
+        return [snapshot.to_dict() for snapshot in query.stream()]
+
+    def reconcile_terminal_execution(
+        self, order_id: str, execution_id: str, owner: str,
+    ) -> bool:
+        """Mark a Cloud Run-terminal worker with missing DB completion as unknown."""
+        order_ref = self._orders.document(order_id)
+        execution_ref = self._executions.document(execution_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def reconcile(tx):
+            order = order_ref.get(transaction=tx)
+            execution = execution_ref.get(transaction=tx)
+            if not order.exists or not execution.exists:
+                return False
+            ex = execution.to_dict()
+            if ex.get("state") != "running" or ex.get("owner") != owner:
+                return False
+            slot_id = ex.get("slot_id")
+            slot_ref = self._slots.document(slot_id) if slot_id else None
+            slot = slot_ref.get(transaction=tx) if slot_ref else None
+            now = self._clock()
+            tx.update(execution_ref, {
+                "state": "review",
+                "outcome_unknown": True,
+                "error_code": "job_terminal_without_final_state",
+                "finished": now,
+                "updated": now,
+            })
+            tx.update(order_ref, {
+                "status": "review",
+                "job_id": execution_id,
+                "payment_note": "job_terminal_without_final_state",
+                "updated": now,
+            })
+            if slot_ref and slot and slot.exists and slot.to_dict().get("owner") == owner:
+                tx.update(slot_ref, {
+                    "state": "released", "released": now, "updated": now,
+                })
+            # Never release the transfer lock: game-side outcome is unknown.
+            return True
+
+        return reconcile(transaction)
+
     def get_execution(self, execution_id: str) -> dict[str, Any] | None:
         snapshot = self._executions.document(execution_id).get()
         return snapshot.to_dict() if snapshot.exists else None
