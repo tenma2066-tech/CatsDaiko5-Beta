@@ -66,10 +66,14 @@ class ShopStoreTests(unittest.TestCase):
             self.store.set_status(order["id"], "paid")
 
     def test_default_catalog_has_requested_per_unit_prices(self):
-        os.environ.pop("SHOP_CATALOG_JSON", None)
-        items = {item["id"]: item for item in self.store.catalog()}
-        self.assertEqual(items["character-specific"]["unit_price_yen"], 50)
-        self.assertEqual(items["other-service"]["unit_price_yen"], 25)
+        configured = os.environ.pop("SHOP_CATALOG_JSON", None)
+        try:
+            items = {item["id"]: item for item in self.store.catalog()}
+            self.assertEqual(items["character-specific"]["unit_price_yen"], 50)
+            self.assertEqual(items["other-service"]["unit_price_yen"], 25)
+        finally:
+            if configured is not None:
+                os.environ["SHOP_CATALOG_JSON"] = configured
 
     def test_payment_claim_is_atomic_and_only_one_request_wins(self):
         order = self.store.create_order("svc-a")
