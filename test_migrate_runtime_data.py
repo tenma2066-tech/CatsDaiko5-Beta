@@ -59,7 +59,11 @@ class RuntimeMigrationParserTests(unittest.TestCase):
 
         self.assertEqual(
             payment_digest_coverage(orders, attempts),
-            {"missing": 1, "invalid": 1},
+            {
+                "missing": 1, "invalid": 1, "mismatched": 0,
+                "paid_without_digest": 0, "invalid_attempts": 0,
+                "orphaned_attempts": 0,
+            },
         )
 
     def test_payment_digest_coverage_accepts_complete_ledger(self):
@@ -68,11 +72,47 @@ class RuntimeMigrationParserTests(unittest.TestCase):
         digest = "c" * 64
         self.assertEqual(
             payment_digest_coverage(
-                [{"payment_digest": digest}],
+                [{"id": "0000000001", "status": "paid", "payment_digest": digest}],
                 [{"digest": digest, "order_id": "0000000001"}],
             ),
-            {"missing": 0, "invalid": 0},
+            {
+                "missing": 0, "invalid": 0, "mismatched": 0,
+                "paid_without_digest": 0, "invalid_attempts": 0,
+                "orphaned_attempts": 0,
+            },
         )
+
+    def test_paid_order_without_digest_blocks_migration(self):
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        result = payment_digest_coverage(
+            [{"id": "0000000001", "status": "paid", "payment_digest": None}],
+            [],
+        )
+        self.assertEqual(result["paid_without_digest"], 1)
+
+    def test_digest_must_belong_to_the_same_order(self):
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        digest = "d" * 64
+        result = payment_digest_coverage(
+            [{"id": "0000000001", "status": "paid", "payment_digest": digest}],
+            [{"digest": digest, "order_id": "0000000002"}],
+        )
+        self.assertEqual(result["mismatched"], 1)
+
+    def test_invalid_and_orphaned_ledger_rows_are_reported(self):
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        result = payment_digest_coverage(
+            [{"id": "0000000001", "status": "awaiting_payment"}],
+            [
+                {"digest": "not-a-digest", "order_id": "0000000001"},
+                {"digest": "e" * 64, "order_id": "0000000002"},
+            ],
+        )
+        self.assertEqual(result["invalid_attempts"], 1)
+        self.assertEqual(result["orphaned_attempts"], 1)
 
     def test_apply_requires_complete_global_paypay_ledger_snapshot(self):
         from migrate_runtime_data_to_firestore import require_ledger_snapshot_for_apply
