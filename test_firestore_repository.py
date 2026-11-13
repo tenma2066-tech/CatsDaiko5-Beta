@@ -174,8 +174,15 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         session_id = "otp_" + secrets.token_hex(12)
         encrypted = "fernet-ciphertext-not-plaintext-otp"
         workflow.save_otp_session(session_id, encrypted, time.time() + 300)
+        stored = self.client.collection("admin_otp_sessions").document(session_id).get().to_dict()
+        self.assertNotIn("plain-otp", stored["encrypted_state"])
+        self.assertEqual(workflow.get_otp_session(session_id), encrypted)
         self.assertEqual(workflow.consume_otp_session(session_id), encrypted)
         self.assertIsNone(workflow.consume_otp_session(session_id))
+        workflow.save_otp_session(session_id, "renewed-encrypted-state", time.time() + 300)
+        self.assertEqual(workflow.get_otp_session(session_id), "renewed-encrypted-state")
+        workflow.clear_otp_session(session_id)
+        self.assertIsNone(workflow.get_otp_session(session_id))
         self.client.collection("admin_otp_sessions").document(session_id).delete()
 
     def test_dispatch_defers_when_all_global_slots_are_occupied(self):
@@ -230,6 +237,66 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.client.collection("task_outbox").document(execution_id).delete()
         self.client.collection("executions").document(execution_id).delete()
         self.client.collection("worker_slots").document("slot-0").delete()
+
+    def test_shop_store_uses_firestore_and_persists_order_outbox(self):
+        import importlib
+        from cryptography.fernet import Fernet
+
+        import shop_store
+
+        previous = {
+            key: os.environ.get(key)
+            for key in ("SHOP_STORAGE_BACKEND", "PAYPAY_ENCRYPTION_KEY",
+                        "SHOP_CATALOG_JSON", "GOOGLE_CLOUD_PROJECT")
+        }
+        os.environ["SHOP_STORAGE_BACKEND"] = "firestore"
+        os.environ["PAYPAY_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
+        os.environ["GOOGLE_CLOUD_PROJECT"] = os.environ.get(
+            "GOOGLE_CLOUD_PROJECT", "demo-catsdaiko-test"
+        )
+        os.environ.pop("SHOP_CATALOG_JSON", None)
+        shop_store = importlib.reload(shop_store)
+        created = None
+        try:
+            operation = {
+                "safe": True, "dry": False, "clone": False, "integrity_only": False,
+                "items": ["XP"], "qty": {}, "chars": "", "cat_settings": {},
+                "subs": [], "others": [],
+            }
+            created = shop_store.create_operation_order(operation, 1)
+            digest = secrets.token_hex(32)
+            self.assertTrue(shop_store.claim_payment_attempt(created["id"], digest))
+            shop_store.transition_payment_attempt(created["id"], digest, "paid")
+            shop_store.save_credentials(
+                created["id"], created["access_token"], "", ""
+            )
+            execution_id = shop_store.enqueue_execution(
+                created["id"], created["access_token"]
+            )
+            self.assertEqual(
+                shop_store.execution_progress(
+                    created["id"], created["access_token"]
+                )["status"],
+                "queued",
+            )
+            self.assertTrue(shop_store.cancel_queued_execution(
+                created["id"], created["access_token"]
+            ))
+            self.assertEqual(
+                shop_store.public_order(created["id"], created["access_token"])["status"],
+                "cancelled",
+            )
+            self.client.collection("orders").document(created["id"]).delete()
+            self.client.collection("payment_attempts").document(digest).delete()
+            self.client.collection("executions").document(execution_id).delete()
+            self.client.collection("task_outbox").document(execution_id).delete()
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            importlib.reload(shop_store)
 
 
 if __name__ == "__main__":
