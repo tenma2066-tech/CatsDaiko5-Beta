@@ -27,7 +27,7 @@ The server enforces these fixed prices:
 - Quantity: 1–100 characters.
 - Amount is calculated server-side as unit price × quantity. Browser-supplied prices are ignored.
 
-When the customer has selected character numbers in the original character-management field, that count is the billable quantity for the 50 JPY category. For other operations, the original interface asks for the billable character count; that billing count is kept separate from the actual operation payload.
+The server parses the saved character-number field itself. If it contains character numbers, the server derives both the 50 JPY category and the billable quantity from the unique parsed character IDs, ignoring any browser-supplied category or quantity. If no character numbers are selected, the original interface asks for the billable character count for the 25 JPY category; that count is kept separate from the actual operation payload.
 
 ## Data and execution safeguards
 
