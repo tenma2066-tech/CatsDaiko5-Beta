@@ -1257,3 +1257,16 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はRunbookのresource table・Dispatcher env・Scheduler roleを再fetchして確認し、最新CI statusを確認する。
+
+
+## 44. Cloud Tasks retry exhausted後のtask_enqueued outbox回復（2026-11-13）
+
+- 追加の運用監査で、Cloud Tasksが最大attempts到達やqueue purgeによりTaskを削除すると、Firestore outboxは `task_enqueued` のまま残り、従来の `list_pending_outbox(state=pending)` ではsweep対象から外れてしまうことを発見。
+- `list_pending_outbox()` は `pending` と `task_enqueued` の両方を返すよう変更。Publisherも両状態を処理する。
+- `task_enqueued` の場合はまず `get_task` で既存Taskを確認。存在すれば再作成せず終了。NotFoundならcreate_taskを試し、削除済みTask名のdedupe予約が残っていてALREADY_EXISTSとなる場合はgenerationをtransactionで増やして別名で再登録する。
+- `advance_outbox_task_generation()` は `pending` / `task_enqueued` のみ許可し、`launching`以降は拒否。Cloud Tasksの古い再試行が尽きても、Dispatcherの業務claim gateで二重Job起動を防ぐ。
+- Tests: Cloud Tasks task_enqueued live task / deleted task retry、Firestore Emulatorのtask_enqueued generation rotationとlaunching state拒否を追加。
+- 最新コードcommit: `d4e9c640742ac370786b6d99dd10b0cdf6a04044`, `b1855afd1b33b7954c8bd2a8ba5d84dc48d56408`, `8957f822ce12f6d033a04bff91f23a5bf4d0f0d2`, `80a134a9bcd4522a3be5a74c7618de4e813efd65`, test fix `9dbdffdfd823f992a00913bb20c21b05072d46a2`。この変更を含むCI結果はこれから確認する。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はCloud Tasks unit tests / Firestore Emulatorでtask_enqueued recoveryを確認する。taskが削除されていない間は再登録せず、taskがない場合だけ新generationで再登録することを検証する。
