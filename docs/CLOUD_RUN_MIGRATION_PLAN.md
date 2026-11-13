@@ -1049,3 +1049,16 @@ F. execution完了:
 - 専用branch `feature/cloud-run-firestore-foundation` / Draft PR #9のみ変更。Beta main・安定版CatsDaiko5・Render・runtime-dataは未変更。GCPリソース未作成。実PayPayログイン・決済・実注文なし。 `SHOP_LIVE_ORDERS_ENABLED=0` を維持。`PAYPAY_ENCRYPTION_KEY` は変更なし。
 
 次は最新CIのFirestore Emulator結果を確認し、失敗を修正する。続けてbounded log chunksと管理者向けunknown launch復旧手順を完成させ、PayPay ledger移行の実データdry-run照合へ進む。ユーザーのGCP project/billing設定が必要になるまでは、Render・GCP・実注文に触れない。
+
+
+## 28. 旧PayPay決済台帳の移行前照合をfail-closed化（2026-11-13）
+
+- 旧注文DBの `orders.payment_digest` と旧PayPay台帳 `links.digest` の照合が移行前に必須であることを確認。
+- 従来の移行スクリプトはledger snapshotが存在しない場合にattempt一覧を空として扱い、注文に保存されたpayment_digestが旧台帳に存在しないままFirestore importを進める可能性があった。
+- `migrate_runtime_data_to_firestore.py` に `payment_digest_coverage()` を追加。注文側にpayment_digestがあるのにledger側に存在しない件数と、不正形式のdigest件数をdry-run summaryへ表示する。
+- `--apply` はmissing / invalidが1件でもあればFirestore書き込み前に停止する。digestそのものはログへ出さない。旧ledger欠損や不整合を無視してリンク重複防止を弱めない。
+- parser testに完全一致・欠損・不正形式のcoverage testを追加。
+- 最新の変更commitは `4ff6c395c48496591c42e8268002a370773760c0`。このHEADのCI結果は実行中のため未確定。直前のCI run `43438124320`（commit `10be1090`）はsuccess。直近の並列回帰run `43438669407`（commit `9a21d1fd`）はsuccess。
+- 変更は専用branch / Draft PR #9のみ。main・Render・GCP・runtime-data・PayPay実アカウントは変更なし。注文受付停止 `SHOP_LIVE_ORDERS_ENABLED=0` を維持。
+
+次は最新CIのmigration parser / Firestore Emulator結果を確認する。coverageが0でない場合は実データimportを行わず、旧DBとledgerの不整合を調査する。引き続きbounded log chunks、unknown launchの手動復旧、Security Rules/IAM、実データdry-run照合を完了させる。
