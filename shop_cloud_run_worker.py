@@ -37,6 +37,14 @@ def _cipher() -> Fernet:
     return Fernet(value.encode("ascii"))
 
 
+def _execution_owner() -> str:
+    """Require Cloud Run's stable execution identity for reconciliation."""
+    value = os.environ.get("CLOUD_RUN_EXECUTION", "").strip()
+    if not value or len(value) > 512 or any(ord(ch) < 32 for ch in value):
+        raise RuntimeError("Cloud Run execution identity is missing or invalid")
+    return value
+
+
 def _pepper() -> bytes:
     value = os.environ.get("TRANSFER_LOCK_PEPPER", "").strip()
     if not value:
@@ -266,7 +274,14 @@ def run_worker(order_id: str, execution_id: str, slot_id: str) -> int:
         )
         return 4
 
-    owner = os.environ.get("CLOUD_RUN_EXECUTION") or ("worker-" + uuid.uuid4().hex)
+    try:
+        owner = _execution_owner()
+    except Exception:
+        workflow.fail_reserved_execution(
+            order_id, execution_id, slot_id, "worker_execution_identity_missing"
+        )
+        return 5
+
     if not workflow.claim_execution(
         order_id, execution_id, owner, lock_digest, slot_id
     ):
