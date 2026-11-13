@@ -5,6 +5,7 @@ import json
 import unittest
 
 from shop_cloud_run_dispatcher import (
+    CloudTasksOutboxPublisher,
     GoogleCloudRunJobLauncher,
     build_task_payload,
     handle_dispatch_payload,
@@ -98,6 +99,65 @@ class CloudRunDispatcherTests(unittest.TestCase):
             "--order-id", "0123456789",
             "--execution-id", "exec_12345678",
         ])
+
+    def test_cloud_tasks_publisher_uses_non_secret_deterministic_task(self):
+        class Repo:
+            def __init__(self):
+                self.item = {
+                    "task_id": "exec_12345678",
+                    "execution_id": "exec_12345678",
+                    "order_id": "0123456789",
+                    "state": "pending",
+                }
+                self.marked = False
+
+            def get_outbox_item(self, execution_id):
+                return dict(self.item)
+
+            def mark_task_enqueued(self, execution_id):
+                self.item["state"] = "task_enqueued"
+                self.marked = True
+
+        class Client:
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def task_path(self, project, location, queue, task):
+                return f"projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"
+
+            def create_task(self, request):
+                self.request = request
+                return request["task"]
+
+        repo = Repo()
+        client = Client()
+        publisher = CloudTasksOutboxPublisher(
+            client, repo, project="demo", location="asia-northeast1",
+            queue="orders", dispatcher_url="https://dispatcher.example/dispatch",
+            oidc_service_account="tasks@example.iam.gserviceaccount.com",
+        )
+        self.assertTrue(publisher.publish("exec_12345678"))
+        task = client.request["task"]
+        body = json.loads(task.http_request.body)
+        self.assertEqual(body, {
+            "order_id": "0123456789",
+            "execution_id": "exec_12345678",
+        })
+        self.assertEqual(task.http_request.oidc_token.audience,
+                         "https://dispatcher.example/dispatch")
+        self.assertTrue(repo.marked)
+        self.assertFalse(publisher.publish("exec_12345678"))
+
+    def test_dispatch_rejects_secret_or_extra_payload_fields(self):
+        repository = FakeRepository()
+        launcher = FakeLauncher()
+        with self.assertRaises(ValueError):
+            handle_dispatch_payload({
+                "order_id": "0123456789",
+                "execution_id": "exec_12345678",
+                "transfer_code": "must-not-be-sent",
+            }, repository, launcher)
+        self.assertEqual(launcher.calls, [])
 
 
 if __name__ == "__main__":
