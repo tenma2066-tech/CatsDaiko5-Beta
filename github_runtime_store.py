@@ -179,7 +179,7 @@ def write_blob(name: str, raw: bytes, *, create_only: bool = False):
 
 @contextmanager
 def sqlite_database(name: str, local_path):
-    """Open a serialized SQLite snapshot, commit, then encrypt and push it to GitHub."""
+    """Open an encrypted SQLite snapshot and push only when the DB actually changes."""
     if _config() is None:
         path = Path(local_path)
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -199,21 +199,37 @@ def sqlite_database(name: str, local_path):
     with _lock("sqlite:" + name):
         con = sqlite3.connect(":memory:", timeout=20)
         con.row_factory = sqlite3.Row
+        remote_exists = False
+        initial_snapshot = None
         try:
-            encrypted = read_blob(name, local_path)
-            if encrypted:
+            encrypted, _ = _read_remote(name)
+            if encrypted is not None:
+                remote_exists = True
                 try:
-                    snapshot = _cipher().decrypt(encrypted)
-                    con.deserialize(snapshot)
+                    initial_snapshot = _cipher().decrypt(encrypted)
+                    con.deserialize(initial_snapshot)
                     con.row_factory = sqlite3.Row
                 except (InvalidToken, sqlite3.DatabaseError, ValueError) as exc:
                     raise RuntimeStoreError("GitHub上の暗号化DBを復元できません。") from exc
+            elif local_path and Path(local_path).is_file():
+                # Migrate an old local SQLite file as a raw database snapshot.
+                legacy = sqlite3.connect(str(local_path))
+                try:
+                    initial_snapshot = legacy.serialize()
+                    con.deserialize(initial_snapshot)
+                    con.row_factory = sqlite3.Row
+                finally:
+                    legacy.close()
+
             con.execute("PRAGMA busy_timeout=20000")
             yield con
             con.commit()
             snapshot = con.serialize()
-            encrypted = _cipher().encrypt(snapshot)
-            write_blob(name, encrypted)
+            if snapshot != initial_snapshot:
+                encrypted = _cipher().encrypt(snapshot)
+                # First creation/migration is create-only: a concurrent remote
+                # initialization must never be overwritten by an older local DB.
+                write_blob(name, encrypted, create_only=not remote_exists)
         except Exception:
             con.rollback()
             raise
