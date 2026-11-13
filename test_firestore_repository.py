@@ -178,6 +178,59 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertIsNone(workflow.consume_otp_session(session_id))
         self.client.collection("admin_otp_sessions").document(session_id).delete()
 
+    def test_dispatch_defers_when_all_global_slots_are_occupied(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        workflow.mark_task_enqueued(execution_id)
+        for index in range(4):
+            self.client.collection("worker_slots").document(f"slot-{index}").set({
+                "state": "active", "owner": "other-worker",
+            })
+        try:
+            result = workflow.begin_dispatch(execution_id)
+            self.assertEqual(result, {"state": "no_slot"})
+            self.assertEqual(
+                workflow.get_outbox_item(execution_id)["state"], "task_enqueued"
+            )
+        finally:
+            for index in range(4):
+                self.client.collection("worker_slots").document(f"slot-{index}").delete()
+            self.client.collection("task_outbox").document(execution_id).delete()
+            self.client.collection("executions").document(execution_id).delete()
+            self.client.collection("orders").document(self.order_id).update({
+                "status": "paid", "job_id": None, "active_execution_id": firestore.DELETE_FIELD,
+            })
+
+    def test_reserved_slot_can_be_released_before_worker_claim(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        workflow.mark_task_enqueued(execution_id)
+        claim = workflow.begin_dispatch(execution_id)
+        self.assertEqual(claim["slot_id"], "slot-0")
+        workflow.fail_reserved_execution(
+            self.order_id, execution_id, "slot-0", "worker_claim_failed"
+        )
+        self.assertEqual(
+            self.client.collection("worker_slots").document("slot-0").get().to_dict()["state"],
+            "released",
+        )
+        self.assertEqual(self.orders.get_order(self.order_id)["status"], "review")
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("worker_slots").document("slot-0").delete()
+
 
 if __name__ == "__main__":
     unittest.main()
