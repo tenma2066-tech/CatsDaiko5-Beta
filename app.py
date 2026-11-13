@@ -1235,7 +1235,7 @@ placeButton.addEventListener('click',async()=>{
   location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
  }catch(e){error.textContent=e.message;}finally{button.disabled=false;button.textContent='PayPay決済へ進む';}
 });
-</script>""".replace("__PRODUCTS__", product_json).replace("__ORDERS_ENABLED__", "true" if orders_enabled else "false").replace("__SHOP_DISABLED__", "")
+</script>""".replace("__ORDERS_ENABLED__", "true" if orders_enabled else "false").replace("__SHOP_DISABLED__", "").replace("__PRODUCTS__", product_json)
     return _shop_page("商品一覧", body)
 
 @app.post("/api/shop/orders")
