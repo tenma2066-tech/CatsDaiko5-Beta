@@ -1207,3 +1207,15 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新CIでFirestore Emulator全21 testとDocker buildを再確認する。generation初期値が両方のoutbox作成経路に1つずつあることを確認し、成功後にIAM matrixのCloud Tasks get_task read権限を追記する。
+
+
+## 40. Cloud Tasks get_taskに必要なread IAMを追加（2026-11-13）
+
+- Cloud Tasks publisherはALREADY_EXISTS時に `get_task` でタスクが現在も存在するか確認する。
+- IAM公式permission表を確認したところ、`roles/cloudtasks.enqueuer` は `cloudtasks.tasks.create` は含むが `cloudtasks.tasks.get` は含まない。従来のIAM matrixだけではget_taskがPERMISSION_DENIEDとなり、generation rotationが進まない。
+- Dispatcher SAへ対象Queue限定の `roles/cloudtasks.viewer` を追加する案を記載。Project-wide Cloud Tasks Viewerは付与しない。さらに最小化したい場合は `cloudtasks.tasks.get` だけのcustom roleを検討する。
+- Inspector runbookにGitHub branch checkout / requirements install手順を追加。InspectorはFirestore `roles/datastore.viewer` + Worker Job `roles/run.viewer` のread-only権限のみ。
+- 直前HEAD `43c6629a5687a15048434365147750ce563ff68e` のCI run `43444283798` は全工程success（Cloud Tasks publisher tests、Firestore Emulator 21 tests、Docker build含む）、parallel regression run `43444284174` もsuccess。
+- IAM matrix修正commitはこれから記録。変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はIAM matrix/Inspector runbookの追記を再fetchして確認する。Cloud Tasks role bindingはGCP project作成後、IAM Policy Simulatorでqueue resource単位の付与とget_task実行を検証する。
