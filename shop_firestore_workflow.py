@@ -249,6 +249,39 @@ class FirestoreWorkflowRepository:
 
         mark(transaction)
 
+    def cancel_queued_execution(self, order_id: str, execution_id: str) -> bool:
+        order_ref = self._orders.document(order_id)
+        execution_ref = self._executions.document(execution_id)
+        outbox_ref = self._outbox.document(execution_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def cancel(tx):
+            order = order_ref.get(transaction=tx)
+            execution = execution_ref.get(transaction=tx)
+            outbox = outbox_ref.get(transaction=tx)
+            if not order.exists or not execution.exists or not outbox.exists:
+                return False
+            od, ex, ob = order.to_dict(), execution.to_dict(), outbox.to_dict()
+            if (od.get("status") != "paid"
+                    or od.get("job_id") != "queued"
+                    or od.get("active_execution_id") != execution_id
+                    or ex.get("state") != "queued"
+                    or ob.get("state") not in {"pending", "task_enqueued"}):
+                return False
+            now = self._clock()
+            tx.update(order_ref, {
+                "status": "cancelled", "job_id": None,
+                "active_execution_id": None, "updated": now,
+            })
+            tx.update(execution_ref, {
+                "state": "cancelled", "finished": now, "updated": now,
+            })
+            tx.update(outbox_ref, {"state": "cancelled", "updated": now})
+            return True
+
+        return cancel(transaction)
+
     def fail_reserved_execution(self, order_id: str, execution_id: str, slot_id: str, reason: str) -> None:
         """Release only a slot reserved by this execution before it claimed a worker."""
         order_ref = self._orders.document(order_id)
@@ -404,7 +437,7 @@ class FirestoreWorkflowRepository:
             tx.update(order_ref, {
                 "status": target,
                 "job_id": None if success else execution_id,
-                "active_execution_id": None if success else execution_id,
+                "active_execution_id": execution_id,
                 "updated": now,
             })
             if slot_ref and slot and slot.exists and slot.to_dict().get("owner") == owner:
