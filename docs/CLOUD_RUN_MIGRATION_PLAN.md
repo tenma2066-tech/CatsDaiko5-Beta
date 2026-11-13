@@ -872,3 +872,13 @@ F. execution完了:
 - SHOP_LIVE_ORDERS_ENABLED=0を維持。安定版CatsDaiko5とBeta mainは未変更。
 
 次の作業は最新CIを確認し、Firestore adapterのEmulator実行環境を用意するか、テスト可能な専用CIジョブを設ける。その後、既存PayPay ledger/OTP状態を含む決済Repositoryの完全な移行境界を設計し、Cloud Tasks outbox・slot lease・transfer lockを実装する。
+
+## 23. Firestore adapter初期実装のCI結果（2026-11-13）
+
+- 最新コード・計画書を含むPR #9 HEAD `c544f0e6aa76a528c0603b5bc26446dc8e3f622e` のGitHub Actions run `43431398137` は success。
+- 依存関係インストール、BCSFE API互換性、Application self-test、Save audit/repair、Parallel、Improvement、Character customization、GitHub auth/runtime store、PayPay gateway、Shop store、Firestore repository test commandの全ステップが成功。
+- Firestore repository test command自体は成功したが、FIRESTORE_EMULATOR_HOST未設定のためEmulator統合ケースはskipされている。Firestore transactionの実接続検証を完了した意味ではない。
+- 最新作業ブランチHEADは本チェックポイント更新前のコードHEAD c544f0e6aa76a528c0603b5bc26446dc8e3f622e。追加した本章はdocsのみ。
+- PR #9はDraft/open/not merged。main、Render、GCP、runtime-data、PayPay設定、実注文に変更なし。SHOP_LIVE_ORDERS_ENABLED=0を維持。
+
+次の実装はFirestore Emulatorを利用した実トランザクション試験環境の整備と、PayPay台帳（attempted / pending / review / outcome_unknown）・OTP状態を含む永続化契約の完成。その後Cloud Tasks outbox、global worker slot lease、transfer lockを追加する。Firestore backendはこれらと本番切替手順が完成するまで有効化しない。
