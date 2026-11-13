@@ -1,7 +1,8 @@
-"""Private HTTP target for Cloud Tasks.
+"""Private HTTP target for Cloud Tasks and Cloud Scheduler.
 
 Deploy this service with unauthenticated access disabled. Cloud Run IAM must
-grant roles/run.invoker only to the dedicated Cloud Tasks OIDC service account.
+grant roles/run.servicesInvoker only to the dedicated Cloud Tasks and Scheduler
+OIDC service accounts.
 """
 from __future__ import annotations
 
