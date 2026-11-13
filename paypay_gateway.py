@@ -195,7 +195,8 @@ def _parse_time(value):
     except ValueError: return None
 
 def _verify_link(body, amount):
-    if not isinstance(body, dict) or (body.get("header") or {}).get("resultCode") != "S0000":
+    header = body.get("header") if isinstance(body, dict) else None
+    if not isinstance(header, dict) or header.get("resultCode") != "S0000":
         raise PayPayError("invalid_link", "PayPayリンクを確認できませんでした。")
     p = body.get("payload")
     if not isinstance(p, dict) or p.get("orderStatus") != "PENDING":
@@ -212,7 +213,8 @@ def _verify_link(body, amount):
     if not isinstance(sender, dict) or not isinstance(receiver, dict) or not sender.get("externalId") or not receiver.get("externalId") or sender["externalId"] == receiver["externalId"]:
         raise PayPayError("identity", "送金元・受取先を確認できません。")
     data = msg.get("data")
-    if not isinstance(data, dict) or data.get("orderId") != info.get("orderId") or data.get("amount") != amount or data.get("status") != "PENDING":
+    if (not isinstance(data, dict) or not isinstance(info.get("orderId"), str) or not info["orderId"]
+            or data.get("orderId") != info.get("orderId") or data.get("amount") != amount or data.get("status") != "PENDING"):
         raise PayPayError("order_mismatch", "送金リンクの注文情報が一致しません。")
     if not all(isinstance(msg.get(k), str) and msg[k] for k in ("messageId", "chatRoomId")) or not _parse_time(data.get("transactionAt")):
         raise PayPayError("link_incomplete", "送金リンクの取引情報が不足しています。")
