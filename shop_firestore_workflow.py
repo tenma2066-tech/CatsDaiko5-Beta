@@ -99,6 +99,29 @@ class FirestoreWorkflowRepository:
 
         return enqueue(transaction)
 
+    def get_outbox_item(self, execution_id: str) -> dict[str, Any] | None:
+        snapshot = self._outbox.document(execution_id).get()
+        return snapshot.to_dict() if snapshot.exists else None
+
+    def mark_task_enqueued(self, execution_id: str) -> None:
+        reference = self._outbox.document(execution_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def mark(tx):
+            snapshot = reference.get(transaction=tx)
+            if not snapshot.exists:
+                raise WorkflowStateError("outbox item not found")
+            state = snapshot.to_dict().get("state")
+            if state == "task_enqueued":
+                return
+            if state != "pending":
+                raise WorkflowStateError("outbox is not pending")
+            tx.update(reference, {"state": "task_enqueued", "task_enqueued": self._clock(),
+                                  "updated": self._clock()})
+
+        mark(transaction)
+
     def begin_dispatch(self, execution_id: str) -> dict[str, str] | None:
         """Single-use launch gate; ambiguous launches are never auto-replayed."""
         reference = self._outbox.document(execution_id)
@@ -225,7 +248,7 @@ class FirestoreWorkflowRepository:
                 "slot_id": slot_id, "transfer_lock_id": transfer_digest,
                 "started": now, "updated": now,
             })
-            tx.update(order_ref, {"job_id": execution_id, "updated": now})
+            tx.update(order_ref, {"status": "fulfilling", "job_id": execution_id, "updated": now})
             return True
 
         return claim(transaction)
