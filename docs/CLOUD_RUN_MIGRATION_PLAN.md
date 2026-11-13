@@ -1282,3 +1282,14 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はCloud Tasks retry cap / review transitionのFirestore Emulator testを確認。費用暴走を防ぎつつ、実行開始後はslot/transfer lockを保持する安全性を確認する。
+
+
+## 46. Retry exhausted order metadataを既存review遷移と統一（2026-11-13）
+
+- generation上限到達時のreview遷移を既存 `mark_dispatch_unknown()` と照合し、order側に `job_id=execution_id` と `payment_note=cloud_tasks_retry_exhausted` も記録するよう統一。
+- UI/管理画面がactive executionを同じIDで追跡でき、payment noteで原因を判別できるようにする。executionは `review` / `outcome_unknown=false` のまま（Job起動前のqueue retry exhaustionであり、ゲーム副作用は開始していない）。
+- test_firestore_repository.pyでorder status/job_id/payment_noteを検証。
+- 修正commit `153aa9799c4659573cf241cebd91719d3c5ee84d`、test `f90fcc6ad9a8a3efb03088b8cf5c4178af37c004`。最新HEAD CI/parallel結果はこれから確認。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はretry exhaustionのFirestore Emulator testを再実行し、review後にslot/transfer lockが存在しないこと、UI用job_id/payment_noteが整合することを確認する。
