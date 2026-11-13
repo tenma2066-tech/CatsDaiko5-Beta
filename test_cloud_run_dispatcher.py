@@ -260,6 +260,105 @@ class CloudRunDispatcherTests(unittest.TestCase):
         self.assertTrue(publisher.publish("exec_12345678"))
         self.assertTrue(repo.marked)
 
+    def test_task_enqueued_outbox_republishes_when_cloud_task_was_deleted(self):
+        class Repo:
+            def __init__(self):
+                self.item = {
+                    "task_id": "exec_12345678", "execution_id": "exec_12345678",
+                    "order_id": "0123456789", "state": "task_enqueued",
+                    "task_generation": 0,
+                }
+                self.advanced = []
+                self.marked = False
+
+            def get_outbox_item(self, execution_id):
+                return dict(self.item)
+
+            def advance_outbox_task_generation(self, execution_id, expected):
+                self.advanced.append(expected)
+                self.item["task_generation"] = expected + 1
+                return expected + 1
+
+            def mark_task_enqueued(self, execution_id):
+                self.marked = True
+
+        class Client:
+            def __init__(self):
+                self.names = []
+
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def task_path(self, project, location, queue, task):
+                return f"projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"
+
+            def get_task(self, request):
+                if request["name"].endswith("-g0"):
+                    raise NotFound("task exhausted and deleted")
+                return {"name": request["name"]}
+
+            def create_task(self, request):
+                self.names.append(request["task"].name)
+                raise AlreadyExists("deleted task name is still reserved")
+
+        class RotatingClient(Client):
+            def create_task(self, request):
+                self.names.append(request["task"].name)
+                if request["task"].name.endswith("-g0"):
+                    raise AlreadyExists("deleted task name is still reserved")
+                return request["task"]
+
+        repo = Repo()
+        client = RotatingClient()
+        publisher = CloudTasksOutboxPublisher(
+            client, repo, project="demo", location="asia-northeast1",
+            queue="orders", dispatcher_url="https://dispatcher.example",
+            oidc_service_account="tasks@example.iam.gserviceaccount.com",
+        )
+        self.assertTrue(publisher.publish("exec_12345678"))
+        self.assertEqual(repo.advanced, [0])
+        self.assertTrue(repo.marked)
+        self.assertEqual(len(client.names), 2)
+        self.assertTrue(client.names[1].endswith("-g1"))
+
+    def test_task_enqueued_outbox_with_live_task_is_not_recreated(self):
+        class Repo:
+            def __init__(self):
+                self.item = {
+                    "task_id": "exec_12345678", "execution_id": "exec_12345678",
+                    "order_id": "0123456789", "state": "task_enqueued",
+                    "task_generation": 0,
+                }
+
+            def get_outbox_item(self, execution_id):
+                return dict(self.item)
+
+            def advance_outbox_task_generation(self, execution_id, expected):
+                raise AssertionError("generation should not advance")
+
+            def mark_task_enqueued(self, execution_id):
+                raise AssertionError("existing task should not be republished")
+
+        class Client:
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def task_path(self, project, location, queue, task):
+                return f"projects/{project}/locations/{queue}/tasks/{task}"
+
+            def get_task(self, request):
+                return {"name": request["name"]}
+
+            def create_task(self, request):
+                raise AssertionError("existing task should not be created again")
+
+        publisher = CloudTasksOutboxPublisher(
+            Client(), Repo(), project="demo", location="asia-northeast1",
+            queue="orders", dispatcher_url="https://dispatcher.example",
+            oidc_service_account="tasks@example.iam.gserviceaccount.com",
+        )
+        self.assertFalse(publisher.publish("exec_12345678"))
+
     def test_dispatch_rejects_secret_or_extra_payload_fields(self):
         repository = FakeRepository()
         launcher = FakeLauncher()
