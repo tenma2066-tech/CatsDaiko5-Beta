@@ -1196,3 +1196,14 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新CIのCloud Tasks unit tests / Firestore Emulator / Docker buildを確認し、失敗時は修正する。Queueを本番作成する際は新形式で作成し、旧Queueの最大9日dedupe windowを前提にしない。
+
+
+## 39. Cloud Tasks generation初期値のatomic submit経路を修正（2026-11-13）
+
+- 最新CI `43443866008` でCloud Tasks publisher unit testsはsuccessしたが、Firestore Emulatorの `test_credentials_and_outbox_are_created_atomically` がKeyError `task_generation` で失敗。
+- 原因は2つのoutbox作成経路の編集ミス。通常enqueue側に `task_generation: 0` が二重に入り、実際にapp.pyが使用するatomic credential-submit側には初期値が入っていなかった。
+- atomic credential-submit側にも `task_generation: 0` を追加し、通常enqueue側は1項目に整理。最初のテストがassertで止まったためテスト専用outboxがcleanupされず、後続のpending件数テストも2件と誤認して失敗していた。後続失敗はこのcleanup cascade。
+- 修正commit `060b03c3b9706ac1198730553b8c0f0f11fb7c06`。この修正を含む最新CI/parallel結果はこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIでFirestore Emulator全21 testとDocker buildを再確認する。generation初期値が両方のoutbox作成経路に1つずつあることを確認し、成功後にIAM matrixのCloud Tasks get_task read権限を追記する。
