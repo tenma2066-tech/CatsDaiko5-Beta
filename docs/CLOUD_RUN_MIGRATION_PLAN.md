@@ -343,3 +343,36 @@ GitHub runtime-dataの扱い:
 - Firestore quotas and free tier: https://docs.cloud.google.com/firestore/quotas
 - Firestore Native mode locations: https://docs.cloud.google.com/firestore/native/docs/locations
 
+
+
+## 12. Phase 1 追加調査：ビルド・秘密情報・ログ費用（2026-11-13）
+
+### 12.1 追加で確認した公式無料枠・料金
+
+- Artifact Registry: 請求先アカウント単位で合計0.5GiBまで保存無料。超過分は保存量に応じて課金。東京のCloud Runと同じリージョンにリポジトリを置けば、同一リージョン内のGoogle Cloudサービスへの転送は無料扱い。古いイメージを残し続けない。
+- Cloud Build: 請求先アカウントあたり月2,500 build-minutesの無料枠。無料枠の対象はデフォルトプールのe2-standard-2。ビルド待ち時間はbuild-minuteに含まれない。ビルド頻度とビルド実行時間を監視する。
+- Secret Manager: 請求先アカウントあたり月6個のアクティブsecret versions、月10,000回のaccess operationsまで無料。超過時はアクティブバージョン数とアクセス回数に応じて課金。秘密値を毎リクエスト取得せず、インスタンス起動時に必要なバージョンを読み込む設計を検討する。既存のPAYPAY_ENCRYPTION_KEYは値を変更・再生成せず、移行時に同一値を安全に移す。
+- Cloud Logging: 通常のログ取り込みはプロジェクトあたり月50GiBまで無料。超過分は$0.50/GiB。標準保持期間を超える追加保持は別料金。不要なdebugログ・資格情報を含むログを抑制し、ログ量と保持期間を制限する。
+
+### 12.2 予算への影響と運用方針
+
+- 小規模な単一ベータ環境で、Artifact Registryのイメージを0.5GiB以内、Cloud Buildを2,500分以内、Secret Managerを6アクティブバージョン・10,000アクセス以内、Loggingを50GiB/月以内に抑えれば、これら4項目は公開されている無料枠に収まる可能性がある。
+- これらの無料枠も請求先アカウント単位で他プロジェクトと共有される項目がある。既存利用分が不明なため、アカウント全体の残枠を確認する必要がある。
+- Artifact Registryの脆弱性スキャン等の追加機能、外向き通信、ネットワーク転送、ログ転送先、無料枠超過は別料金になり得る。
+- 画像タグは固定タグと最新1～2世代を基本にし、古いイメージを定期的に削除する運用を設計する。
+- Cloud Loggingは注文ID・実行IDなどの追跡用メタデータに限定し、PayPay Cookie/token、OTP、パスワード、引継ぎコード、暗証番号、復号済み注文情報を出力しない。
+- Secret Managerへのアクセスは専用サービスアカウントに必要なsecret単位で付与し、管理者権限をアプリに与えない。
+
+### 12.3 Phase 1の現在地
+
+東京リージョンと主要コンポーネントの無料枠は確認できた。引き続き、Cloud Run Jobsの実行コストとFirestoreのread/write回数が支配的な費用要因になる可能性がある。現行環境の処理時間・注文量・データ量が分からないため、現時点では1,000円以内の確定見積もりには至っていない。
+
+次の作業は、現行Betaの注文・Worker・SQLiteデータモデルをコード上でさらに調査し、Firestore移行に必要なRepository境界、トランザクション、読み書き回数を設計すること。その後に3つの利用シナリオで費用試算する。
+
+### 12.4 追加参照した公式資料
+
+- Artifact Registry pricing: https://cloud.google.com/artifact-registry/pricing
+- Cloud Build pricing: https://cloud.google.com/build/pricing
+- Secret Manager pricing: https://cloud.google.com/secret-manager/pricing
+- Cloud Logging pricing: https://cloud.google.com/logging/pricing
+
