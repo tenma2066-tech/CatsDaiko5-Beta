@@ -1256,7 +1256,7 @@ def shop_order_page(order_id):
 <label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
 <button id="send-credentials">引継ぎ情報を送信</button></div>
 <p id="error" class="error"></p>
-<div id="job-progress" hidden><h2>処理状況</h2><p id="job-state" class="muted"></p><pre id="job-log" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto"></pre></div>
+<div id="job-progress" hidden><h2>処理状況</h2><p id="job-state" class="muted"></p><button id="cancel-order-job" hidden>待機中の処理を取り消す</button><pre id="job-log" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto"></pre><h3 id="job-result-title" hidden>処理結果</h3><pre id="job-result" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto"></pre></div>
 <p class="muted">受取処理中に通信が途切れた場合、二重受取を避けるため自動再試行しません。画面の案内に従って管理者へお問い合わせください。</p></div>
 <script>
 const id="__ID__",key=new URLSearchParams(location.search).get('key')||'';
@@ -1279,8 +1279,12 @@ async function refreshProgress(){
   if(!r.ok)return;
   const j=await r.json(),box=document.getElementById('job-progress');
   box.hidden=false;
-  document.getElementById('job-state').textContent='処理状態：'+(j.status||j.job_status||'確認中')+(j.queue_position?'（待機 '+j.queue_position+' 番目）':'');
-  document.getElementById('job-log').textContent=(j.log||[]).join('\n')+(j.error?'\n'+j.error:'');
+  document.getElementById('job-state').textContent='処理状態：'+(j.status||j.job_status||'確認中')+(j.queue_position?'（待機 '+j.queue_position+' 番目）':'')+(j.step?'・工程 '+j.step+'/'+j.total:'');
+  document.getElementById('job-log').textContent=(j.log||[]).join(String.fromCharCode(10))+(j.error?String.fromCharCode(10)+j.error:'');
+  const cancel=document.getElementById('cancel-order-job');
+  cancel.hidden=j.status!=='queued';
+  const resultTitle=document.getElementById('job-result-title'),result=document.getElementById('job-result');
+  resultTitle.hidden=!j.result; result.textContent=j.result?JSON.stringify(j.result,null,2):'';
   if(j.status==='done')document.getElementById('status').textContent='処理完了';
   if(j.status==='error')document.getElementById('status').textContent='処理エラー：管理者へお問い合わせください';
  }catch(e){}
@@ -1291,6 +1295,15 @@ document.getElementById('pay').addEventListener('click',async()=>{
   const r=await fetch('/api/shop/order/'+id+'/paypay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,link:document.getElementById('paypay-link').value})});
   const d=await r.json();if(!r.ok)throw Error(d.error||'決済を確認できませんでした。');e.textContent=d.message||'決済を確認しました。';await refresh();
  }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='PayPayで支払う';}
+});
+document.getElementById('cancel-order-job').addEventListener('click',async()=>{
+ const b=document.getElementById('cancel-order-job');b.disabled=true;
+ try{
+  const r=await fetch('/api/shop/order/'+id+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'取り消せませんでした。');
+  await refresh();
+ }catch(e){document.getElementById('error').textContent=e.message;}
+ finally{b.disabled=false;}
 });
 document.getElementById('send-credentials').addEventListener('click',async()=>{
  const b=document.getElementById('send-credentials'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='送信中…';
@@ -1386,6 +1399,25 @@ def shop_order_progress(order_id):
         except shop_store.ShopError:
             pass
     return response
+
+
+@app.post("/api/shop/order/<order_id>/cancel")
+def shop_order_cancel(order_id):
+    data = request.get_json(silent=True) or {}
+    order = shop_store.public_order(order_id, data.get("key", ""))
+    if not order:
+        return jsonify(error="注文が見つかりません。"), 404
+    job_id = order.get("job_id")
+    if not job_id or job_id == "starting":
+        return jsonify(error="待機中の処理が見つかりません。"), 404
+    with app.test_request_context("/cancel/" + job_id, method="POST"):
+        session["_order_execution"] = True
+        session["job_owner"] = "order:" + order_id
+        response = cancel_job(job_id)
+        if isinstance(response, tuple):
+            body, code = response
+            return body, code
+        return response
 
 
 @app.post("/api/shop/order/<order_id>/paypay")
