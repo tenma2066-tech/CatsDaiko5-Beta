@@ -1211,6 +1211,8 @@ def storefront_root():
 
 @app.get("/shop")
 def shop_home():
+    # Keep the historical URL working, but use the original full UI for customers.
+    return redirect("/")
     try:
         products = shop_store.catalog()
     except shop_store.ShopError:
