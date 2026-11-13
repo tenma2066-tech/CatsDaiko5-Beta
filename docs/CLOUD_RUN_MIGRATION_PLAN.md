@@ -1100,3 +1100,18 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新CIのFirestore Emulatorで早期配送race testを確認する。その後、outbox / slot / transfer lockの管理者復旧手順とbounded log chunk化を進める。Cloud Tasksのat-least-once配送を前提に、Firestoreの業務状態を唯一のclaim gateとして維持する。
+
+
+## 32. Worker実行ログ・レポートをbounded chunkへ分離（2026-11-13）
+
+- 既存Worker snapshotはlog/warn/report/skippedをExecution本体docへ配列保存していた。700KiBを超えると保存を拒否するだけで、レポート量によってはWorkerの進捗保存が失敗し、処理結果がreview扱いになる可能性があった。
+- `execution_logs/{execution_id}/chunks/{chunk_id}` に配列データを分離。1chunkは推定128KiB以下、最大32chunk。単一itemが上限超過、またはchunk数上限超過の場合は明示的にfail-closedする。
+- Snapshot更新はFirestore transactionで既存chunkを読み取り、旧chunk削除・新chunk作成・Execution revision更新をまとめて行う。途中で失敗しても旧snapshotが残り、部分的なchunkセットを公開しない。
+- 各更新で旧revisionのchunkを削除して置き換えるため、実行中の進捗更新で履歴docが無制限に増えない。
+- `get_execution()` はchunkをindex順に再構築して既存shop_store/admin画面向けのlog/warn/report/skipped配列契約を維持する。以前のinline配列を持つ既存Executionとの後方互換も保持。
+- Emulator test `test_worker_snapshot_arrays_are_chunked_and_replaced_atomically` を追加。1MiBを超えるlogを分割して復元できること、更新後に旧chunkが残らないことを確認する。
+- コードcommit: `d02b0b521d72a6a63cf9dc681329ef0d967d0e85`、test: `e349c42228a9f2efa7cf44a38a940234793c2fe4`、後方互換修正: `24e402da6a19209db3e3d53fcb7e59256c54fef9`。
+- 最新HEADのCI `43440765574` はpending、同HEADのparallel regression `43440765854` はin_progress。直前のCI `43439896632` とparallel `43439896714` はsuccess。新しいchunk実装のCI成功とはまだ扱わない。
+- 専用branch / Draft PR #9のみ。Beta main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADのCI/parallel結果、とくにFirestore Emulatorのchunk置換テストを確認する。続いて、管理者向けunknown launch復旧ツール、Cloud Run Job実行ID照合、IAM/Security Rulesをレビューする。実データdry-run前にGCP Project/Billing/ADCが必要になるが、ユーザー承認前にリソース作成やデータ移行はしない。
