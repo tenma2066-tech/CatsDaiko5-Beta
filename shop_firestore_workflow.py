@@ -46,6 +46,7 @@ def _estimate_firestore_payload_size(value: Any) -> int:
 _WORKER_ARRAY_FIELDS = ("log", "warn", "report", "skipped")
 _WORKER_CHUNK_MAX_BYTES = 128 * 1024
 _WORKER_CHUNK_MAX_COUNT = 32
+MAX_OUTBOX_TASK_GENERATION = 3
 
 
 def _split_worker_snapshot_arrays(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -229,8 +230,38 @@ class FirestoreWorkflowRepository:
             current = int(data.get("task_generation") or 0)
             if current != expected_generation:
                 return current
-            if current >= 10000:
-                raise WorkflowStateError("outbox task generation limit reached")
+            if current >= MAX_OUTBOX_TASK_GENERATION:
+                execution_ref = self._executions.document(execution_id)
+                order_ref = self._orders.document(data.get("order_id") or "")
+                execution = execution_ref.get(transaction=tx)
+                order = order_ref.get(transaction=tx)
+                now = self._clock()
+                # Only a queued execution with no owner/slot can be safely
+                # closed here. A launched/running execution is never reset.
+                if execution.exists:
+                    execution_data = execution.to_dict()
+                    if (execution_data.get("state") == "queued"
+                            and not execution_data.get("owner")
+                            and not execution_data.get("slot_id")):
+                        tx.update(execution_ref, {
+                            "state": "review",
+                            "outcome_unknown": False,
+                            "error_code": "cloud_tasks_retry_exhausted",
+                            "updated": now,
+                        })
+                if order.exists:
+                    order_data = order.to_dict()
+                    if order_data.get("active_execution_id") == execution_id:
+                        tx.update(order_ref, {
+                            "status": "review",
+                            "updated": now,
+                        })
+                tx.update(reference, {
+                    "state": "review",
+                    "error_code": "cloud_tasks_retry_exhausted",
+                    "updated": now,
+                })
+                return None
             updated = current + 1
             tx.update(reference, {
                 "task_generation": updated,
