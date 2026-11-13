@@ -293,7 +293,7 @@ class DeliveryTests(unittest.TestCase):
             self.assertFalse(A._run_lock.locked())
 
     def test_latest_endpoint_is_public_but_respects_busy_lock(self):
-        with patch.object(A, '_latest_catalog_thread', lambda: None):
+        with patch.object(A, '_latest_catalog_thread', lambda: A._run_lock.release()):
             response = self.client.post('/api/cats/latest')
             self.assertEqual(response.status_code, 202)
         A._run_lock.acquire()
