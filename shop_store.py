@@ -52,6 +52,12 @@ def _db():
             if "unit_price_yen" not in columns:
                 con.execute("ALTER TABLE orders ADD COLUMN unit_price_yen INTEGER NOT NULL DEFAULT 0")
                 con.execute("UPDATE orders SET unit_price_yen=amount WHERE quantity=1")
+            if "operation_enc" not in columns:
+                con.execute("ALTER TABLE orders ADD COLUMN operation_enc BLOB")
+            if "service_type" not in columns:
+                con.execute("ALTER TABLE orders ADD COLUMN service_type TEXT NOT NULL DEFAULT 'other-service'")
+            if "job_id" not in columns:
+                con.execute("ALTER TABLE orders ADD COLUMN job_id TEXT")
             # Finish one-time schema migration before any caller starts an explicit transaction.
             con.commit()
             if not github_runtime_store.enabled():
@@ -112,6 +118,79 @@ def create_order(sku: str, quantity=1):
     return {"id": order_id, "access_token": access_token, "title": item["title"],
             "unit_price_yen": item["unit_price_yen"], "quantity": quantity,
             "amount": amount, "status": "awaiting_payment"}
+
+def create_operation_order(operation: dict, service_type: str, quantity: int):
+    """Create a PayPay order that stores the original UI operation, encrypted at rest.
+
+    Prices are fixed server-side: character-specific selection is 50 yen per
+    selected character; all other services are 25 yen per requested character.
+    """
+    if service_type not in {"character-specific", "other-service"}:
+        raise ShopError("サービス区分が正しくありません。")
+    if not isinstance(operation, dict) or len(json.dumps(operation, ensure_ascii=False)) > 100_000:
+        raise ShopError("注文内容が大きすぎるか、形式が正しくありません。")
+    if type(quantity) is not int or not 1 <= quantity <= MAX_ORDER_QUANTITY:
+        raise ShopError("代行体数は1〜100体で指定してください。")
+    unit_price = 50 if service_type == "character-specific" else 25
+    amount = unit_price * quantity
+    order_id = secrets.token_hex(5).upper()
+    access_token = secrets.token_urlsafe(32)
+    credential_enc = _cipher().encrypt(json.dumps(
+        {"transfer_code": "", "pin": ""}, ensure_ascii=False
+    ).encode("utf-8"))
+    operation_enc = _cipher().encrypt(json.dumps(
+        operation, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8"))
+    title = "キャラ特定選択" if service_type == "character-specific" else "その他の代行"
+    now = time.time()
+    with _db() as db:
+        db.execute("""INSERT INTO orders
+            (id,access_hash,sku,title,amount,unit_price_yen,quantity,credential_enc,
+             operation_enc,service_type,job_id,credentials_submitted,status,created,updated)
+            VALUES(?,?,?,?,?,?,?,?,?,?,NULL,0,'awaiting_payment',?,?)""",
+            (order_id, hashlib.sha256(access_token.encode()).hexdigest(),
+             "original-" + service_type, title, amount, unit_price, quantity,
+             credential_enc, operation_enc, service_type, now, now))
+    return {"id": order_id, "access_token": access_token, "title": title,
+            "unit_price_yen": unit_price, "quantity": quantity,
+            "amount": amount, "status": "awaiting_payment"}
+
+
+def operation_for_execution(order_id: str, access_token: str):
+    row = _row(order_id)
+    if not row or not secrets.compare_digest(
+        row["access_hash"], hashlib.sha256((access_token or "").encode()).hexdigest()
+    ):
+        return None
+    if row["status"] != "paid" or not row.get("credentials_submitted"):
+        raise ShopError("決済確認と引継ぎ情報の入力が必要です。")
+    if not row.get("operation_enc"):
+        raise ShopError("この注文には実行内容が保存されていません。管理者へお問い合わせください。")
+    try:
+        operation = json.loads(_cipher().decrypt(row["operation_enc"]))
+        credentials = json.loads(_cipher().decrypt(row["credential_enc"]))
+    except Exception:
+        raise ShopError("注文内容を安全に読み取れません。管理者へお問い合わせください。") from None
+    if not isinstance(operation, dict) or not credentials.get("transfer_code") or not credentials.get("pin"):
+        raise ShopError("注文内容または引継ぎ情報が不足しています。")
+    operation["transfer"] = credentials["transfer_code"]
+    operation["confirm"] = credentials["pin"]
+    return operation
+
+
+def bind_job(order_id: str, access_token: str, job_id: str):
+    row = _row(order_id)
+    if not row or not secrets.compare_digest(
+        row["access_hash"], hashlib.sha256((access_token or "").encode()).hexdigest()
+    ):
+        raise ShopError("注文が見つかりません。")
+    with _db() as db:
+        changed = db.execute("""UPDATE orders SET job_id=?,updated=?
+            WHERE id=? AND status='paid' AND credentials_submitted=1 AND job_id IS NULL""",
+            (job_id, time.time(), order_id))
+        if changed.rowcount != 1:
+            raise ShopError("この注文は既に処理開始済み、または状態が変わりました。")
+
 
 def claim_payment(order_id: str):
     with _db() as db:
@@ -176,7 +255,7 @@ def public_order(order_id: str, access_token: str):
     return {"id": row["id"], "title": row["title"], "amount": row["amount"],
             "quantity": row.get("quantity", 1), "unit_price_yen": row.get("unit_price_yen", 0),
             "status": row["status"], "credentials_submitted": bool(row["credentials_submitted"]),
-            "created": int(row["created"])}
+            "job_id": row.get("job_id"), "created": int(row["created"])}
 
 def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
     allowed = {"paid", "review", "fulfilling", "completed", "cancelled"}
