@@ -64,13 +64,19 @@ def create_app():
             from google.cloud import run_v2
             executions_client = run_v2.ExecutionsClient()
             checked = reconciled = 0
-            for item in repository.list_running_executions(limit=100):
+            for item in repository.list_active_executions(limit=100):
                 owner = item.get("owner")
                 order_id = item.get("order_id")
                 execution_id = item.get("execution_id")
-                if not owner or not order_id or not execution_id or owner.startswith("worker-"):
+                execution_name = item.get("cloud_run_execution_name") or owner
+                if not execution_name or not order_id or not execution_id:
                     continue
-                resource_name = job_resource + "/executions/" + owner
+                if str(execution_name).startswith("worker-"):
+                    continue
+                resource_name = (
+                    str(execution_name) if "/" in str(execution_name)
+                    else job_resource + "/executions/" + str(execution_name)
+                )
                 try:
                     execution = executions_client.get_execution(request={"name": resource_name})
                 except Exception as exc:
@@ -80,7 +86,10 @@ def create_app():
                     raise
                 checked += 1
                 if getattr(execution, "completion_time", None):
-                    if repository.reconcile_terminal_execution(order_id, execution_id, owner):
+                    if repository.reconcile_terminal_execution(
+                        order_id, execution_id, owner=owner,
+                        cloud_run_execution_name=str(execution_name),
+                    ):
                         reconciled += 1
             return jsonify(checked=checked, reconciled=reconciled), 200
         except Exception:
