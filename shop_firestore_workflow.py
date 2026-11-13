@@ -663,7 +663,9 @@ class FirestoreWorkflowRepository:
             return None
         result = snapshot.to_dict()
         for field in _WORKER_ARRAY_FIELDS:
-            result[field] = []
+            # Preserve inline arrays from executions written by earlier beta
+            # revisions; new snapshots are reconstructed from chunk documents.
+            result[field] = list(result.get(field) or [])
         chunks = (
             self._client.collection("execution_logs")
             .document(execution_id).collection("chunks")
