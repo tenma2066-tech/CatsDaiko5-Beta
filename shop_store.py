@@ -52,6 +52,7 @@ def _db():
             con.execute("ALTER TABLE orders ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
         if "unit_price_yen" not in columns:
             con.execute("ALTER TABLE orders ADD COLUMN unit_price_yen INTEGER NOT NULL DEFAULT 0")
+        con.execute("UPDATE orders SET unit_price_yen=amount WHERE unit_price_yen=0 AND quantity=1")
         os.chmod(DB_PATH, 0o600)
         yield con
         con.commit()
