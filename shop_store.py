@@ -178,18 +178,33 @@ def operation_for_execution(order_id: str, access_token: str):
     return operation
 
 
-def bind_job(order_id: str, access_token: str, job_id: str):
+def claim_execution(order_id: str, access_token: str):
     row = _row(order_id)
     if not row or not secrets.compare_digest(
         row["access_hash"], hashlib.sha256((access_token or "").encode()).hexdigest()
     ):
         raise ShopError("注文が見つかりません。")
     with _db() as db:
-        changed = db.execute("""UPDATE orders SET job_id=?,updated=?
+        changed = db.execute("""UPDATE orders SET job_id='starting',updated=?
             WHERE id=? AND status='paid' AND credentials_submitted=1 AND job_id IS NULL""",
-            (job_id, time.time(), order_id))
+            (time.time(), order_id))
         if changed.rowcount != 1:
             raise ShopError("この注文は既に処理開始済み、または状態が変わりました。")
+
+
+def bind_job(order_id: str, job_id: str):
+    with _db() as db:
+        changed = db.execute("""UPDATE orders SET job_id=?,updated=?
+            WHERE id=? AND status='paid' AND credentials_submitted=1 AND job_id='starting'""",
+            (job_id, time.time(), order_id))
+        if changed.rowcount != 1:
+            raise ShopError("処理開始状態を確定できません。管理者による確認が必要です。")
+
+
+def release_execution(order_id: str):
+    with _db() as db:
+        db.execute("UPDATE orders SET job_id=NULL,updated=? WHERE id=? AND job_id='starting'",
+                   (time.time(), order_id))
 
 
 def claim_payment(order_id: str):
