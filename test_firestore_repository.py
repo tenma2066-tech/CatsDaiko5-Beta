@@ -166,11 +166,22 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
             workflow.advance_outbox_task_generation(execution_id, 1), 2
         )
         workflow.mark_task_enqueued(execution_id)
+        self.assertEqual(
+            [item["execution_id"] for item in workflow.list_pending_outbox()],
+            [execution_id],
+        )
+        # task_enqueued also rotates after Cloud Tasks has deleted an exhausted task.
+        self.assertEqual(
+            workflow.advance_outbox_task_generation(execution_id, 2), 3
+        )
+        self.client.collection("task_outbox").document(execution_id).update({
+            "state": "launching",
+        })
         self.assertIsNone(
-            workflow.advance_outbox_task_generation(execution_id, 2)
+            workflow.advance_outbox_task_generation(execution_id, 3)
         )
         self.assertEqual(
-            workflow.get_outbox_item(execution_id)["task_generation"], 2
+            workflow.get_outbox_item(execution_id)["task_generation"], 3
         )
         self.client.collection("task_outbox").document(execution_id).delete()
         self.client.collection("executions").document(execution_id).delete()
