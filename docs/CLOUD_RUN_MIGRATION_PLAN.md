@@ -998,3 +998,15 @@ F. execution完了:
 - 作業は専用ブランチ / Draft PR #9のみ。main・Render・GCP実リソース・PayPay実アカウント・実注文は変更せず、SHOP_LIVE_ORDERS_ENABLED=0を維持。
 
 次は最新CIを確認し、PayPay旧ledgerのFirestore移行・OTPの並行処理保護・ログdocument分割・outbox task retry exhausted時の回復とslot reaperを実装する。これらが完了するまではFirestore backendを本番で有効化しない。
+
+
+## 26. PayPay SMS認証状態のsingle-use化（2026-11-13）
+
+- PayPay OAuthのOTP stateをFirestoreへ保存する既存経路を確認。従来のfinish_login()は状態を読み取るだけで、成功後にclearするため、並行した複数リクエストが同じSMS認証stateを同時に利用できる競合があった。
+- paypay_gateway.pyに_pending_otp_consume()を追加。Firestore backendではFirestoreWorkflowRepository.consume_otp_session()のtransactionでpending→consumedを原子的に変更し、暗号化stateを一度だけ取得する。legacy backendではプロセスロック下でメモリstateを取り出して消去する。
+- finish_login()はOTP形式検証後にconsumeしてからPayPay OAuthを呼ぶ。これにより同一OTP sessionの同時送信・再利用を防ぐ。OTP認証通信がタイムアウト等で結果不明になった場合もstateは再利用せず、管理者は最初からログインを開始する必要がある。安全性優先のトレードオフ。
+- test_paypay_gateway.pyにlegacy single-use test、test_firestore_repository.pyにFirestore Emulator single-use testを追加。
+- この変更はPayPay実ログイン・SMS送信・決済を実行していない。暗号化キー・保存済みPayPay account.encには触れていない。
+- 今回のコードcommit: e40e0cb190e1c51893c6c98051662f2d63840ab4 / 6ff279294f9679ce787bd68c936c1e0d521c67be / ca40a9013b0fb819a976a156984219ec7e12cf9c。
+- 次は最新CIでFirestore Emulator testを含む成功を確認する。次の大きな課題はworker snapshotのbounded chunk化とoutbox retry/reaperの回復ロジック。
+
