@@ -36,6 +36,18 @@ class PayPayGatewayValidationTests(unittest.TestCase):
             }
         }
 
+    def test_rejects_extra_path_segments_and_multiple_trailing_slashes(self):
+        self.assertIsNone(paypay_gateway._normalize_link("https://pay.paypay.ne.jp/AbCd123456/extra"))
+        self.assertIsNone(paypay_gateway._normalize_link("https://pay.paypay.ne.jp/AbCd123456//"))
+
+    def test_structured_temporary_hold_code_is_detected(self):
+        self.assertEqual(paypay_gateway._provider_hold_code(
+            {"error": {"errorCode": "42007013"}}
+        ), "42007013")
+        self.assertIsNone(paypay_gateway._provider_hold_code(
+            {"message": "42007013"}
+        ))
+
     def test_valid_pending_link_matches_server_amount(self):
         result = paypay_gateway._verify_link(self._valid_body(), 1200)
         self.assertEqual(result["order_id"], "provider-order-1")
