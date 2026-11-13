@@ -133,7 +133,8 @@ class ShopStoreTests(unittest.TestCase):
         self.assertEqual(saved["transfer"], "transfer-code")
         self.assertEqual(saved["confirm"], "1234")
         self.assertTrue(self.store.claim_execution(order["id"], order["access_token"]))
-        self.assertFalse(self.store.claim_execution(order["id"], order["access_token"]))
+        with self.assertRaises(self.store.ShopError):
+            self.store.claim_execution(order["id"], order["access_token"])
         self.store.bind_job(order["id"], "job-123")
         self.assertEqual(
             self.store.public_order(order["id"], order["access_token"])["job_id"],
