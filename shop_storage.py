@@ -1,7 +1,7 @@
 """Explicit storage backend selection for storefront persistence.
 
 The legacy backend preserves the current SQLite + optional GitHub snapshot behavior.
-Firestore is intentionally unavailable until its transactional adapter is implemented.
+Firestore is opt-in and must be explicitly configured; it never falls back to SQLite.
 """
 from __future__ import annotations
 
@@ -18,10 +18,7 @@ def selected_backend() -> str:
     if backend in ("legacy", "sqlite_github"):
         return "legacy"
     if backend == "firestore":
-        raise ShopStorageError(
-            "Firestore注文ストレージは統合・検証が未完了です。"
-            "安全のため別の保存先へ自動切替しません。"
-        )
+        return "firestore"
     raise ShopStorageError("SHOP_STORAGE_BACKENDの設定値が正しくありません。")
 
 
@@ -34,8 +31,9 @@ def database(name: str, local_path):
     GitHub snapshots when it is configured. This preserves Render behavior.
     """
     backend = selected_backend()
+    if backend == "firestore":
+        raise ShopStorageError("Firestore選択時にSQLiteデータベースは開けません。")
     if backend != "legacy":
-        # Defensive guard: adding a new backend requires an explicit adapter.
         raise ShopStorageError("指定された注文ストレージは利用できません。")
 
     import github_runtime_store
@@ -56,3 +54,16 @@ def uses_remote_snapshot() -> bool:
         return github_runtime_store.enabled()
     except github_runtime_store.RuntimeStoreError as exc:
         raise ShopStorageError(str(exc)) from exc
+
+
+def firestore_client():
+    """Create the explicitly selected Firestore client; never use SQLite fallback."""
+    if selected_backend() != "firestore":
+        raise ShopStorageError("Firestore backend is not selected.")
+    from google.cloud import firestore
+
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("FIRESTORE_PROJECT_ID")
+    try:
+        return firestore.Client(project=project) if project else firestore.Client()
+    except Exception as exc:
+        raise ShopStorageError("Firestoreへ接続できません。") from exc
