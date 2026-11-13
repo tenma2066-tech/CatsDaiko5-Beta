@@ -198,9 +198,32 @@ Scheduler用サービスアカウントにはDispatcher ServiceへのInvokerだ�
 9. OTPがFirestoreへ暗号化保存され、Webのscale-to-zero後もSMS認証を継続できることを確認。
 10. Billingの実測値で通常月・集中月の月額見込みを再計算する。
 
-## 13. データ移行・切替の未完了ゲート
+## 13. 既存runtime-dataの読み取り専用移行
 
-- 現行GitHub `runtime-data` の暗号化snapshotから注文DB・PayPay ledgerを読み取り専用で取り出し、Firestoreへ照合/importする専用移行ツールと復旧テストは未完成。
+専用スクリプト `migrate_runtime_data_to_firestore.py` を追加済み。
+
+1. Cloud Shell等でProjectを選択し、FirestoreへのApplication Default Credentialsを用意する。
+2. GitHub runtime-dataを読むため、現行の `RUNTIME_GITHUB_REPO` / branch / prefix / tokenを設定する。
+3. 現行と同じ `PAYPAY_ENCRYPTION_KEY` をSecret Manager等から安全に環境へ注入する。
+4. 最初はdry-runのみ実行する。
+
+```bash
+python migrate_runtime_data_to_firestore.py
+```
+
+件数・snapshot復号・スキーマ確認ができた場合のみ、バックアップを取得したうえで `--apply` を付けて実行する。
+
+```bash
+python migrate_runtime_data_to_firestore.py --apply
+```
+
+このツールはGitHub上の暗号化snapshotだけを読み取り、ローカルSQLiteをGitHubへ自動uploadしない。Firestoreへはcreate-onlyで書き込み、既存docを上書きしない。途中で止まった場合は同じコマンドを再実行できる。旧job_idが残る注文やpayment_processing中の注文はreviewへ移し、実行を自動再開しない。旧PayPay ledgerのattempted状態はoutcome_unknownとして取り込む。
+
+**本番移行前に、dry-runの件数と管理画面の注文数を照合すること。** 取り込み後もPayPay account.encはGitHub runtime-dataに残す。暗号化キーは変更しない。
+
+## 14. データ移行・切替の未完了ゲート
+
+- 移行ツールは実装済みだが、現行runtime-dataを使ったdry-run件数照合・実データimport・復旧テストは未実施。
 - PayPayアカウント暗号化blobは引き続きGitHub runtime-dataを使用する。新Firestoreの注文台帳とは別管理。
 - 旧PayPay ledgerは移行前リンクの重複を防ぐため読み取り専用チェックを残している。
 - Firestoreの本番Projectでの実トランザクション、Cloud Run Job実機、費用計測、秘密情報のSecret Manager移設は未実施。
