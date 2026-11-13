@@ -1228,7 +1228,7 @@ function updatePrice(){
 document.getElementById('quantity').addEventListener('input',updatePrice);
 if(!products.length){document.getElementById('catalog-error').textContent='現在、販売商品が設定されていません。管理者にお問い合わせください。';}
 products.forEach(p=>{const el=document.createElement('button');el.type='button';el.style.textAlign='left';el.innerHTML='';
-el.textContent=p.title+'　'+yen(p.price_yen)+(p.description?' — '+p.description:'');
+el.textContent=p.title+'　'+yen(p.unit_price_yen)+'/体'+(p.description?' — '+p.description:'');
 el.addEventListener('click',()=>{selected=p;document.getElementById('selected-title').textContent=p.title;document.getElementById('checkout').hidden=false;updatePrice();document.getElementById('checkout').scrollIntoView({behavior:'smooth'});});list.appendChild(el);});
 const placeButton=document.getElementById('place');
 placeButton.disabled=!ordersEnabled;
@@ -1253,7 +1253,7 @@ def shop_create_order():
         return jsonify(error="現在は注文受付を停止しています。"), 503
     data = request.get_json(silent=True) or {}
     try:
-        order = shop_store.create_order(data.get("sku", ""))
+        order = shop_store.create_order(data.get("sku", ""), data.get("quantity", 1))
         return jsonify(order), 201
     except shop_store.ShopError as exc:
         return jsonify(error=str(exc)), 400
@@ -1399,7 +1399,7 @@ def admin_orders_page():
 {% if o.credentials_submitted %}<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>{% else %}<p>引継ぎ情報：購入者の入力待ち</p>{% endif %}
 <form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
 <select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
-        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review","cancelled"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed"],"completed":[],"cancelled":[]})
+        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed"],"completed":[],"cancelled":[]})
     return _shop_page("注文管理", '<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>'+order_body+'</div>')
 
 @app.post("/admin/orders/<order_id>/status")
