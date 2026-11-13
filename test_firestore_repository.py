@@ -320,6 +320,75 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
                     os.environ[key] = value
             importlib.reload(shop_store)
 
+    def test_reconciler_releases_slot_but_keeps_lock_after_running_job_ends_unknown(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        workflow.mark_task_enqueued(execution_id)
+        workflow.begin_dispatch(execution_id)
+        workflow.mark_dispatch_started(execution_id, {
+            "operation_name": "operations/reconcile-test",
+            "execution_name": "job-run-unknown",
+        })
+        lock_digest = transfer_lock_id("transfer-code-example", b"z" * 32)
+        self.assertTrue(workflow.claim_execution(
+            self.order_id, execution_id, "job-run-unknown", lock_digest, "slot-0"
+        ))
+        self.assertTrue(workflow.reconcile_terminal_execution(
+            self.order_id, execution_id, owner="job-run-unknown",
+            cloud_run_execution_name="job-run-unknown",
+        ))
+        execution = workflow.get_execution(execution_id)
+        self.assertEqual(execution["state"], "review")
+        self.assertTrue(execution["outcome_unknown"])
+        self.assertEqual(
+            self.client.collection("worker_slots").document("slot-0").get().to_dict()["state"],
+            "released",
+        )
+        self.assertEqual(
+            self.client.collection("transfer_locks").document(lock_digest).get().to_dict()["state"],
+            "active",
+        )
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("worker_slots").document("slot-0").delete()
+        self.client.collection("transfer_locks").document(lock_digest).delete()
+
+    def test_reconciler_releases_preclaim_reservation_without_account_lock(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        workflow.mark_task_enqueued(execution_id)
+        workflow.begin_dispatch(execution_id)
+        workflow.mark_dispatch_started(execution_id, {
+            "operation_name": "operations/preclaim-test",
+            "execution_name": "job-never-claimed",
+        })
+        self.assertTrue(workflow.reconcile_terminal_execution(
+            self.order_id, execution_id, owner=None,
+            cloud_run_execution_name="job-never-claimed",
+        ))
+        execution = workflow.get_execution(execution_id)
+        self.assertEqual(execution["state"], "review")
+        self.assertFalse(execution["outcome_unknown"])
+        self.assertEqual(
+            self.client.collection("worker_slots").document("slot-0").get().to_dict()["state"],
+            "released",
+        )
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("worker_slots").document("slot-0").delete()
+
 
 if __name__ == "__main__":
     unittest.main()
