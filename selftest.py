@@ -7,11 +7,13 @@
 本物の bcsfe やゲームサーバーは使わず、ダミーに差し替えて
 「画面とAPIの流れ」「キャラ解放」「安全モード」「試運転」「キャラ名検索」を確認します。
 """
+import json
 import os
 import sys
 import threading
 import time
 import types
+from cryptography.fernet import Fernet
 
 # ---- bcsfe のダミー ----------------------------------------------------------
 sys.modules["bcsfe"] = types.ModuleType("bcsfe")
@@ -26,6 +28,13 @@ _cat_mod = types.ModuleType("bcsfe.core.game.catbase.cat")
 _cat_mod.Cat = types.SimpleNamespace(init=lambda i: Cat(i), unlock=lambda *a, **k: None)
 sys.modules["bcsfe.core.game.catbase.cat"] = _cat_mod
 os.environ["APP_PASSWORD"] = "pw"
+os.environ["PAYPAY_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
+os.environ["SHOP_DB_PATH"] = "/tmp/catsdaiko-selftest-shop.sqlite3"
+os.environ["SHOP_CATALOG_JSON"] = json.dumps([{"id": "sample", "title": "テスト商品", "price_yen": 500}], ensure_ascii=False)
+try:
+    os.remove(os.environ["SHOP_DB_PATH"])
+except OSError:
+    pass
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 for _f in ("/tmp/bcsfe_game_version.json", "/tmp/bcsfe_cat_names.json"):
@@ -182,6 +191,12 @@ print("\n[1] ログインと画面")
 check("未ログインでも / は公開ショップへ", c.get("/").headers.get("Location", "").endswith("/shop"))
 check("未ログインは /console がログインへ", c.get("/console").status_code == 302)
 check("公開ショップは未ログインで表示", c.get("/shop").status_code == 200)
+shop_order = c.post("/api/shop/orders", json={"sku":"sample","transfer_code":"transfer-test","pin":"9876"})
+check("未ログインで注文を作成できる", shop_order.status_code == 201)
+if shop_order.status_code == 201:
+    order_data = shop_order.get_json()
+    public_order = c.get("/api/shop/order/"+order_data["id"]+"?key="+order_data["access_token"])
+    check("注文状態は秘密情報なしで照会できる", public_order.status_code == 200 and "transfer-test" not in public_order.get_data(as_text=True))
 check("未ログインは API が401", c.get("/api/cats").status_code == 401)
 check("パスワード違いは入れない", c.post("/login", data={"password": "x"}).status_code == 200)
 check("ログインできる", c.post("/login", data={"password": "pw"}).status_code == 302)
