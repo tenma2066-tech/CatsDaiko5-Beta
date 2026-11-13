@@ -1206,13 +1206,11 @@ def shop_home():
         products = []
     product_json = json.dumps(products, ensure_ascii=False).replace("</", "<\\/")
     orders_enabled = os.environ.get("SHOP_LIVE_ORDERS_ENABLED") == "1"
-    body = r"""<div class="card"><h2>商品を選択</h2><p class="muted">ログイン不要でご注文いただけます。商品を選び、引継ぎ情報を入力してください。</p>
+    body = r"""<div class="card"><h2>商品を選択</h2><p class="muted">ログイン不要でご注文いただけます。商品を選び、PayPayでお支払い後に引継ぎ情報を入力してください。</p>
 <div id="products"></div><p id="catalog-error" class="error"></p><p class="muted" id="shop-disabled">__SHOP_DISABLED__</p></div>
 <div class="card" id="checkout" hidden><h2 id="selected-title">注文内容</h2><p class="price" id="selected-price"></p>
-<label>引継ぎコード<input id="transfer" maxlength="128" autocomplete="off" autocapitalize="off"></label>
-<label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
-<p class="muted">入力情報は暗号化して保存し、注文処理にのみ使用します。</p>
-<button id="place">注文を確定する</button><p id="error" class="error"></p></div>
+<p class="muted">次の画面でPayPay決済を行います。決済確認後に引継ぎコードと暗証番号を入力します。</p>
+<button id="place">PayPay決済へ進む</button><p id="error" class="error"></p></div>
 <script>
 const products=__PRODUCTS__;let selected=null;\nconst ordersEnabled=__ORDERS_ENABLED__;\nif(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
 const yen=n=>new Intl.NumberFormat('ja-JP').format(n)+'円';
@@ -1226,10 +1224,10 @@ document.getElementById('place').addEventListener('click',async()=>{
  if(!selected)return;
  const button=document.getElementById('place');button.disabled=true;button.textContent='注文を作成中…';
  try{
-  const r=await fetch('/api/shop/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku:selected.id,transfer_code:document.getElementById('transfer').value,pin:document.getElementById('pin').value})});
+  const r=await fetch('/api/shop/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku:selected.id})});
   const data=await r.json();if(!r.ok)throw Error(data.error||'注文を作成できませんでした。');
   location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
- }catch(e){error.textContent=e.message;}finally{button.disabled=false;button.textContent='注文を確定する';}
+ }catch(e){error.textContent=e.message;}finally{button.disabled=false;button.textContent='PayPay決済へ進む';}
 });
 </script>""".replace("__PRODUCTS__", product_json).replace("__ORDERS_ENABLED__", "true" if orders_enabled else "false").replace("__SHOP_DISABLED__", "")
     return _shop_page("商品一覧", body)
