@@ -84,6 +84,7 @@ class CloudRunDispatcherTests(unittest.TestCase):
     def test_cloud_run_job_receives_only_order_and_execution_ids(self):
         class Operation:
             name = "operations/123"
+            metadata = type("Metadata", (), {"name": "job-run-xyz"})()
 
         class Client:
             def run_job(self, request):
@@ -98,7 +99,7 @@ class CloudRunDispatcherTests(unittest.TestCase):
         operation = launcher.launch("0123456789", "exec_12345678", "slot-0")
         args = client.request["overrides"]["container_overrides"][0]["args"]
         self.assertEqual(operation, {
-            "operation_name": "operations/123", "execution_name": None,
+            "operation_name": "operations/123", "execution_name": "job-run-xyz",
         })
         self.assertEqual(args, [
             "--order-id", "0123456789",
