@@ -261,13 +261,23 @@ class FirestoreWorkflowRepository:
             data = outbox.to_dict()
             if data.get("state") != "launching":
                 raise WorkflowStateError("outbox is not in launching state")
+            operation_name = (
+                cloud_run_operation.get("operation_name")
+                if isinstance(cloud_run_operation, dict) else str(cloud_run_operation)
+            )
+            execution_name = (
+                cloud_run_operation.get("execution_name")
+                if isinstance(cloud_run_operation, dict) else None
+            )
             tx.update(outbox_ref, {
                 "state": "dispatched",
-                "cloud_run_operation": cloud_run_operation,
+                "cloud_run_operation": operation_name,
+                "cloud_run_execution_name": execution_name,
                 "updated": self._clock(),
             })
             tx.update(execution_ref, {
-                "cloud_run_operation": cloud_run_operation,
+                "cloud_run_operation": operation_name,
+                "cloud_run_execution_name": execution_name,
                 "state": "starting",
                 "updated": self._clock(),
             })
