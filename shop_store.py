@@ -120,7 +120,7 @@ def create_order(sku: str, quantity=1):
         "sku": sku, "title": item["title"], "amount": amount,
         "unit_price_yen": item["unit_price_yen"], "quantity": quantity,
         "credential_enc": credentials, "operation_enc": None,
-        "service_type": sku, "now": now,
+        "service_type": "other-service", "now": now,
     })
     return {"id": order_id, "access_token": access_token, "title": item["title"],
             "unit_price_yen": item["unit_price_yen"], "quantity": quantity,
