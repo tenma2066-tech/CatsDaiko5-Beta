@@ -25,34 +25,44 @@ class ShopStoreTests(unittest.TestCase):
             os.environ.pop(key, None)
 
     def test_order_uses_server_catalog_and_hides_credentials_from_public_view(self):
-        order = self.store.create_order("svc-a", "transfer-secret", "9876")
+        order = self.store.create_order("svc-a")
         self.assertEqual(order["amount"], 1234)
         public = self.store.public_order(order["id"], order["access_token"])
         self.assertEqual(public["status"], "awaiting_payment")
+        self.assertFalse(public["credentials_submitted"])
         self.assertNotIn("transfer-secret", json.dumps(public))
-        self.assertNotIn("9876", json.dumps(public))
+        with self.assertRaises(self.store.ShopError):
+            self.store.save_credentials(order["id"], order["access_token"], "transfer-secret", "9876")
+        self.store.set_status(order["id"], "paid", payment_digest="digest-1")
+        self.store.save_credentials(order["id"], order["access_token"], "transfer-secret", "9876")
+        public_after = self.store.public_order(order["id"], order["access_token"])
+        self.assertTrue(public_after["credentials_submitted"])
+        self.assertNotIn("transfer-secret", json.dumps(public_after))
         admin = self.store.get_order_for_admin(order["id"])
         self.assertEqual(admin["credentials"]["transfer_code"], "transfer-secret")
         self.assertEqual(admin["credentials"]["pin"], "9876")
 
-    def test_client_cannot_choose_price(self):
-        order = self.store.create_order("svc-a", "abc", "9999")
+    def test_price_is_always_taken_from_server_catalog(self):
+        order = self.store.create_order("svc-a")
         self.assertEqual(order["amount"], 1234)
 
     def test_unknown_product_rejected(self):
         with self.assertRaises(self.store.ShopError):
-            self.store.create_order("not-for-sale", "abc", "9876")
+            self.store.create_order("not-for-sale")
 
-    def test_order_state_machine(self):
-        order = self.store.create_order("svc-a", "abc", "9876")
-        self.store.set_status(order["id"], "paid", payment_digest="digest-1")
+    def test_order_state_machine_requires_credentials_before_fulfillment(self):
+        order = self.store.create_order("svc-a")
+        self.store.set_status(order["id"], "paid", payment_digest="digest-2")
+        with self.assertRaises(self.store.ShopError):
+            self.store.set_status(order["id"], "fulfilling")
+        self.store.save_credentials(order["id"], order["access_token"], "transfer", "9876")
         self.store.set_status(order["id"], "fulfilling")
         self.store.set_status(order["id"], "completed")
         with self.assertRaises(self.store.ShopError):
             self.store.set_status(order["id"], "paid")
 
     def test_wrong_access_token_cannot_read_order(self):
-        order = self.store.create_order("svc-a", "abc", "9876")
+        order = self.store.create_order("svc-a")
         self.assertIsNone(self.store.public_order(order["id"], "wrong-token"))
 
 
