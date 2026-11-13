@@ -513,6 +513,9 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
             self.order_id, execution_id, owner, lock_digest, "slot-0"
         ))
 
+        self.client.collection("executions").document(execution_id).update({
+            "log": ["legacy-inline"], "warn": ["legacy-warning"],
+        })
         large_log = [f"entry-{index}-" + ("x" * 18000) for index in range(60)]
         workflow.persist_worker_snapshot(
             execution_id, owner,
@@ -546,6 +549,19 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertEqual(len(second_chunks), 1)
         self.assertEqual(restored["worker_snapshot_revision"], first_revision + 1)
         self.assertEqual(restored["log"], ["latest"])
+        self.assertEqual(restored["warn"], [])
+        self.assertEqual(restored["report"], [])
+        self.assertEqual(restored["skipped"], [])
+
+        workflow.persist_worker_snapshot(
+            execution_id, owner,
+            {"status": "running", "step": 4, "log": [],
+             "warn": [], "report": [], "skipped": [],
+             "dry": False, "clone": False, "integrity_only": False},
+        )
+        self.assertEqual(list(chunks_ref.stream()), [])
+        restored = workflow.get_execution(execution_id)
+        self.assertEqual(restored["log"], [])
         self.assertEqual(restored["warn"], [])
         self.assertEqual(restored["report"], [])
         self.assertEqual(restored["skipped"], [])
