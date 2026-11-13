@@ -174,8 +174,10 @@ def execution_progress(order_id: str, access_token: str):
         status = "error"
     elif state == "running" and worker_status in {"running", "done", "error"}:
         status = worker_status
-    elif state in {"queued", "starting"}:
+    elif state == "queued":
         status = "queued"
+    elif state == "starting":
+        status = "running"
     else:
         status = "error"
     result = None
@@ -188,6 +190,10 @@ def execution_progress(order_id: str, access_token: str):
     return {
         "status": status,
         "step": execution.get("step", 0),
+        "total": 4,
+        "queue_position": None,
+        "slot": (int(execution["slot_id"].split("-")[1]) + 1) if execution.get("slot_id") else None,
+        "max_concurrent_jobs": 4,
         "log": execution.get("log", []),
         "warn": execution.get("warn", []),
         "report": execution.get("report", []),
@@ -460,7 +466,8 @@ def public_order(order_id: str, access_token: str):
     return {"id": row["id"], "title": row["title"], "amount": row["amount"],
             "quantity": row.get("quantity", 1), "unit_price_yen": row.get("unit_price_yen", 0),
             "status": row["status"], "credentials_submitted": bool(row["credentials_submitted"]),
-            "job_id": row.get("job_id"), "execution_id": row.get("active_execution_id"),
+            "job_id": row.get("job_id") or row.get("active_execution_id"),
+            "execution_id": row.get("active_execution_id"),
             "created": int(row["created"])}
 
 def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
