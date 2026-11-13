@@ -35,3 +35,5 @@ services:
         value: /var/data/paypay/payments.sqlite3
       - key: SHOP_DB_PATH
         value: /var/data/shop.sqlite3
+      - key: SHOP_LIVE_ORDERS_ENABLED
+        value: "0"
