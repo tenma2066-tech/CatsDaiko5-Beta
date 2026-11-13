@@ -147,6 +147,7 @@ class FirestoreWorkflowRepository:
             tx.create(outbox_ref, {
                 "task_id": execution_id, "execution_id": execution_id,
                 "order_id": order_id, "state": "pending",
+                "task_generation": 0,
                 "created": now, "updated": now,
             })
             return {"execution_id": execution_id, "task_id": execution_id}
@@ -195,7 +196,6 @@ class FirestoreWorkflowRepository:
                 "execution_id": execution_id,
                 "order_id": order_id,
                 "state": "pending",
-                "task_generation": 0,
                 "task_generation": 0,
                 "created": now,
                 "updated": now,
