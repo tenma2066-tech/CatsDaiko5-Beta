@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from google.api_core.exceptions import AlreadyExists, NotFound
 
 from shop_cloud_run_dispatcher import (
     CloudTasksOutboxPublisher,
@@ -158,6 +159,106 @@ class CloudRunDispatcherTests(unittest.TestCase):
                          "https://dispatcher.example")
         self.assertTrue(repo.marked)
         self.assertFalse(publisher.publish("exec_12345678"))
+
+    def test_cloud_tasks_already_exists_checks_task_before_acknowledging(self):
+        class Repo:
+            def __init__(self):
+                self.item = {
+                    "task_id": "exec_12345678", "execution_id": "exec_12345678",
+                    "order_id": "0123456789", "state": "pending",
+                    "task_generation": 0,
+                }
+                self.marked = False
+                self.generations = []
+
+            def get_outbox_item(self, execution_id):
+                return dict(self.item)
+
+            def advance_outbox_task_generation(self, execution_id, expected):
+                self.generations.append(expected)
+                self.item["task_generation"] = expected + 1
+                return expected + 1
+
+            def mark_task_enqueued(self, execution_id):
+                self.item["state"] = "task_enqueued"
+                self.marked = True
+
+        class Client:
+            def __init__(self):
+                self.names = []
+                self.created = 0
+
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def task_path(self, project, location, queue, task):
+                return f"projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"
+
+            def create_task(self, request):
+                self.names.append(request["task"].name)
+                self.created += 1
+                if self.created == 1:
+                    raise AlreadyExists("dedupe reservation")
+                return request["task"]
+
+            def get_task(self, request):
+                raise NotFound("task was already deleted")
+
+        repo = Repo()
+        client = Client()
+        publisher = CloudTasksOutboxPublisher(
+            client, repo, project="demo", location="asia-northeast1",
+            queue="orders", dispatcher_url="https://dispatcher.example",
+            oidc_service_account="tasks@example.iam.gserviceaccount.com",
+        )
+        self.assertTrue(publisher.publish("exec_12345678"))
+        self.assertEqual(repo.generations, [0])
+        self.assertTrue(repo.marked)
+        self.assertEqual(len(client.names), 2)
+        self.assertIn("exec-exec_12345678-g0", client.names[0])
+        self.assertIn("exec-exec_12345678-g1", client.names[1])
+
+    def test_cloud_tasks_already_exists_with_live_task_is_acknowledged(self):
+        class Repo:
+            def __init__(self):
+                self.item = {
+                    "task_id": "exec_12345678", "execution_id": "exec_12345678",
+                    "order_id": "0123456789", "state": "pending",
+                    "task_generation": 0,
+                }
+                self.marked = False
+
+            def get_outbox_item(self, execution_id):
+                return dict(self.item)
+
+            def advance_outbox_task_generation(self, execution_id, expected):
+                raise AssertionError("generation must not advance for a live task")
+
+            def mark_task_enqueued(self, execution_id):
+                self.item["state"] = "task_enqueued"
+                self.marked = True
+
+        class Client:
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def task_path(self, project, location, queue, task):
+                return f"projects/{project}/locations/{queue}/tasks/{task}"
+
+            def create_task(self, request):
+                raise AlreadyExists("task exists")
+
+            def get_task(self, request):
+                return {"name": request["name"]}
+
+        repo = Repo()
+        publisher = CloudTasksOutboxPublisher(
+            Client(), repo, project="demo", location="asia-northeast1",
+            queue="orders", dispatcher_url="https://dispatcher.example",
+            oidc_service_account="tasks@example.iam.gserviceaccount.com",
+        )
+        self.assertTrue(publisher.publish("exec_12345678"))
+        self.assertTrue(repo.marked)
 
     def test_dispatch_rejects_secret_or_extra_payload_fields(self):
         repository = FakeRepository()
