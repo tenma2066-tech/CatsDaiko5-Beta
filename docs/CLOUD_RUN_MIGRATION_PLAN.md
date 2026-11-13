@@ -1365,3 +1365,13 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はWeb/Worker Secret割当、GitHub token scopes、PayPay keyの同一性要件を再fetchして確認する。実Secret値はチャットやGitHubへ出さず、GCP Project作成時にユーザー側の安全な保管元からSecret Managerへ登録する。
+
+
+## 51. Dispatcherの内部endpoint説明をScheduler構成に統一（2026-11-13）
+
+- Dispatcher section 9にCloud Tasks `/dispatch`、Cloud Scheduler `/sweep` + `/reconcile` の両方を明記。以前はSchedulerが `/sweep` のみを呼ぶ説明で、実際の2-job構成と一致していなかった。
+- Web/Worker Secret mappingとno-site-password方針はRunbook/IAM matrixで再fetch確認済み。
+- 直前コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI/parallelはsuccess。最新docs HEAD CI/parallelは実行中。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はDispatcher endpoint説明と最新CI statusを確認する。
