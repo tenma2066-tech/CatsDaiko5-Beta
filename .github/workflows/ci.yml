@@ -81,3 +81,6 @@ jobs:
 
       - name: Firestore Emulator integration tests
         run: firebase emulators:exec --only firestore --project demo-catsdaiko5 "python -m unittest -v test_firestore_repository.py"
+
+      - name: Build Cloud Run container image
+        run: docker build --tag catsdaiko5-beta:test .
