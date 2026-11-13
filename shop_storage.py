@@ -19,7 +19,7 @@ def selected_backend() -> str:
         return "legacy"
     if backend == "firestore":
         raise ShopStorageError(
-            "Firestore注文ストレージはまだ実装されていません。"
+            "Firestore注文ストレージは統合・検証が未完了です。"
             "安全のため別の保存先へ自動切替しません。"
         )
     raise ShopStorageError("SHOP_STORAGE_BACKENDの設定値が正しくありません。")
