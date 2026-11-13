@@ -187,6 +187,34 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.client.collection("executions").document(execution_id).delete()
         self.client.collection("orders").document(self.order_id).delete()
 
+    def test_outbox_task_generation_exhaustion_moves_queued_order_to_review(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        self.assertEqual(workflow.advance_outbox_task_generation(execution_id, 0), 1)
+        self.assertEqual(workflow.advance_outbox_task_generation(execution_id, 1), 2)
+        self.assertEqual(workflow.advance_outbox_task_generation(execution_id, 2), 3)
+        workflow.mark_task_enqueued(execution_id)
+        self.assertIsNone(workflow.advance_outbox_task_generation(execution_id, 3))
+        outbox = workflow.get_outbox_item(execution_id)
+        execution = workflow.get_execution(execution_id)
+        order = self.orders.get_order(self.order_id)
+        self.assertEqual(outbox["state"], "review")
+        self.assertEqual(outbox["error_code"], "cloud_tasks_retry_exhausted")
+        self.assertEqual(execution["state"], "review")
+        self.assertFalse(execution["outcome_unknown"])
+        self.assertEqual(execution["error_code"], "cloud_tasks_retry_exhausted")
+        self.assertEqual(order["status"], "review")
+        self.assertEqual(workflow.list_pending_outbox(), [])
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("orders").document(self.order_id).delete()
+
     def test_dispatch_accepts_task_delivery_before_publish_state_commit(self):
         workflow = FirestoreWorkflowRepository(self.client)
         self.assertTrue(self.payments.claim_payment(self.order_id))
