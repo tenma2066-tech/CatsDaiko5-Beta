@@ -1352,3 +1352,16 @@ F. execution完了:
 6. GCP Project/Billing/credentialsが必要になる段階でユーザーへ具体的に案内する。実PayPay login/payment/orderは必ず事前承認を得る。
 
 次回はこのチェックポイントから再開する。
+
+
+## 50. Web/Worker Secret割当とGitHub token不足を補正（2026-11-13）
+
+- Web Service環境変数監査で、`AUTH_GITHUB_REPO` を設定しているのにGitHubPasswordStore / github_runtime_storeが必要とする `AUTH_GITHUB_TOKEN` の注入がWeb環境変数一覧から抜けていたことを確認。runtime-data read/writeと管理者認証ストアが利用できなくなるため追記。
+- `PAYPAY_ENCRYPTION_KEY` もWeb環境変数一覧に明示。現行Renderと同じ値をWeb/Worker双方へ渡す。変更・再生成禁止。
+- Secretの役割を明確化: Web=`SECRET_KEY`/`PAYPAY_ENCRYPTION_KEY`/`AUTH_GITHUB_TOKEN`（必要なら別RUNTIME token）、Worker=`PAYPAY_ENCRYPTION_KEY`/`TRANSFER_LOCK_PEPPER`、Dispatcher=Secret不要。
+- `RUNTIME_GITHUB_TOKEN` は任意で、未設定時は `AUTH_GITHUB_TOKEN` にfallback。
+- `APP_PASSWORD` は設定しない。公開ショップにサイトアクセスパスワードを要求しない方針を維持。
+- Runbook/IAM matrixのSecret割当を修正。これはdocsのみの変更。直前コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI/parallelはsuccess。最新docs HEAD CIはpending。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はWeb/Worker Secret割当、GitHub token scopes、PayPay keyの同一性要件を再fetchして確認する。実Secret値はチャットやGitHubへ出さず、GCP Project作成時にユーザー側の安全な保管元からSecret Managerへ登録する。
