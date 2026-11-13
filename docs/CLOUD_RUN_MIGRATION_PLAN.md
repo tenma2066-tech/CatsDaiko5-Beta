@@ -1140,3 +1140,18 @@ F. execution完了:
 - 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新HEADのCI/parallel regressionを確認。引き続き管理者のunknown launch復旧方法とIAMの最小権限を詰める。実GCPリソース作成、実データ移行、PayPay実ログイン・決済はユーザーの明示承認前に行わない。
+
+
+## 35. Unknown Job launchの読み取り専用Inspector追加（2026-11-13）
+
+- Cloud Run Job launch APIがタイムアウトし、Jobが受理されたか不明な場合に、Firestore上の `review/outcome_unknown` とCloud Run Execution一覧を照合する読み取り専用CLI `shop_cloud_run_recovery.py` を追加。
+- Firestore execution/outboxの整合性を先に検証し、Cloud Run Executionsを全ページ走査。Executionのcontainer argsから `--order-id` / `--execution-id` / `--slot-id` の3値が完全一致するものだけを候補として返す。
+- 出力はExecution名・作成/開始/完了時刻・task countsのみ。引継ぎコード/PIN/決済リンク等は取得・表示しない。
+- 結果は `matching_execution_found` / `multiple_matching_executions_found` / `no_matching_execution_found`。no-matchはAPI未受理の証明ではないため、どの結果でもslot/transfer lockの自動解除・Job再実行はしない。
+- `test_cloud_run_recovery.py` に完全一致、no-match、Firestore不整合、resource/ID検証テストを追加し、CI workflowへ登録。
+- Runbook section 19にCloud Shell実行例、必要な照合、no-matchの注意点を追加。
+- 直前HEAD `6c8194faa2c9a60a718378ddda760aafddb4e20b` のCI run `43442205219` は全工程success（Firestore Emulator / Docker build含む）、parallel regression `43442205366` もsuccess。
+- Inspectorコード `ed6aede40a0b8f431822c2213285d65df77da8df`、テスト `78f23bd832b3284efb0fedcad98cd2be4212da08`、CI登録 `a1fb67ce3a181c1854d9897d675148d36177634e`、runbook `e5fbc9efc1906b4c2251b2b7e68bce91fad391dc`。最新HEAD CI/parallelはこれから実行。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はInspectorのCI testと既存CIを確認。成功後、GCP service accountごとのIAM権限表、Cloud Scheduler認証、Cloud Run JobのmaxRetries=0 / task timeout / CPU・memory・max instancesを最終監査する。実GCP環境への作成・データ移行・実PayPay操作はユーザーの明示承認前に行わない。
