@@ -293,3 +293,8 @@ Firestore Execution本体には進捗メタデータのみを保存し、`log` /
 ## 17. PayPay ledger snapshotのschema確認
 
 本番migrationの `--apply` 前に、暗号化ledger snapshotの存在だけでなく、SQLite内に `links` テーブルと `digest` / `order_id` / `state` / `created` 列がすべて存在することを確認する。欠落・schema不一致の場合はFirestore書き込み前に停止する。dry-runでの調査は可能だが、空台帳としてimportを続けてはいけない。
+
+
+## 18. Worker reportのsecret redaction
+
+Workerはlog/warn/errorだけでなく、Firestoreに保存するreport/skipped配列のネストしたdict/listも再帰的にsecret redactionする。転送コード・PINなどを含む文字列を置換し、reportの構造と長さは維持する。単一itemや総chunk数がFirestore chunk上限を超える場合は自動切り捨てせずreviewへ回す。
