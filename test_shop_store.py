@@ -156,6 +156,8 @@ class ShopStoreTests(unittest.TestCase):
             self.store.create_operation_order({}, 101)
         with self.assertRaises(self.store.ShopError):
             self.store.create_operation_order({"chars": "not-a-number"}, 1)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({"chars": "1-101"}, 1)
 
     def test_operation_order_requires_valid_order_token(self):
         order = self.store.create_operation_order({"items": ["XP"]}, 1)
