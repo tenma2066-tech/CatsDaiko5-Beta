@@ -40,5 +40,19 @@ def database(name: str, local_path):
 
     import github_runtime_store
 
-    with github_runtime_store.sqlite_database(name, local_path) as connection:
-        yield connection
+    try:
+        with github_runtime_store.sqlite_database(name, local_path) as connection:
+            yield connection
+    except github_runtime_store.RuntimeStoreError as exc:
+        raise ShopStorageError(str(exc)) from exc
+
+
+def uses_remote_snapshot() -> bool:
+    """Return whether legacy persistence is configured to use GitHub snapshots."""
+    selected_backend()
+    import github_runtime_store
+
+    try:
+        return github_runtime_store.enabled()
+    except github_runtime_store.RuntimeStoreError as exc:
+        raise ShopStorageError(str(exc)) from exc
