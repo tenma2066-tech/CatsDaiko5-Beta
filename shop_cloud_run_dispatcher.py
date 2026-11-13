@@ -31,9 +31,9 @@ class CloudTasksOutboxPublisher:
         self._client = client
         self._repository = repository
         self._parent = client.queue_path(project, location, queue)
-        self._dispatcher_url = dispatcher_url
+        self._dispatcher_url = dispatcher_url.rstrip("/") + "/dispatch"
         self._service_account = oidc_service_account
-        self._audience = audience or dispatcher_url
+        self._audience = audience or dispatcher_url.rstrip("/")
         self._project, self._location, self._queue = project, location, queue
 
     def publish_pending(self, limit: int = 100) -> dict[str, int]:
