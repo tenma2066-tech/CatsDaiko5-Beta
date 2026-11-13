@@ -45,3 +45,15 @@ Obtain a supported, trusted Japanese egress endpoint under the user's or a trust
 ## Status
 
 Investigation and implementation boundary documented. No application code changed because the required trusted, supported Japanese egress endpoint is not available yet. This avoids shipping a fake or unsafe VPN integration and preserves the original site.
+
+## Additional no-card option checked after confirming RAKULINK is unavailable
+
+- Checked WireCanal's official product and pricing pages. Its free tier is advertised as $0, no credit card, one canal, with access protection. Its agent runs on a Windows/Linux machine inside the Japanese network and opens an outbound tunnel to WireCanal's Japan edge.
+- Important limitation: raw TCP canals (the feature needed for a conventional TCP proxy) are Pro and above. The free tier is described as HTTP/MCP, not a general TCP tunnel. A custom HTTP egress bridge might be possible, but it would be a separate service on an always-on Japanese PC and would place request traffic through a third-party TLS-terminating edge. This is not approved as a route for PayPay credentials without a careful vendor/security review.
+- WireCanal is a tunnel/publishing service, not a ready-made Japanese outbound proxy. Its Japan relay edge alone does not mean outbound requests from Render will leave through a Japanese residential/ISP IP.
+- A self-hosted Japanese home gateway would require an always-on Windows/Linux/Raspberry Pi machine and a secure, supported tunnel path. No such device has been confirmed available. An iPhone app alone is not a reliable always-on server-side egress host.
+- VPN Gate remains unsuitable for PayPay secrets because its official anti-abuse policy records connection metadata and retains connection logs for at least three months; relay operators are volunteers. Do not use it for PayPay login/payment credentials.
+
+## Updated decision
+
+No code change. Do not wire WireCanal free HTTP canal, VPN Gate, or an arbitrary public proxy into paypay_gateway.py as if it were a trusted, general-purpose Japan egress route. Keep the site untouched and SHOP_LIVE_ORDERS_ENABLED=0. A real implementation still requires either (a) a user-controlled always-on Japanese Windows/Linux host plus an appropriately secured tunnel/forwarder, or (b) a trusted provider that explicitly supplies a server-side Japanese HTTPS/SOCKS proxy endpoint with suitable security guarantees.
