@@ -1,8 +1,8 @@
-"""Firestore workflow primitives for Cloud Run task/job orchestration.
+"""Firestore workflow primitives used by the opt-in Cloud Run checkout backend.
 
-This module is intentionally not wired into the live checkout path yet. It
-contains transaction boundaries that can be exercised against Firestore
-Emulator before enabling the Firestore backend.
+The Firestore backend is selected explicitly through SHOP_STORAGE_BACKEND and
+fails closed when unavailable. Keep the legacy SQLite/GitHub snapshot path
+unchanged until the isolated Cloud Run environment is validated and approved.
 """
 from __future__ import annotations
 
