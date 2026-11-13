@@ -423,7 +423,14 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str, *, exter
                 raise PayPayError("link_network", "PayPayリンク確認で通信エラーが発生しました。") from None
             verified=_verify_link(body,amount)
             digest=hashlib.sha256(code.encode()).hexdigest()
-            if not external_ledger:
+            if external_ledger:
+                # Preserve duplicate protection for links recorded before the
+                # Firestore migration. The GitHub-backed legacy ledger is read-only
+                # in this mode; new attempts are written only to Firestore.
+                with _ledger() as db:
+                    if db.execute("SELECT 1 FROM links WHERE digest=?", (digest,)).fetchone():
+                        raise PayPayError("duplicate", "このPayPayリンクは移行前に使用されています。")
+            else:
                 with _ledger() as db:
                     try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
                     except sqlite3.IntegrityError:
