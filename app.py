@@ -1280,7 +1280,7 @@ async function refreshProgress(){
   const j=await r.json(),box=document.getElementById('job-progress');
   box.hidden=false;
   document.getElementById('job-state').textContent='処理状態：'+(j.status||j.job_status||'確認中')+(j.queue_position?'（待機 '+j.queue_position+' 番目）':'');
-  document.getElementById('job-log').textContent=(j.log||[]).join('\\n')+(j.error?'\\n'+j.error:'');
+  document.getElementById('job-log').textContent=(j.log||[]).join('\n')+(j.error?'\n'+j.error:'');
   if(j.status==='done')document.getElementById('status').textContent='処理完了';
   if(j.status==='error')document.getElementById('status').textContent='処理エラー：管理者へお問い合わせください';
  }catch(e){}
@@ -2259,7 +2259,6 @@ function refresh(){
   const bm=$('#integrity').checked?'保全チェック（決済後に引継ぎ情報入力）':$('#clone').checked?'アカウント複製（決済後に引継ぎ情報入力）':'PayPay決済後に引継ぎ情報入力';
   $('#mode').innerHTML=m; $('#barmode').textContent=bm;
   $('#total').textContent='選択 '+total+'件';
-  if(!t===!c) $('#inputErr').textContent='';
   renderExtras(pc,qm,total,bm);
   return total;
 }
@@ -2276,8 +2275,6 @@ $('#chars').addEventListener('input',refresh);
 $('#charClear').addEventListener('click',()=>{$('#chars').value=''; refresh();});
 $('#qfill').addEventListener('click',()=>{$$('input.q').forEach(e=>e.value=e.dataset.max); refresh();});
 $('#qclear').addEventListener('click',()=>{$$('input.q').forEach(e=>e.value=''); refresh();});
-$('#transfer').addEventListener('input',refresh);
-$('#confirm').addEventListener('input',refresh);
 $$('[data-all]').forEach(b=>b.addEventListener('click',()=>{
   $$('input[name='+b.dataset.all+']').forEach(e=>e.checked=b.dataset.v==='1'); refresh();
 }));
@@ -2398,8 +2395,6 @@ function goLabel(){ return $('#integrity').checked?($('#dry').checked?'保全チ
 function renderChecks(pc,qm,total){
   const L=[]; const add=(lv,t)=>L.push([lv,t]);
   if($('#clone').checked){
-    const t0=$('#transfer').value.trim(), c0=$('#confirm').value.trim();
-    if(!t0||!c0) add('bad','複製には、引継ぎコードと暗証番号の両方が必要です。');
     add('ok','複製モード：元セーブを別インスタンスに読み込み、複製側に新しい問い合わせコードを割り当てます。');
     if($('#dry').checked) add('ok','試運転：取得できるかだけ確認します。コードは発行しません。');
     const ul0=$('#checks'); ul0.textContent='';
@@ -2439,8 +2434,6 @@ function renderChecks(pc,qm,total){
     const ex=pc.nums.filter(n=>ERRNUMS.includes(n));
     if(ex.length) add('warn','エラーキャラになる番号は自動で除外します：'+compress(ex));
   }
-  const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
-  if(!t!==!c) add('bad','引継ぎコードと暗証番号が片方だけです。');
   if(total===0&&!pc.err) add('warn','まだ項目が選ばれていません。');
   if($('#dry').checked) add('ok','試運転：コードは発行せず、変更内容だけ確認します。');
   if(!L.some(x=>x[0]!=='ok')) add('ok','問題は見つかりませんでした。');
