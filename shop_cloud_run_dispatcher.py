@@ -146,6 +146,11 @@ def handle_dispatch_payload(payload: dict[str, Any], repository, job_launcher) -
         raise ValueError("invalid dispatcher payload")
     order_id, execution_id = payload["order_id"], payload["execution_id"]
     build_task_payload(order_id, execution_id)
+    # The queue body is not authoritative: bind it to the immutable order ID
+    # stored in the transactional outbox before reserving a worker slot.
+    outbox = repository.get_outbox_item(execution_id)
+    if not outbox or outbox.get("order_id") != order_id:
+        raise ValueError("dispatcher order/execution binding mismatch")
     claim = repository.begin_dispatch(execution_id)
     if claim is None:
         return {"state": "duplicate_or_already_claimed"}
