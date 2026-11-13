@@ -418,6 +418,48 @@ class FirestoreWorkflowRepository:
 
         finish(transaction)
 
+    def get_execution(self, execution_id: str) -> dict[str, Any] | None:
+        snapshot = self._executions.document(execution_id).get()
+        return snapshot.to_dict() if snapshot.exists else None
+
+    def persist_worker_snapshot(
+        self, execution_id: str, owner: str, snapshot: dict[str, Any],
+        result_enc: bytes | None = None,
+    ) -> None:
+        reference = self._executions.document(execution_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def persist(tx):
+            current = reference.get(transaction=tx)
+            if not current.exists or current.to_dict().get("owner") != owner:
+                raise WorkflowStateError("execution owner mismatch")
+            if current.to_dict().get("state") != "running":
+                raise WorkflowStateError("execution is not running")
+            data = {
+                "worker_status": str(snapshot.get("status") or "running")[:24],
+                "step": max(0, min(int(snapshot.get("step") or 0), 4)),
+                "log": list(snapshot.get("log") or [])[-60:],
+                "warn": list(snapshot.get("warn") or [])[-100:],
+                "report": list(snapshot.get("report") or [])[-200:],
+                "skipped": list(snapshot.get("skipped") or [])[:100],
+                "dry": bool(snapshot.get("dry")),
+                "clone": bool(snapshot.get("clone")),
+                "integrity_only": bool(snapshot.get("integrity_only")),
+                "error": str(snapshot.get("error") or "")[:500],
+                "outcome_unknown": bool(snapshot.get("outcome_unknown")),
+                "updated": self._clock(),
+            }
+            if result_enc is not None:
+                data["result_enc"] = result_enc
+            if snapshot.get("finished") is not None:
+                data["worker_finished"] = snapshot.get("finished")
+            if snapshot.get("audit") is not None:
+                data["audit"] = snapshot["audit"]
+            tx.update(reference, data)
+
+        persist(transaction)
+
     def save_otp_session(
         self, session_id: str, encrypted_state: str, expires_at: float,
     ) -> None:
