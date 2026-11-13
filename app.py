@@ -1513,14 +1513,7 @@ def shop_paypay_submit(order_id):
             shop_store.transition_payment_attempt(order_id, digest, "paid")
             return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。引継ぎ情報を入力できます。")
         except paypay_gateway.PayPayError as exc:
-            if exc.code == "temporary_hold":
-                state = "pending"
-            elif exc.code == "accept_uncertain":
-                state = "outcome_unknown"
-            elif exc.code in {"accept_unconfirmed", "duplicate"}:
-                state = "review"
-            else:
-                state = "rejected"
+            state = paypay_gateway.payment_failure_state(exc.code)
             try:
                 shop_store.transition_payment_attempt(order_id, digest, state, exc.code)
             except shop_store.ShopError:
