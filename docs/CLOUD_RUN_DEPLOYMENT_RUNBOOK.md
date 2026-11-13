@@ -106,9 +106,9 @@ Cloud Run Jobs起動には `roles/run.jobsExecutorWithOverrides` が必要。通
 - `TRANSFER_LOCK_PEPPER`: 新規生成したBase64ランダム値（32 bytes以上）。
 - `AUTH_GITHUB_TOKEN`: 現行BetaのGitHub認証ストアに必要な最小権限token。
 - `RUNTIME_GITHUB_TOKEN`: 現行runtime-data保存に必要な最小権限token。構成上AUTH tokenと共用する場合も権限範囲を確認する。
-- `APP_PASSWORD`: 現行Betaで実際に利用している場合のみ。
+- `APP_PASSWORD` は設定しない。公開ショップにサイトアクセスパスワードを要求しない。
 
-Cloud Run Web/JobのサービスIDに、必要なSecretだけを読める権限を付ける。値を環境変数の平文やDocker build argsへ書かない。
+Secretの割当は次のとおり。Web Service: `SECRET_KEY`、現行と同じ `PAYPAY_ENCRYPTION_KEY`、`AUTH_GITHUB_TOKEN`、必要なら別個の `RUNTIME_GITHUB_TOKEN`。Worker Job: 同じ `PAYPAY_ENCRYPTION_KEY` と `TRANSFER_LOCK_PEPPER`。Dispatcher Service: Secret不要。値を環境変数の平文やDocker build argsへ書かない。
 
 ## 7. コンテナをビルド
 
@@ -170,6 +170,9 @@ Web Serviceは公開アクセスを許可するが、注文受付は停止した
 - `CLOUD_RUN_DISPATCHER_AUDIENCE`
 - `CLOUD_TASKS_SERVICE_ACCOUNT`
 - `AUTH_GITHUB_REPO=tenma2066-tech/CatsDaiko5-Beta`
+- `AUTH_GITHUB_TOKEN`（Secret Manager。GitHub auth/password storeとruntime-dataの読み書きに必要）
+- `RUNTIME_GITHUB_TOKEN`（任意。未設定ならAUTH_GITHUB_TOKENを使用）
+- `PAYPAY_ENCRYPTION_KEY`（Secret Manager。現行の暗号化キーと同一値）
 - `RUNTIME_GITHUB_REPO=tenma2066-tech/CatsDaiko5-Beta`
 - `RUNTIME_GITHUB_BRANCH=runtime-data`
 - `RUNTIME_GITHUB_PREFIX=runtime`
@@ -178,7 +181,7 @@ Web Serviceは公開アクセスを許可するが、注文受付は停止した
 - `SHOP_DB_PATH=/tmp/shop.sqlite3`（Firestore選択時は使用しない）
 - 現行と同じ `SHOP_CATALOG_JSON`（使用している場合）
 
-Webはmin instances 0、max instances 1で開始する。max 1はGitHub runtime-dataを使うPayPayアカウント・旧台帳の単一writer制約を守るため。安定した `SECRET_KEY` をSecret Managerから設定する。
+Webはmin instances 0、max instances 1で開始する。max 1はGitHub runtime-dataを使うPayPayアカウント・旧台帳の単一writer制約を守るため。安定した `SECRET_KEY` をSecret Managerから設定する。`APP_PASSWORD` は設定せず、サイトアクセスパスワードを要求しない。
 
 ## 11. Outbox回復
 
