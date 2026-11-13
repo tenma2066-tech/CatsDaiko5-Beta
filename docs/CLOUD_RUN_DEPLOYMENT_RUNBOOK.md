@@ -305,9 +305,13 @@ Workerはlog/warn/errorだけでなく、Firestoreに保存するreport/skipped�
 
 Dispatcherの `run_job` 呼び出しがタイムアウトすると、Cloud Run側でJobが受理されたかどうか分からないまま、Firestoreは `review / outcome_unknown` になる。この場合はslotとtransfer lockを保持し、自動再実行しない。
 
-Cloud Shell等でADCを用意し、読み取り専用の調査コマンドを実行できる。
+Cloud Shell等で対象branchをcheckoutし、ADCを用意してから読み取り専用の調査コマンドを実行する。必要なIAMは [Cloud Run IAM matrix](CLOUD_RUN_IAM_MATRIX.md) のInspector用read-only権限を参照。
 
 ```bash
+git clone https://github.com/tenma2066-tech/CatsDaiko5-Beta.git
+cd CatsDaiko5-Beta
+git checkout feature/cloud-run-firestore-foundation
+python -m pip install -r requirements.txt
 python shop_cloud_run_recovery.py \
   --execution-id "exec_..." \
   --job-resource "projects/PROJECT_ID/locations/asia-northeast1/jobs/WORKER_JOB"
