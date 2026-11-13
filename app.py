@@ -1332,6 +1332,35 @@ def shop_order_status(order_id):
 def shop_submit_credentials(order_id):
     data = request.get_json(silent=True) or {}
     key = data.get("key", "")
+    if shop_store.uses_firestore():
+        order = shop_store.public_order(order_id, key)
+        if not order:
+            return jsonify(error="注文が見つかりません。"), 404
+        if order.get("job_id"):
+            return jsonify(error="この注文は既に処理開始済みです。"), 409
+        operation = shop_store.operation_payload(order_id, key)
+        if not operation:
+            return jsonify(error="注文が見つかりません。"), 404
+        transfer_code = data.get("transfer_code", "")
+        pin = data.get("pin", "")
+        if (operation.get("clone") or operation.get("integrity_only")) and not (transfer_code and pin):
+            return jsonify(error="複製・保全チェックには既存セーブの引継ぎコードと暗証番号が必要です。"), 400
+        try:
+            shop_store.save_credentials(order_id, key, transfer_code, pin)
+            execution_id = shop_store.enqueue_execution(order_id, key)
+            try:
+                published = shop_store.publish_execution(execution_id)
+            except shop_store.ShopError:
+                published = False
+                app.logger.warning("Cloud Tasks publication pending for order %s", order_id)
+            message = (
+                "引継ぎ情報を受け付け、処理を開始しました。"
+                if published else
+                "引継ぎ情報を受け付けました。処理の起動待ちです。画面を開いたままにしてください。"
+            )
+            return jsonify(ok=True, job=execution_id, message=message)
+        except shop_store.ShopError as exc:
+            return jsonify(error=str(exc)), 409
     claimed = False
     try:
         order = shop_store.public_order(order_id, key)
@@ -1384,6 +1413,19 @@ def shop_order_progress(order_id):
     order = shop_store.public_order(order_id, key)
     if not order:
         return jsonify(error="注文が見つかりません。"), 404
+    if shop_store.uses_firestore():
+        execution_id = order.get("execution_id")
+        if not execution_id:
+            return jsonify(status=order["status"], job_status="not_started")
+        if order.get("status") == "paid" and order.get("job_id") == "queued":
+            try:
+                shop_store.publish_execution(execution_id)
+            except shop_store.ShopError:
+                pass
+        progress = shop_store.execution_progress(order_id, key)
+        if progress is None:
+            return jsonify(error="処理状況を取得できません。"), 404
+        return jsonify(progress)
     job_id = order.get("job_id")
     if not job_id or job_id == "starting":
         return jsonify(status=order["status"], job_status="not_started")
@@ -1417,9 +1459,14 @@ def shop_order_progress(order_id):
 @app.post("/api/shop/order/<order_id>/cancel")
 def shop_order_cancel(order_id):
     data = request.get_json(silent=True) or {}
-    order = shop_store.public_order(order_id, data.get("key", ""))
+    key = data.get("key", "")
+    order = shop_store.public_order(order_id, key)
     if not order:
         return jsonify(error="注文が見つかりません。"), 404
+    if shop_store.uses_firestore():
+        if shop_store.cancel_queued_execution(order_id, key):
+            return jsonify(ok=True, status="cancelled")
+        return jsonify(error="処理がすでに起動中、またはキャンセルできない状態です。"), 409
     job_id = order.get("job_id")
     if not job_id or job_id == "starting":
         return jsonify(error="待機中の処理が見つかりません。"), 404
