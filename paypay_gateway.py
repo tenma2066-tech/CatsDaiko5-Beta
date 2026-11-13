@@ -92,6 +92,31 @@ def _pending_otp_load():
     return value
 
 
+def _pending_otp_consume():
+    """Atomically take the pending OTP state so concurrent submissions cannot replay it."""
+    repository = _otp_repository()
+    if repository is None:
+        with _LOCK:
+            if not _pending_otp:
+                return {}
+            value = dict(_pending_otp)
+            _pending_otp.clear()
+            return value
+    try:
+        encrypted = repository.consume_otp_session(_OTP_SESSION_ID)
+    except Exception as exc:
+        raise PayPayError("otp_store", "SMS認証状態を安全に取得できません。") from exc
+    if not encrypted:
+        return {}
+    try:
+        value = json.loads(_cipher().decrypt(encrypted.encode("ascii")))
+    except Exception as exc:
+        raise PayPayError("otp_store", "保存済みSMS認証状態を読み取れません。") from exc
+    if not isinstance(value, dict):
+        raise PayPayError("otp_store", "保存済みSMS認証状態が不正です。")
+    return value
+
+
 def _pending_otp_clear():
     repository = _otp_repository()
     if repository is None:
@@ -270,11 +295,11 @@ async def begin_login(phone: str, password: str):
 
 async def finish_login(otp: str):
     _cipher()
-    p = _pending_otp_load()
-    if not p:
-        raise PayPayError("otp_expired", "SMS認証の有効期限が切れました。最初からログインしてください。")
     if not OTP_RE.fullmatch(otp or ""):
         raise PayPayError("otp_format", "SMS認証コードは4桁で入力してください。")
+    p = _pending_otp_consume()
+    if not p:
+        raise PayPayError("otp_expired", "SMS認証の有効期限が切れました。最初からログインしてください。")
     result = await _oauth({"scope":"SIGN_IN","grant_type":"otp","client_uuid":p["uuid"],
                            "otp":otp,"otp_prefix":p["otp_prefix"],
                            "otp_reference_id":p["otp_reference_id"],
