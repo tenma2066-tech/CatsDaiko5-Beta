@@ -149,7 +149,7 @@ def _build_arguments(app_module, operation: dict, credentials: dict):
         qty[key] = number
 
     dry = bool(data.get("dry", False))
-    safe = bool(data.get("safe", True))
+    safe = False if integrity_only else bool(data.get("safe", True))
     skipped = []
     if safe:
         skipped = [value for value in app_module.HIGH_RISK_ITEMS if value in items or value in qty]
