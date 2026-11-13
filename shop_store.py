@@ -474,6 +474,19 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
     allowed = {"paid", "review", "fulfilling", "completed", "cancelled"}
     if status not in allowed:
         raise ShopError("不正な注文状態です。")
+    if uses_firestore():
+        if status in {"fulfilling", "completed"}:
+            raise ShopError("Firestore環境では処理状態はCloud Run Workerが確定します。")
+        row = _row(order_id)
+        digest = payment_digest or (row.get("payment_digest") if row else None)
+        if status == "paid" and digest:
+            try:
+                _payment_repository.transition_payment_attempt(
+                    order_id, digest, "paid", note or "admin_confirmed"
+                )
+                return
+            except PaymentRepositoryError as exc:
+                raise ShopError(str(exc)) from exc
     try:
         _order_repository.set_status(
             order_id, status, payment_digest=payment_digest, note=note
