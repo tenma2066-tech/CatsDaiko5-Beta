@@ -12,6 +12,8 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
+import github_runtime_store
+
 DB_PATH = Path(os.environ.get("SHOP_DB_PATH", "instance/shop.sqlite3"))
 ORDER_ID_RE = re.compile(r"^[A-Z0-9]{10}$")
 DEFAULT_CATALOG = [
@@ -34,33 +36,27 @@ def _cipher():
 
 @contextmanager
 def _db():
-    DB_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH, timeout=20)
-    con.row_factory = sqlite3.Row
     try:
-        con.execute("PRAGMA busy_timeout=20000")
-        con.execute("""CREATE TABLE IF NOT EXISTS orders (
-            id TEXT PRIMARY KEY, access_hash TEXT NOT NULL, sku TEXT NOT NULL,
-            title TEXT NOT NULL, amount INTEGER NOT NULL, credential_enc BLOB NOT NULL,
-            status TEXT NOT NULL, payment_digest TEXT UNIQUE, payment_note TEXT,
-            created REAL NOT NULL, updated REAL NOT NULL
-        )""")
-        columns = {row[1] for row in con.execute("PRAGMA table_info(orders)")}
-        if "credentials_submitted" not in columns:
-            con.execute("ALTER TABLE orders ADD COLUMN credentials_submitted INTEGER NOT NULL DEFAULT 0")
-        if "quantity" not in columns:
-            con.execute("ALTER TABLE orders ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
-        if "unit_price_yen" not in columns:
-            con.execute("ALTER TABLE orders ADD COLUMN unit_price_yen INTEGER NOT NULL DEFAULT 0")
-            con.execute("UPDATE orders SET unit_price_yen=amount WHERE quantity=1")
-        os.chmod(DB_PATH, 0o600)
-        yield con
-        con.commit()
-    except Exception:
-        con.rollback()
-        raise
-    finally:
-        con.close()
+        with github_runtime_store.sqlite_database("shop.sqlite3", DB_PATH) as con:
+            con.execute("""CREATE TABLE IF NOT EXISTS orders (
+                id TEXT PRIMARY KEY, access_hash TEXT NOT NULL, sku TEXT NOT NULL,
+                title TEXT NOT NULL, amount INTEGER NOT NULL, credential_enc BLOB NOT NULL,
+                status TEXT NOT NULL, payment_digest TEXT UNIQUE, payment_note TEXT,
+                created REAL NOT NULL, updated REAL NOT NULL
+            )""")
+            columns = {row[1] for row in con.execute("PRAGMA table_info(orders)")}
+            if "credentials_submitted" not in columns:
+                con.execute("ALTER TABLE orders ADD COLUMN credentials_submitted INTEGER NOT NULL DEFAULT 0")
+            if "quantity" not in columns:
+                con.execute("ALTER TABLE orders ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
+            if "unit_price_yen" not in columns:
+                con.execute("ALTER TABLE orders ADD COLUMN unit_price_yen INTEGER NOT NULL DEFAULT 0")
+                con.execute("UPDATE orders SET unit_price_yen=amount WHERE quantity=1")
+            if not github_runtime_store.enabled():
+                os.chmod(DB_PATH, 0o600)
+            yield con
+    except github_runtime_store.RuntimeStoreError as exc:
+        raise ShopError(str(exc)) from exc
 
 def catalog():
     raw = os.environ.get("SHOP_CATALOG_JSON", "").strip()
