@@ -96,6 +96,9 @@ class CloudRunDispatcherTests(unittest.TestCase):
         operation = launcher.launch("0123456789", "exec_12345678", "slot-0")
         args = client.request["overrides"]["container_overrides"][0]["args"]
         self.assertEqual(operation, "operations/123")
+        self.assertEqual(client.request["overrides"]["container_overrides"][0]["command"], [
+            "python", "shop_cloud_run_worker.py",
+        ])
         self.assertEqual(args, [
             "--order-id", "0123456789",
             "--execution-id", "exec_12345678",
