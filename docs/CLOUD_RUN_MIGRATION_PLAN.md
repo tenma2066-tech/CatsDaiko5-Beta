@@ -760,3 +760,39 @@ F. execution完了:
 - SHOP_LIVE_ORDERS_ENABLED の有効化。
 
 次の作業は、Repository契約とSQLite互換アダプターの設計・実装。Firestore接続情報がない状態でも既存SQLiteテストを維持できる形で進める。
+## 19. Phase 2実装チェックポイント：保存先選択と決済Repository抽出（2026-11-13）
+
+### 19.1 実装内容
+
+- shop_storage.py を追加し、注文DBの保存先選択を一箇所に集約した。
+- SHOP_STORAGE_BACKEND の既定値は legacy。現在のSQLite + 任意のGitHub暗号化スナップショット経由を維持する。Render側に新しい環境変数を追加しなくても従来動作を保つ。
+- SHOP_STORAGE_BACKEND=firestore はFirestoreアダプターが完成するまで明示的にエラーにし、SQLiteやGitHub保存先へ黙ってフォールバックしない。
+- 未知のバックエンド値もエラーにする。GitHub Runtime Storeの例外はストレージ境界で ShopStorageError に統一する。
+- shop_payment_repository.py を追加し、PaymentRepository Protocolと現行SQLの SQLitePaymentRepository を分離した。
+- claim_payment / release_payment / complete_payment は shop_store.py からRepositoryへ委譲する。既存の条件付きUPDATE、BEGIN IMMEDIATE、決済後状態確定エラーを維持する。
+- test_shop_store.py にFirestore未実装時のfail-closedと未知バックエンド拒否テストを追加し、テストごとにlegacy backendを明示する。
+
+### 19.2 CI検証
+
+- Draft PR #9: https://github.com/tenma2066-tech/CatsDaiko5-Beta/pull/9
+- GitHub Actions CI run 43429994230（初回ストレージ境界実装）: success。
+- GitHub Actions CI run 43430175204（決済Repository抽出を含む最新コード）: success。
+- 最新runでは依存関係インストール、BCSFE API互換性、Application self-test、Save audit/repair、Parallel、Improvement、Character customization、GitHub auth/runtime store、PayPay gateway、Shop store tests がすべて成功。
+- CIはGitHub Actions上で実行済み。Cloud Run/Firestore Emulatorでの統合テストはまだ未実施。
+
+### 19.3 現在のGitHub状態
+
+- 作業ブランチ: feature/cloud-run-firestore-foundation。
+- PR #9はDraft / open / not merged。mainへは未反映。
+- 最新ブランチHEAD: 0697751e4ab816a87ce33b86dcd9761e33c5da28。
+- 変更対象は shop_storage.py、shop_payment_repository.py、shop_store.py、test_shop_store.py、本計画書。
+
+### 19.4 未実施・安全状態
+
+- Firestore adapter、注文全体のRepository抽出、Cloud Tasks outbox、実行claim/slot lease/transfer lock、Job entrypointは未実装。
+- GCP project/billing/IAM/Secret Manager/Firestore/Cloud Tasks/Cloud Runは未作成。
+- Render設定・デプロイ・runtime-data・PayPay認証/決済データは変更していない。
+- PayPay実ログイン・実決済・実注文は実施していない。
+- SHOP_LIVE_ORDERS_ENABLED=0 は維持。CatsDaiko5安定版とBeta mainは変更していない。
+
+次の作業は、注文作成・資格情報保存・実行claimを順番にRepositoryへ抽出し、Firestore transaction adapterに必要な原子操作を明確化する。SQLite互換テストを継続し、Cloud Run用バックエンドが未完成の間はlegacy以外を拒否する。
