@@ -179,11 +179,13 @@ def run(body, wait=6.0):
 
 
 print("\n[1] ログインと画面")
-check("未ログインは / がログインへ", c.get("/").status_code == 302)
+check("未ログインでも / は公開ショップへ", c.get("/").headers.get("Location", "").endswith("/shop"))
+check("未ログインは /console がログインへ", c.get("/console").status_code == 302)
+check("公開ショップは未ログインで表示", c.get("/shop").status_code == 200)
 check("未ログインは API が401", c.get("/api/cats").status_code == 401)
 check("パスワード違いは入れない", c.post("/login", data={"password": "x"}).status_code == 200)
 check("ログインできる", c.post("/login", data={"password": "pw"}).status_code == 302)
-html = c.get("/").get_data(as_text=True)
+html = c.get("/console").get_data(as_text=True)
 check("7つのタブ+状況が出る", html.count('role="tab"') == 7, html.count('role="tab"'))
 for needle in ('id="safe"', 'id="dry"', 'id="clone"', 'id="integrity"', 'id="checks"', 'id="cs"', 'id="chars"', 'id="rep"', 'window.confirm'):
     check("画面に " + needle, needle in html)
