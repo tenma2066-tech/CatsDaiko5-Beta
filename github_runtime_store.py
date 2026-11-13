@@ -114,7 +114,7 @@ def _read_remote(name: str):
     try:
         encoded = response.get("content", "").replace("\n", "")
         raw = base64.b64decode(encoded, validate=True)
-        if len(raw) > 8_000_000:
+        if len(raw) > 900_000:
             raise ValueError("oversized")
         sha = response.get("sha")
         if not isinstance(sha, str) or not sha:
@@ -146,8 +146,8 @@ def write_blob(name: str, raw: bytes):
     cfg = _config()
     if cfg is None:
         raise RuntimeStoreError("GitHubランタイム保存が設定されていません。")
-    if not isinstance(raw, bytes) or len(raw) > 6_000_000:
-        raise RuntimeStoreError("保存データのサイズが上限を超えています。")
+    if not isinstance(raw, bytes) or len(raw) > 900_000:
+        raise RuntimeStoreError("GitHub Contents APIで安全に扱える保存サイズ（900KB）を超えています。")
     repo, token, branch, prefix = cfg
     path = prefix + "/" + name.lstrip("/")
     url, _ = _url(path)
