@@ -138,7 +138,7 @@ WorkerはCloud Run標準環境変数 `CLOUD_RUN_EXECUTION` を実行ownerとし�
 
 ## 9. 非公開Dispatcher Service
 
-同じイメージを使い、command `python`、args `shop_cloud_run_dispatcher_service.py` で起動する。
+同じイメージを使い、Flaskの開発サーバーではなくGunicornで起動する。Cloud Runのcommandを `gunicorn`、argsを `--workers 1 --threads 4 --bind 0.0.0.0:$PORT shop_cloud_run_dispatcher_service:app` にする。Dockerfile既定CMDはWeb用のため、Dispatcher Serviceでは明示的にoverrideする。
 
 環境変数:
 
