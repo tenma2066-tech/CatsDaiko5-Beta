@@ -23,7 +23,7 @@ class GitHubRuntimeStoreTests(unittest.TestCase):
         self.get = store._read_remote
         self.request = store._request
 
-        def read(name):
+        def read(name, **kwargs):
             return self.remote.get(name), self.sha.get(name)
 
         def request(method, url, token, payload=None):
