@@ -28,12 +28,14 @@ _GITHUB_WRITE_LOCK = threading.RLock()
 
 def _config():
     repo = os.environ.get("RUNTIME_GITHUB_REPO", "").strip()
+    # A token used only by the separate password store must not implicitly
+    # switch local development to GitHub runtime persistence.
+    if not repo:
+        return None
     token = os.environ.get("RUNTIME_GITHUB_TOKEN", "").strip() or os.environ.get("AUTH_GITHUB_TOKEN", "").strip()
     branch = os.environ.get("RUNTIME_GITHUB_BRANCH", "runtime-data").strip()
     prefix = os.environ.get("RUNTIME_GITHUB_PREFIX", "runtime").strip("/")
-    if not repo and not token:
-        return None
-    if not repo or not token or not branch or not prefix:
+    if not token or not branch or not prefix:
         raise RuntimeStoreError("GitHubランタイム保存の設定が不足しています。")
     if "/" not in repo or len(repo.split("/")) != 2:
         raise RuntimeStoreError("RUNTIME_GITHUB_REPO は owner/repository 形式にしてください。")
