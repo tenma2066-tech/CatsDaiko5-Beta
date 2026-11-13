@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from shop_cloud_run_worker import _build_arguments, _redact
+from shop_cloud_run_worker import _build_arguments, _redact, _redact_nested
 from shop_firestore_workflow import transfer_lock_id
 
 
@@ -55,6 +55,19 @@ class CloudRunWorkerTests(unittest.TestCase):
         self.assertEqual(arguments[2:5], ([], [], []))
         self.assertTrue(metadata["clone"])
         self.assertTrue(metadata["dry"])
+
+    def test_nested_report_and_skipped_values_are_redacted_without_truncation(self):
+        source = {
+            "message": "transfer-code-xyz",
+            "nested": ["pin=1234", {"value": "keep-" + ("x" * 600)}],
+        }
+        self.assertEqual(
+            _redact_nested(source, ("transfer-code-xyz", "1234")),
+            {
+                "message": "[REDACTED]",
+                "nested": ["pin=[REDACTED]", {"value": "keep-" + ("x" * 600)}],
+            },
+        )
 
     def test_execution_owner_requires_cloud_run_identity(self):
         from shop_cloud_run_worker import _execution_owner
