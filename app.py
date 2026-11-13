@@ -42,7 +42,12 @@ CAT_NAMES_CACHE_SCHEMA = 2
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "") or secrets.token_urlsafe(32)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    # Spawned worker processes must derive the same session and transfer-lock key.
+    _secret_key = secrets.token_hex(32)
+    os.environ["SECRET_KEY"] = _secret_key
+app.secret_key = _secret_key
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 if os.environ.get("AUTH_GITHUB_REPO") or os.environ.get("AUTH_GITHUB_TOKEN"):
     password_store = GitHubPasswordStore(
