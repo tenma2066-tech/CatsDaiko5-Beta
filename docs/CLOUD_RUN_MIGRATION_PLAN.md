@@ -1155,3 +1155,15 @@ F. execution完了:
 - 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はInspectorのCI testと既存CIを確認。成功後、GCP service accountごとのIAM権限表、Cloud Scheduler認証、Cloud Run JobのmaxRetries=0 / task timeout / CPU・memory・max instancesを最終監査する。実GCP環境への作成・データ移行・実PayPay操作はユーザーの明示承認前に行わない。
+
+
+## 36. Operation保存後にExecution名が欠ける曖昧起動をreview化（2026-11-13）
+
+- Reconcilerは `starting` でCloud Run Execution名がない状態を600秒後にunknown扱いにするが、`mark_dispatch_unknown()` がoutbox `launching` のみを受け付けていたため、`mark_dispatch_started()` が成功してoutbox `dispatched` / operation_name保存済み / execution_name=Noneとなったケースではreview遷移できない不整合を発見。
+- `mark_dispatch_unknown()` は `launching` と `dispatched` の両状態を受け付けるよう変更。Execution名欠損またはJob API応答不明をreview/outcome_unknownへ進める。予約slotは解放しない。
+- Firestore Emulator test `test_unknown_dispatch_after_operation_persist_but_without_execution_name` を追加。operation_nameを保持したままexecution/outbox/orderをreviewへ移し、slotがreservedのままであることを確認。
+- Inspector CLIはoutbox/executionがoutcome_unknownであることを確認してからExecutions一覧を照合する。slot/lock解除は引き続き行わない。
+- 最新コードcommit `2d6e1b0370e5b4e43d003213a8a33f6220eaee5c`、test `dbd467ae2e3c9b37b6bd31e6991f4495e0b8f930`。最新HEAD CI/parallel結果はこれから確認する。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIのFirestore Emulatorでdispatched→unknown testを確認し、read-only inspectorもCIに含めて確認する。unknown起動のslot解放は引き続き自動化しない。
