@@ -1091,6 +1091,9 @@ def _too_many_fails(ip: str) -> bool:
 
 
 def _logged_in() -> bool:
+    # 管理者認証済みなら、管理者画面から通常の代行コンソールへ戻れる。
+    if session.get("admin") is True:
+        return True
     ident = session.get("password_id")
     return session.get("ok") is True and isinstance(ident, int) and password_store.contains(ident)
 
@@ -1143,6 +1146,8 @@ def admin():
                 msg = "失敗が続いたので、10分ほど待ってください。"
             elif admin_password and hmac.compare_digest(request.form.get("passcode", "").encode(), admin_password.encode()):
                 session["admin"] = True
+                # 管理者が代行コンソールへ移動しても、処理状況の所有者を維持する。
+                session.setdefault("job_owner", secrets.token_urlsafe(32))
                 session["admin_csrf"] = secrets.token_urlsafe(32)
                 return redirect("/admin")
             else:
