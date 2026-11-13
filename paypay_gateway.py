@@ -226,6 +226,7 @@ def _ledger():
     _LEDGER_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     db=sqlite3.connect(_LEDGER_FILE,timeout=20)
     try:
+        os.chmod(_LEDGER_FILE, 0o600)
         db.execute("CREATE TABLE IF NOT EXISTS links (digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, state TEXT NOT NULL, created REAL NOT NULL)")
         yield db
         db.commit()
