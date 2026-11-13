@@ -67,3 +67,31 @@ Keep the original CatsDaiko5/Discord-derived service UI and processing capabilit
 - Admin authentication remains separate and enforced.
 - All order, payment, credential, and job state transitions are server-authoritative.
 - The stable repository is untouched.
+
+
+## Route-level integration map (source inspection)
+
+| Existing route | Current gate / behavior | Required beta behavior |
+|---|---|---|
+| `/` | Redirects to `/shop` | Render the original full service UI in public draft mode |
+| `/console` | Requires legacy customer password | Keep as an administrator/maintenance entry or redirect appropriately; do not make it the public customer route |
+| `/api/state`, `/api/warmup` | Require legacy login | Allow public read/warmup only with abuse limits; do not expose admin data |
+| `/api/cats*` | Require legacy login | Public catalog/search endpoints, rate-limited |
+| `/run` | Requires legacy login and accepts mutable browser payload | Replace customer invocation with a paid-order-only start endpoint that loads the immutable payload from storage |
+| `/status/<job_id>`, `/cancel/<job_id>` | Bound to the legacy session's `job_owner` | Bound to the order access token and only the job associated with that order |
+| `/admin*` | Separate admin session/password | Keep protected and separate from customer access |
+
+### Important source-level details
+
+- The current `MAIN_HTML` contains all five original tabs (input, items, quantity, character management, subs, others, status), character lookup, per-character level/form/talent settings, clone, integrity check, safety mode, and result download. Keep this template and its worker semantics rather than rebuilding a reduced product picker.
+- Its JavaScript currently submits the entire selection and transfer credentials together to `POST /run`. The customer-facing version must split this into (a) immutable quote/order creation, (b) PayPay verification, (c) credential submission, and (d) paid-order worker start. A front-end-only payment gate is insufficient.
+- `shop_store.orders` currently stores SKU, quantity, amount, encrypted credentials, payment state, and access-token hash, but no versioned operation payload or job association. A schema migration is required before the original UI can be safely connected.
+- Existing job ownership is a session `job_owner`; the order flow needs explicit order-to-job ownership, including the queued-job cancellation path.
+- The original worker accepts transfer/PIN, items, subs, others, quantities, character IDs/settings, dry/safe/clone/integrity flags. Validate and normalize this exact payload once before quote creation, persist it, and start from that stored copy only.
+
+## Outstanding implementation gates
+
+1. **Pricing mapping:** The requested rates are clear (50 JPY per character for character-specific selection, 25 JPY per character for other service), but the original UI contains account-wide item/sub/other operations as well as character selections. Before charging, the billable-unit rule for each non-character operation must be explicitly mapped; silently treating every checkbox or item quantity as a character would mischarge.
+2. **Payment state:** Existing PayPay receipt code is behind `SHOP_LIVE_ORDERS_ENABLED`. Keep it disabled until order payload persistence, payment idempotency, and end-to-end test coverage are complete.
+3. **Encryption:** The app already has `SECRET_KEY` generated persistently by `render.yaml`; do not rely on the random in-process fallback if deploying outside that Blueprint. Existing PayPay/order encryption data must not be invalidated by key rotation.
+4. **Runtime persistence:** GitHub-backed SQLite snapshots must be tested for serialized writes and restart recovery before any live order acceptance. This is not a real mounted disk and does not provide multi-instance transactional locking.
