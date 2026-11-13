@@ -49,9 +49,30 @@ class GitHubRuntimeStoreTests(unittest.TestCase):
             db.execute("INSERT INTO orders VALUES (?, ?)", ("A1", "private customer data"))
         saved = self.remote["orders.sqlite3"]
         self.assertNotIn(b"private customer data", saved)
+        writes_before = len(self.remote)
         with store.sqlite_database("orders.sqlite3", "/tmp/not-used-orders.sqlite3") as db:
             row = db.execute("SELECT note FROM orders WHERE id='A1'").fetchone()
             self.assertEqual(row["note"], "private customer data")
+        self.assertEqual(len(self.remote), writes_before, "read-only access must not create a Git commit")
+
+    def test_legacy_local_database_is_migrated_without_plaintext_upload(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy.sqlite3"
+            local = sqlite3.connect(path)
+            local.execute("CREATE TABLE sample (value TEXT)")
+            local.execute("INSERT INTO sample VALUES ('legacy-private-value')")
+            local.commit()
+            local.close()
+            with store.sqlite_database("legacy.sqlite3", path) as db:
+                self.assertEqual(db.execute("SELECT value FROM sample").fetchone()["value"],
+                                 "legacy-private-value")
+            encrypted = self.remote["legacy.sqlite3"]
+            self.assertNotIn(b"legacy-private-value", encrypted)
+            self.assertEqual(store._cipher().decrypt(encrypted)[:16], b"SQLite format 3")
 
     def test_blob_round_trip(self):
         store.write_blob("paypay/account.enc", b"already-encrypted-account")
