@@ -1245,3 +1245,15 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はRunbookのGunicorn起動記述を再fetchし、latest CI/parallel statusを確認する。
+
+
+## 43. Cloud Scheduler / Dispatcher設定のrunbook整合性修正（2026-11-13）
+
+- Runbook section 11 / 15ではScheduler jobを2つ（outbox sweepとexecution reconcile）必要としていたが、resource一覧tableには1つしか記載されていなかったため修正。
+- Dispatcher Serviceのenv listに `CLOUD_RUN_DISPATCHER_AUDIENCE` と `CLOUD_RUN_STALE_LAUNCH_SECONDS=600` を追加。Dispatcher自身もCloud Tasksをpublishするため、Webと同じOIDC audience設定が必要。
+- Scheduler SAの権限記載を `roles/run.invoker` から `roles/run.servicesInvoker` に統一し、Job実行権限を持たないInvoker roleへ最小化。
+- Runbook table、Dispatcher env、Scheduler scheduleの整合を確認。
+- これはRunbookのみの変更。直前コードHEAD `43c6629a5687a15048434365147750ce563ff68e` のCI/parallelはsuccess。最新docs HEADのCIはpending。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はRunbookのresource table・Dispatcher env・Scheduler roleを再fetchして確認し、最新CI statusを確認する。
