@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -37,7 +38,7 @@ HOLD_CODES = {"42007013", "42007014", "42007015", "42007016"}
 _ROOT = Path(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay")).resolve()
 _ACCOUNT_FILE = _ROOT / "account.enc"
 _LEDGER_FILE = Path(os.environ.get("PAYPAY_LEDGER_PATH", str(_ROOT / "payments.sqlite3")))
-_LOCK = asyncio.Lock()
+_LOCK = threading.Lock()
 _pending_otp: dict = {}
 
 class PayPayError(Exception):
@@ -233,7 +234,7 @@ def _ledger():
 async def receive_payment(raw_link: str, amount: int, purchase_id: str):
     code = _normalize_link(raw_link)
     if not code: raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
-    async with _LOCK:
+    with _LOCK:
         account = _load_account()
         if not account:
             raise PayPayError("login_required", "管理者のPayPay接続が必要です。")
