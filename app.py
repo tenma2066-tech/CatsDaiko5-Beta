@@ -1,9 +1,9 @@
-"""にゃんこ代行 Web版（個人用・無料）
-ブラウザから引継ぎコードを入力して、セーブデータを書き換えます。
-課金・PayPay・Discordは一切ありません。
+"""にゃんこ代行 Web版（ベータ）
+公開ショップ・PayPay決済と、管理者向けセーブデータ処理画面を提供します。
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import importlib.metadata
@@ -30,6 +30,8 @@ from auth_store import PasswordStore
 from github_auth_store import GitHubPasswordStore, PasswordStoreUnavailable
 import save_audit
 import save_repair
+import paypay_gateway
+import shop_store
 
 APP_VERSION = "1.15"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
@@ -1108,7 +1110,7 @@ def login():
             session["password_id"] = ident
             session["job_owner"] = secrets.token_urlsafe(32)
             session.permanent = False
-            return redirect("/")
+            return redirect("/console")
         else:
             _fail.setdefault(ip, []).append(time.time())
             msg = "パスワードが違います。"
@@ -1171,7 +1173,250 @@ def admin():
                                   passwords=password_store.list() if session.get("admin") else [])
 
 
+
+
+# ---------------------------------------------------------------- 公開ショップ・注文・PayPay
+def _shop_page(title, body):
+    return render_template_string("""<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>{{ title }} | にゃんこ代行</title>
+<style>
+:root{color-scheme:light dark;--bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--accent:#ffc42e;--bad:#d93636;--soft:#f1f4f8}
+@media(prefers-color-scheme:dark){:root{--bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,"Noto Sans JP",sans-serif;line-height:1.55}
+main{max-width:620px;margin:0 auto;padding:24px 15px 60px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+h1{font-size:23px;margin:0}h2{font-size:18px;margin:0 0 10px}.muted{color:var(--muted);font-size:13px}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 3px 0 var(--line)}
+input,button,select{font:inherit;width:100%;padding:12px;border:2px solid var(--line);border-radius:10px;background:var(--soft);color:var(--ink);margin:5px 0}
+button{background:var(--accent);color:#17181c;font-weight:800;cursor:pointer}
+label{display:block;font-weight:700;font-size:14px;margin-top:10px}
+.price{font-size:21px;font-weight:900}.error{color:var(--bad);font-weight:700;white-space:pre-wrap}.row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+a{color:inherit}.hidden{display:none!important}
+</style></head><body><main><header><h1>にゃんこ代行</h1><a href="/admin">管理者</a></header>{{ body|safe }}</main></body></html>""", title=title, body=body)
+
 @app.get("/")
+def storefront_root():
+    return redirect("/shop")
+
+@app.get("/shop")
+def shop_home():
+    try:
+        products = shop_store.catalog()
+    except shop_store.ShopError:
+        products = []
+    product_json = json.dumps(products, ensure_ascii=False).replace("</", "<\\/")
+    orders_enabled = os.environ.get("SHOP_LIVE_ORDERS_ENABLED") == "1"
+    body = r"""<div class="card"><h2>商品を選択</h2><p class="muted">ログイン不要でご注文いただけます。商品を選び、PayPayでお支払い後に引継ぎ情報を入力してください。</p>
+<div id="products"></div><p id="catalog-error" class="error"></p><p class="muted" id="shop-disabled">__SHOP_DISABLED__</p></div>
+<div class="card" id="checkout" hidden><h2 id="selected-title">注文内容</h2>
+<label>代行する体数<input id="quantity" type="number" min="1" max="100" step="1" value="1"></label>
+<p class="muted" id="unit-price"></p><p class="price" id="selected-price"></p>
+<p class="muted">次の画面でPayPay決済を行います。決済確認後に引継ぎコードと暗証番号を入力します。</p>
+<button id="place">PayPay決済へ進む</button><p id="error" class="error"></p></div>
+<script>
+const products=__PRODUCTS__;let selected=null;
+const ordersEnabled=__ORDERS_ENABLED__;
+if(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
+const yen=n=>new Intl.NumberFormat('ja-JP').format(n)+'円';
+const list=document.getElementById('products');
+function updatePrice(){
+ if(!selected)return;
+ const q=Number(document.getElementById('quantity').value);
+ document.getElementById('unit-price').textContent='1体あたり '+yen(selected.unit_price_yen);
+ document.getElementById('selected-price').textContent=Number.isInteger(q)&&q>=1&&q<=100?yen(selected.unit_price_yen*q):'数量は1〜100体で指定してください。';
+}
+document.getElementById('quantity').addEventListener('input',updatePrice);
+if(!products.length){document.getElementById('catalog-error').textContent='現在、販売商品が設定されていません。管理者にお問い合わせください。';}
+products.forEach(p=>{const el=document.createElement('button');el.type='button';el.style.textAlign='left';el.innerHTML='';
+el.textContent=p.title+'　'+yen(p.unit_price_yen)+'/体'+(p.description?' — '+p.description:'');
+el.addEventListener('click',()=>{selected=p;document.getElementById('selected-title').textContent=p.title;document.getElementById('checkout').hidden=false;updatePrice();document.getElementById('checkout').scrollIntoView({behavior:'smooth'});});list.appendChild(el);});
+const placeButton=document.getElementById('place');
+placeButton.disabled=!ordersEnabled;
+if(!ordersEnabled)placeButton.textContent='現在注文受付停止中';
+placeButton.addEventListener('click',async()=>{
+ if(!ordersEnabled)return;
+ const error=document.getElementById('error');error.textContent='';
+ if(!selected)return;
+ const button=document.getElementById('place');button.disabled=true;button.textContent='注文を作成中…';
+ try{
+  const r=await fetch('/api/shop/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku:selected.id,quantity:Number(document.getElementById('quantity').value)})});
+  const data=await r.json();if(!r.ok)throw Error(data.error||'注文を作成できませんでした。');
+  location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
+ }catch(e){error.textContent=e.message;}finally{button.disabled=false;button.textContent='PayPay決済へ進む';}
+});
+</script>""".replace("__ORDERS_ENABLED__", "true" if orders_enabled else "false").replace("__SHOP_DISABLED__", "").replace("__PRODUCTS__", product_json)
+    return _shop_page("商品一覧", body)
+
+@app.post("/api/shop/orders")
+def shop_create_order():
+    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
+        return jsonify(error="現在は注文受付を停止しています。"), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        order = shop_store.create_order(data.get("sku", ""), data.get("quantity", 1))
+        return jsonify(order), 201
+    except shop_store.ShopError as exc:
+        return jsonify(error=str(exc)), 400
+
+@app.get("/shop/order/<order_id>")
+def shop_order_page(order_id):
+    key = request.args.get("key", "")
+    order = shop_store.public_order(order_id, key)
+    if not order:
+        return _shop_page("注文確認", '<div class="card"><h2>注文が見つかりません</h2><p>注文URLを確認してください。</p></div>'), 404
+    body = r"""<div class="card"><h2>注文内容</h2><p>注文番号：<b>__ID__</b></p><p>商品：<b>__TITLE__</b></p><p>__QUANTITY__体 × __UNIT_PRICE__円</p><p class="price">合計 __AMOUNT__円</p>
+<p id="status">決済待ち</p><p class="muted">まずPayPayでお支払いください。受取確認後、この画面で引継ぎコードと暗証番号を入力できます。</p>
+<div id="payment">
+<label>PayPay送金リンク<input id="paypay-link" maxlength="2048" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off"></label>
+<button id="pay">PayPayで支払う</button></div>
+<div id="credentials" hidden><h2>引継ぎ情報の入力</h2>
+<label>引継ぎコード<input id="transfer" maxlength="128" autocomplete="off" autocapitalize="off"></label>
+<label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
+<button id="send-credentials">引継ぎ情報を送信</button></div>
+<p id="error" class="error"></p><p class="muted">受取処理中に通信が途切れた場合、二重受取を避けるため自動再試行しません。画面の案内に従って管理者へお問い合わせください。</p></div>
+<script>
+const id="__ID__",key=new URLSearchParams(location.search).get('key')||'';
+async function refresh(){
+ try{
+  const r=await fetch('/api/shop/order/'+id+'?key='+encodeURIComponent(key));if(!r.ok)return;
+  const o=await r.json();
+  const names={awaiting_payment:'決済待ち',payment_processing:'決済処理中',paid:'決済確認済み',review:'管理者による確認中',fulfilling:'作業中',completed:'完了',cancelled:'キャンセル'};
+  const status=document.getElementById('status'),payment=document.getElementById('payment'),credentials=document.getElementById('credentials');
+  status.textContent=names[o.status]||o.status;
+  if(o.status==='awaiting_payment'){payment.hidden=false;credentials.hidden=true;}
+  else if(o.status==='paid'&&!o.credentials_submitted){payment.hidden=true;credentials.hidden=false;status.textContent='決済確認済み。引継ぎ情報を入力してください。';}
+  else{payment.hidden=true;credentials.hidden=true;if(o.status==='paid')status.textContent='引継ぎ情報送信済み。作業待ちです。';}
+ }catch(e){}
+}
+document.getElementById('pay').addEventListener('click',async()=>{
+ const b=document.getElementById('pay'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='PayPay受取を確認中…';
+ try{
+  const r=await fetch('/api/shop/order/'+id+'/paypay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,link:document.getElementById('paypay-link').value})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'決済を確認できませんでした。');e.textContent=d.message||'決済を確認しました。';await refresh();
+ }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='PayPayで支払う';}
+});
+document.getElementById('send-credentials').addEventListener('click',async()=>{
+ const b=document.getElementById('send-credentials'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='送信中…';
+ try{
+  const r=await fetch('/api/shop/order/'+id+'/credentials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,transfer_code:document.getElementById('transfer').value,pin:document.getElementById('pin').value})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'引継ぎ情報を送信できませんでした。');e.textContent=d.message||'引継ぎ情報を送信しました。';await refresh();
+ }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='引継ぎ情報を送信';}
+});
+refresh();
+setInterval(refresh,5000);
+</script>""".replaceAll("__ID__", order.id).replace("__TITLE__", order.title).replace("__QUANTITY__", String(order.quantity)).replace("__UNIT_PRICE__", String(order.unit_price_yen)).replace("__AMOUNT__", String(order.amount))
+    return _shop_page("注文確認", body)
+
+@app.get("/api/shop/order/<order_id>")
+def shop_order_status(order_id):
+    order = shop_store.public_order(order_id, request.args.get("key", ""))
+    if not order:
+        return jsonify(error="注文が見つかりません。"), 404
+    return jsonify(order)
+
+@app.post("/api/shop/order/<order_id>/credentials")
+def shop_submit_credentials(order_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        shop_store.save_credentials(order_id, data.get("key", ""), data.get("transfer_code", ""), data.get("pin", ""))
+        return jsonify(ok=True, message="引継ぎ情報を送信しました。管理者が確認します。")
+    except shop_store.ShopError as exc:
+        return jsonify(error=str(exc)), 400
+
+@app.post("/api/shop/order/<order_id>/paypay")
+def shop_paypay_submit(order_id):
+    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
+        return jsonify(error="現在は決済受付を停止しています。"), 503
+    data = request.get_json(silent=True) or {}
+    order = shop_store.public_order(order_id, data.get("key", ""))
+    if not order:
+        return jsonify(error="注文が見つかりません。"), 404
+    if order["status"] != "awaiting_payment":
+        return jsonify(error="この注文は決済処理中、または決済受付状態ではありません。"), 409
+    if not shop_store.claim_payment(order_id):
+        return jsonify(error="別の決済リクエストを処理中です。画面を更新してください。"), 409
+    try:
+        digest = asyncio.run(paypay_gateway.receive_payment(data.get("link", ""), order["amount"], order_id))
+        shop_store.complete_payment(order_id, digest)
+        return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。管理者が注文を確認します。")
+    except paypay_gateway.PayPayError as exc:
+        uncertain = exc.code in {"accept_uncertain", "accept_unconfirmed", "temporary_hold", "duplicate", "runtime_store"}
+        shop_store.release_payment(order_id, review=uncertain, note=exc.code)
+        return jsonify(error=exc.message), 400
+    except shop_store.ShopError as exc:
+        shop_store.release_payment(order_id, review=True, note="payment_state_error")
+        return jsonify(error=str(exc)), 409
+    except Exception:
+        shop_store.release_payment(order_id, review=True, note="unexpected_payment_error")
+        app.logger.exception("Unexpected payment processing error for order %s", order_id)
+        return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 500
+
+@app.get("/admin/paypay")
+def admin_paypay_page():
+    if not _logged_in(): return redirect("/login")
+    if not session.get("admin"): return redirect("/admin")
+    try: pp_status = paypay_gateway.status()
+    except paypay_gateway.PayPayError as exc: pp_status = {"connected":False,"ready":False,"error":exc.message}
+    csrf = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
+    otp_waiting = bool(paypay_gateway._pending_otp)
+    body = """<div class="card"><h2>PayPay接続</h2><p>接続状態：<b>"""+("受取可能" if pp_status.get("ready") else "未接続・再認証が必要")+"""</b></p>
+<p class="muted">SMS認証はPayPayが要求した場合のみです。認証情報は暗号化して保存されます。</p>
+<form method="post" action="/admin/paypay/connect"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>電話番号<input name="phone" type="tel" required autocomplete="off"></label><label>PayPayパスワード<input name="password" type="password" required autocomplete="off"></label><button>PayPayに接続</button></form>
+"""+("""<form method="post" action="/admin/paypay/otp"><input type="hidden" name="csrf" value="{{ csrf }}"><label>SMS認証コード<input name="otp" inputmode="numeric" maxlength="4" required></label><button>SMS認証</button></form>""" if otp_waiting else "")+"""<p class="error">{{ msg }}</p></div><p><a href="/admin/orders">注文管理</a> ・ <a href="/console">代行ツール</a></p>"""
+    return render_template_string(_shop_page("PayPay設定", body), csrf=csrf, msg=request.args.get("msg",""))
+
+@app.post("/admin/paypay/connect")
+def admin_paypay_connect():
+    if not _logged_in() or not session.get("admin"): return "管理者モードが必要です。", 403
+    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1": return "永続ストレージと商品設定を確認してから注文受付を有効にしてください。", 503
+    token=session.get("admin_csrf","")
+    if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
+    try:
+        result=asyncio.run(paypay_gateway.begin_login(request.form.get("phone",""),request.form.get("password","")))
+        return redirect("/admin/paypay?msg="+("SMS認証コードを入力してください。" if result.get("otp_required") else "PayPayに接続しました。"))
+    except paypay_gateway.PayPayError as exc:
+        return redirect("/admin/paypay?msg="+__import__("urllib.parse",fromlist=["quote"]).quote(exc.message))
+
+@app.post("/admin/paypay/otp")
+def admin_paypay_otp():
+    if not _logged_in() or not session.get("admin"): return "管理者モードが必要です。", 403
+    token=session.get("admin_csrf","")
+    if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
+    try:
+        asyncio.run(paypay_gateway.finish_login(request.form.get("otp","")))
+        return redirect("/admin/paypay?msg=PayPayに接続しました。")
+    except paypay_gateway.PayPayError as exc:
+        return redirect("/admin/paypay?msg="+__import__("urllib.parse",fromlist=["quote"]).quote(exc.message))
+
+@app.get("/admin/orders")
+def admin_orders_page():
+    if not _logged_in(): return redirect("/login")
+    if not session.get("admin"): return redirect("/admin")
+    rows=shop_store.admin_orders()
+    csrf=session.setdefault("admin_csrf",secrets.token_urlsafe(32))
+    order_body=render_template_string("""{% for o in rows %}<div class="card"><b>{{ o.id }} / {{ o.title }} / {{ o.quantity }}体 × {{ o.unit_price_yen }}円 = {{ o.amount }}円</b><p>状態：{{ o.status }}</p>
+{% if o.credentials_submitted %}<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>{% else %}<p>引継ぎ情報：購入者の入力待ち</p>{% endif %}
+<form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
+<select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
+        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed"],"completed":[],"cancelled":[]})
+    return _shop_page("注文管理", '<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>'+order_body+'</div>')
+
+@app.post("/admin/orders/<order_id>/status")
+def admin_order_status(order_id):
+    if not _logged_in() or not session.get("admin"): return "管理者モードが必要です。",403
+    token=session.get("admin_csrf","")
+    if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
+    try:
+        status=request.form.get("status","")
+        # Review -> paid is an explicit manual confirmation after checking PayPay.
+        shop_store.set_status(order_id,status,note="管理者による状態更新")
+    except shop_store.ShopError as exc:
+        return str(exc),400
+    return redirect("/admin/orders")
+
+
+@app.get("/console")
 def index():
     if not _logged_in():
         return redirect("/login")
@@ -1450,7 +1695,7 @@ def cancel_job(job_id: str):
 ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>管理者</title>
 <style>body{font-family:system-ui;max-width:38rem;margin:2rem auto;padding:0 1rem}input,button{font:inherit;padding:.5rem;margin:.25rem 0}form{margin:1rem 0}.msg{color:#a23}</style></head><body>
-<a href="/">戻る</a><h1>管理者モード</h1><p class="msg">{{ msg }}</p>
+<a href="/console">戻る</a> ・ <a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin/orders">注文管理</a><h1>管理者モード</h1><p class="msg">{{ msg }}</p>
 {% if github_storage %}<p>パスワードのハッシュを非公開GitHubリポジトリに保存しています。</p>
 {% if github_bootstrap %}<p class="msg">初期化が済んだら、Renderの AUTH_GITHUB_BOOTSTRAP を削除してください。</p>{% endif %}
 {% elif ephemeral %}<p class="msg">保存先は一時領域です。再起動や再デプロイでパスワードの変更が失われる場合があります。</p>

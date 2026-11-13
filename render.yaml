@@ -25,3 +25,21 @@ services:
         value: tenma2066-tech/CatsDaiko5-Beta
       - key: AUTH_GITHUB_TOKEN
         sync: false
+      - key: RUNTIME_GITHUB_REPO
+        value: tenma2066-tech/CatsDaiko5-Beta
+      - key: RUNTIME_GITHUB_BRANCH
+        value: runtime-data
+      - key: RUNTIME_GITHUB_PREFIX
+        value: runtime
+      - key: PAYPAY_ENCRYPTION_KEY
+        sync: false
+      - key: SHOP_CATALOG_JSON
+        sync: false
+      - key: PAYPAY_DATA_DIR
+        value: /var/data/paypay
+      - key: PAYPAY_LEDGER_PATH
+        value: /var/data/paypay/payments.sqlite3
+      - key: SHOP_DB_PATH
+        value: /var/data/shop.sqlite3
+      - key: SHOP_LIVE_ORDERS_ENABLED
+        value: "0"
