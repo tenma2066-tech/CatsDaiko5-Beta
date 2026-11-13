@@ -112,7 +112,11 @@ class GoogleCloudRunJobLauncher:
                 }],
             },
         })
-        return operation.name
+        metadata = getattr(operation, "metadata", None)
+        return {
+            "operation_name": operation.name,
+            "execution_name": getattr(metadata, "name", None),
+        }
 
 
 def handle_dispatch_payload(payload: dict[str, Any], repository, job_launcher) -> dict[str, str]:
@@ -127,10 +131,10 @@ def handle_dispatch_payload(payload: dict[str, Any], repository, job_launcher) -
     if claim.get("state") == "no_slot":
         return {"state": "no_slot"}
     try:
-        operation_name = job_launcher.launch(
+        operation_info = job_launcher.launch(
             claim["order_id"], claim["execution_id"], claim["slot_id"]
         )
-        repository.mark_dispatch_started(execution_id, operation_name)
+        repository.mark_dispatch_started(execution_id, operation_info)
         return {"state": "started"}
     except Exception as exc:
         # The API may have accepted the Job before a network timeout. Never retry
