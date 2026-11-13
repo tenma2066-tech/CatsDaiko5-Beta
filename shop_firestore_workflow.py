@@ -43,6 +43,35 @@ def _estimate_firestore_payload_size(value: Any) -> int:
     return _estimate_firestore_payload_size(str(value))
 
 
+_WORKER_ARRAY_FIELDS = ("log", "warn", "report", "skipped")
+_WORKER_CHUNK_MAX_BYTES = 128 * 1024
+_WORKER_CHUNK_MAX_COUNT = 32
+
+
+def _split_worker_snapshot_arrays(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Split worker-visible arrays into bounded, ordered Firestore chunk docs."""
+    chunks: list[dict[str, Any]] = []
+    for field in _WORKER_ARRAY_FIELDS:
+        values = list(snapshot.get(field) or [])
+        current: list[Any] = []
+        current_size = 64
+        for value in values:
+            item_size = _estimate_firestore_payload_size(value) + 16
+            if item_size > _WORKER_CHUNK_MAX_BYTES:
+                raise WorkflowStateError("execution_snapshot_item_too_large")
+            if current and current_size + item_size > _WORKER_CHUNK_MAX_BYTES:
+                chunks.append({"field": field, "items": current})
+                current = []
+                current_size = 64
+            current.append(value)
+            current_size += item_size
+        if current:
+            chunks.append({"field": field, "items": current})
+    if len(chunks) > _WORKER_CHUNK_MAX_COUNT:
+        raise WorkflowStateError("execution_snapshot_chunk_limit_exceeded")
+    return chunks
+
+
 def transfer_lock_id(transfer_code: str, pepper: bytes) -> str:
     if not isinstance(pepper, bytes) or len(pepper) < 32:
         raise ValueError("transfer-lock pepper must be at least 32 bytes")
@@ -630,13 +659,33 @@ class FirestoreWorkflowRepository:
 
     def get_execution(self, execution_id: str) -> dict[str, Any] | None:
         snapshot = self._executions.document(execution_id).get()
-        return snapshot.to_dict() if snapshot.exists else None
+        if not snapshot.exists:
+            return None
+        result = snapshot.to_dict()
+        for field in _WORKER_ARRAY_FIELDS:
+            result[field] = []
+        chunks = (
+            self._client.collection("execution_logs")
+            .document(execution_id).collection("chunks")
+            .order_by("index").stream()
+        )
+        for chunk in chunks:
+            data = chunk.to_dict()
+            field = data.get("field")
+            if field in _WORKER_ARRAY_FIELDS:
+                result[field].extend(data.get("items") or [])
+        return result
 
     def persist_worker_snapshot(
         self, execution_id: str, owner: str, snapshot: dict[str, Any],
         result_enc: bytes | None = None,
     ) -> None:
         reference = self._executions.document(execution_id)
+        chunks_ref = (
+            self._client.collection("execution_logs")
+            .document(execution_id).collection("chunks")
+        )
+        worker_chunks = _split_worker_snapshot_arrays(snapshot)
         transaction = self._client.transaction(max_attempts=5)
 
         @firestore.transactional
@@ -644,20 +693,22 @@ class FirestoreWorkflowRepository:
             current = reference.get(transaction=tx)
             if not current.exists or current.to_dict().get("owner") != owner:
                 raise WorkflowStateError("execution owner mismatch")
-            if current.to_dict().get("state") != "running":
+            current_data = current.to_dict()
+            if current_data.get("state") != "running":
                 raise WorkflowStateError("execution is not running")
+            # Read the old bounded chunk set before any transaction writes.
+            old_chunks = list(chunks_ref.stream(transaction=tx))
+            revision = int(current_data.get("worker_snapshot_revision") or 0) + 1
             data = {
                 "worker_status": str(snapshot.get("status") or "running")[:24],
                 "step": max(0, min(int(snapshot.get("step") or 0), 4)),
-                "log": list(snapshot.get("log") or [])[-60:],
-                "warn": list(snapshot.get("warn") or [])[-100:],
-                "report": list(snapshot.get("report") or [])[-200:],
-                "skipped": list(snapshot.get("skipped") or [])[:100],
                 "dry": bool(snapshot.get("dry")),
                 "clone": bool(snapshot.get("clone")),
                 "integrity_only": bool(snapshot.get("integrity_only")),
                 "error": str(snapshot.get("error") or "")[:500],
                 "outcome_unknown": bool(snapshot.get("outcome_unknown")),
+                "worker_snapshot_revision": revision,
+                "worker_snapshot_chunk_count": len(worker_chunks),
                 "updated": self._clock(),
             }
             if result_enc is not None:
@@ -666,12 +717,22 @@ class FirestoreWorkflowRepository:
                 data["worker_finished"] = snapshot.get("finished")
             if snapshot.get("audit") is not None:
                 data["audit"] = snapshot["audit"]
-            # Firestore documents are limited to 1 MiB. Keep a substantial
-            # safety margin for document metadata and future schema fields;
-            # never silently truncate audit/result payloads.
-            payload_size = _estimate_firestore_payload_size(data)
-            if payload_size > 700 * 1024:
-                raise WorkflowStateError("execution_snapshot_too_large")
+            # Non-array metadata remains in the execution document with a
+            # 700 KiB safety margin. Worker arrays live in bounded subdocuments.
+            if _estimate_firestore_payload_size(data) > 700 * 1024:
+                raise WorkflowStateError("execution_snapshot_metadata_too_large")
+            for old in old_chunks:
+                tx.delete(old.reference)
+            for index, chunk in enumerate(worker_chunks):
+                chunk_data = {
+                    **chunk,
+                    "revision": revision,
+                    "index": index,
+                    "updated": self._clock(),
+                }
+                if _estimate_firestore_payload_size(chunk_data) > _WORKER_CHUNK_MAX_BYTES:
+                    raise WorkflowStateError("execution_snapshot_chunk_too_large")
+                tx.create(chunks_ref.document(f"r{revision:08d}-{index:03d}"), chunk_data)
             tx.update(reference, data)
 
         persist(transaction)
