@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import time
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -119,18 +120,45 @@ def create_order(sku: str, quantity=1):
             "unit_price_yen": item["unit_price_yen"], "quantity": quantity,
             "amount": amount, "status": "awaiting_payment"}
 
-def create_operation_order(operation: dict, service_type: str, quantity: int):
-    """Create a PayPay order that stores the original UI operation, encrypted at rest.
+def _selected_character_count(raw: str) -> int:
+    if not isinstance(raw, str) or len(raw) > 20_000:
+        raise ShopError("キャラ番号の入力形式が正しくありません。")
+    value = unicodedata.normalize("NFKC", raw)
+    value = re.sub(r"[~〜～ー−―‐–—]", "-", value)
+    numbers = set()
+    for token in (part for part in re.split(r"[\\s,、，;；・]+", value) if part):
+        match = re.fullmatch(r"(\\d+)(?:-(\\d+))?", token)
+        if not match:
+            raise ShopError(f"キャラ番号「{token}」を読み取れません。")
+        first = int(match.group(1))
+        last = int(match.group(2)) if match.group(2) else first
+        if first > last:
+            first, last = last, first
+        if first < 1 or last > 9999:
+            raise ShopError("キャラ番号は1〜9999の範囲で指定してください。")
+        numbers.update(range(first, last + 1))
+        if len(numbers) > 2000:
+            raise ShopError("キャラ番号は一度に2000体まで指定できます。")
+    return len(numbers)
 
-    Prices are fixed server-side: character-specific selection is 50 yen per
-    selected character; all other services are 25 yen per requested character.
+
+def create_operation_order(operation: dict, quantity: int):
+    """Create an encrypted order; derive character-specific billing from the saved operation.
+
+    The browser cannot choose the cheaper service category or override the
+    quantity for character-specific orders. The only customer-entered billing
+    quantity is used when no character numbers were selected.
     """
-    if service_type not in {"character-specific", "other-service"}:
-        raise ShopError("サービス区分が正しくありません。")
     if not isinstance(operation, dict) or len(json.dumps(operation, ensure_ascii=False)) > 100_000:
         raise ShopError("注文内容が大きすぎるか、形式が正しくありません。")
-    if type(quantity) is not int or not 1 <= quantity <= MAX_ORDER_QUANTITY:
-        raise ShopError("代行体数は1〜100体で指定してください。")
+    character_count = _selected_character_count(operation.get("chars", ""))
+    if character_count:
+        service_type = "character-specific"
+        quantity = character_count
+    else:
+        service_type = "other-service"
+        if type(quantity) is not int or not 1 <= quantity <= MAX_ORDER_QUANTITY:
+            raise ShopError("代行体数は1〜100体で指定してください。")
     unit_price = 50 if service_type == "character-specific" else 25
     amount = unit_price * quantity
     order_id = secrets.token_hex(5).upper()
