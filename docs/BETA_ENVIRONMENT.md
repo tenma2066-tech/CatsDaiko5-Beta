@@ -31,6 +31,7 @@
 - 管理者用セーブ処理画面は `/console`（既存の `/login` で認証）。
 - 管理者ログイン後、`/admin` で管理者モードを解除し、`/admin/paypay` でPayPay接続、`/admin/orders` で注文を確認する。
 - PayPayのSMS認証はPayPay側が要求した場合だけ行う。SMSコードは管理画面から入力する。
+- `SHOP_LIVE_ORDERS_ENABLED` は初期値 `0`。ベータ専用永続ディスク・暗号化キー・商品カタログ・PayPay接続の確認が完了するまで `1` にしない。無効中は公開ページを閲覧できるが、注文・決済・PayPay接続を受け付けない。
 - 商品はRender環境変数 `SHOP_CATALOG_JSON` にJSON配列で設定する。例：
   `[{"id":"sample-service","title":"サンプル商品","price_yen":1000,"description":"説明"}]`
   実際の販売商品名・価格に置き換えること。金額はサーバー側カタログを正とし、ブラウザーから送られた金額は使用しない。
