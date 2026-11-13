@@ -270,6 +270,12 @@ class FirestoreWorkflowRepository:
             ex = execution.to_dict()
             if ex.get("owner") != owner or ex.get("state") != "running":
                 raise WorkflowStateError("execution owner/state mismatch")
+            slot_id = ex.get("slot_id")
+            lock_id = ex.get("transfer_lock_id")
+            slot_ref = self._slots.document(slot_id) if slot_id else None
+            lock_ref = self._locks.document(lock_id) if lock_id else None
+            slot = slot_ref.get(transaction=tx) if slot_ref else None
+            transfer_lock = lock_ref.get(transaction=tx) if lock_ref else None
             target = "completed" if success else "review"
             now = self._clock()
             tx.update(execution_ref, {
@@ -285,18 +291,10 @@ class FirestoreWorkflowRepository:
                 "job_id": None if success else execution_id,
                 "updated": now,
             })
-            slot_id = ex.get("slot_id")
-            lock_id = ex.get("transfer_lock_id")
-            if slot_id:
-                slot_ref = self._slots.document(slot_id)
-                slot = slot_ref.get(transaction=tx)
-                if slot.exists and slot.to_dict().get("owner") == owner:
-                    tx.update(slot_ref, {"state": "released", "released": now, "updated": now})
-            if lock_id:
-                lock_ref = self._locks.document(lock_id)
-                lock = lock_ref.get(transaction=tx)
-                if lock.exists and lock.to_dict().get("owner") == owner:
-                    tx.update(lock_ref, {"state": "released", "released": now, "updated": now})
+            if slot_ref and slot and slot.exists and slot.to_dict().get("owner") == owner:
+                tx.update(slot_ref, {"state": "released", "released": now, "updated": now})
+            if lock_ref and transfer_lock and transfer_lock.exists and transfer_lock.to_dict().get("owner") == owner:
+                tx.update(lock_ref, {"state": "released", "released": now, "updated": now})
 
         finish(transaction)
 
