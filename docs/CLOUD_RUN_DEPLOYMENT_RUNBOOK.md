@@ -319,3 +319,8 @@ python shop_cloud_run_recovery.py \
 - `no_matching_execution_found`: 一致が見つからなかっただけで、Job APIが未受理だった証拠ではない。APIの反映遅延やExecution retentionもあるため、slot/lockを解除しない。
 
 **このコマンドは読み取り専用であり、slot解放・transfer lock解除・Job再実行は一切行わない。** no-matchを根拠に手動解除もしない。別途Cloud Run ConsoleのExecutions、Cloud Audit Logs、Firestoreのorder/execution/outboxを照合し、二重実行がないと確証を得るまでreviewを維持する。
+
+
+## 20. Dispatcher operation名のみ保存された曖昧起動
+
+Cloud Run Job起動のlong-running operation名はFirestoreに保存できたが、Execution名がまだ取得できない状態が600秒以上続く場合、reconcilerは `launching` / `dispatched` のどちらからでも注文・executionをreview/outcome_unknownへ移す。slotは解放せず、transfer lockがある場合も保持する。その後はsection 19の読み取り専用InspectorでExecution引数を照合する。
