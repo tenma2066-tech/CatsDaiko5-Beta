@@ -1373,10 +1373,13 @@ def shop_submit_credentials(order_id):
             session["_order_execution"] = True
             session["job_owner"] = "order:" + order_id
             response = run()
+            response_status = 200
+            if isinstance(response, tuple):
+                response, response_status = response
             result = response.get_json(silent=True) or {}
-            if response.status_code >= 400 or not result.get("job"):
+            if response_status >= 400 or not result.get("job"):
                 shop_store.release_execution(order_id)
-                return jsonify(error=result.get("error", "処理を開始できませんでした。")), response.status_code
+                return jsonify(error=result.get("error", "処理を開始できませんでした。")), response_status
         shop_store.bind_job(order_id, result["job"])
         shop_store.set_status(order_id, "fulfilling", note="決済確認済み・処理開始")
         return jsonify(ok=True, job=result["job"], message="引継ぎ情報を受け付け、処理を開始しました。")
