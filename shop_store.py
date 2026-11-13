@@ -111,8 +111,11 @@ def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: 
         {"transfer_code": transfer_code, "pin": pin}, ensure_ascii=False
     ).encode("utf-8"))
     with _db() as db:
-        db.execute("""UPDATE orders SET credential_enc=?,credentials_submitted=1,updated=?
-                      WHERE id=? AND status='paid'""", (encrypted, time.time(), order_id))
+        updated = db.execute("""UPDATE orders SET credential_enc=?,credentials_submitted=1,updated=?
+                                WHERE id=? AND status='paid'""",
+                             (encrypted, time.time(), order_id))
+        if updated.rowcount != 1:
+            raise ShopError("注文状態が変わりました。注文画面を再読み込みしてください。")
 
 def _row(order_id):
     if not ORDER_ID_RE.fullmatch(order_id or ""):
