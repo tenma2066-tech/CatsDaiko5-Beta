@@ -1204,7 +1204,7 @@ def shop_home():
         products = shop_store.catalog()
     except shop_store.ShopError:
         products = []
-    product_json = json.dumps(products, ensure_ascii=False)
+    product_json = json.dumps(products, ensure_ascii=False).replace("</", "<\\/")
     body = r"""<div class="card"><h2>商品を選択</h2><p class="muted">ログイン不要でご注文いただけます。商品を選び、引継ぎ情報を入力してください。</p>
 <div id="products"></div><p id="catalog-error" class="error"></p></div>
 <div class="card" id="checkout" hidden><h2 id="selected-title">注文内容</h2><p class="price" id="selected-price"></p>
