@@ -252,7 +252,7 @@ python migrate_runtime_data_to_firestore.py
 python migrate_runtime_data_to_firestore.py --apply
 ```
 
-このツールはGitHub上の暗号化snapshotだけを読み取り、ローカルSQLiteをGitHubへ自動uploadしない。Firestoreへはcreate-onlyで書き込み、既存docを上書きしない。途中で止まった場合は同じコマンドを再実行できる。旧job_idが残る注文やpayment_processing中の注文はreviewへ移し、実行を自動再開しない。旧PayPay ledgerのattempted状態はoutcome_unknownとして取り込む。
+このツールはGitHub上の暗号化snapshotだけを読み取り、ローカルSQLiteをGitHubへ自動uploadしない。Firestoreへはcreate-onlyで書き込み、既存docを上書きしない。再実行時は `legacy_imported=true` の既存docだけを同じ移行の続きとしてskipする。同じID/digestの既存docが別用途または別注文に属する場合は衝突として停止する。途中で止まった場合は衝突を確認してから同じコマンドを再実行できる。旧job_idが残る注文やpayment_processing中の注文はreviewへ移し、実行を自動再開しない。旧PayPay ledgerのattempted状態はoutcome_unknownとして取り込む。
 
 dry-run summaryでは、注文DBとPayPay ledgerの対応を複数方向から検査する。次のすべてが **0** であることを確認するまで `--apply` は実行できない。
 
@@ -265,6 +265,8 @@ dry-run summaryでは、注文DBとPayPay ledgerの対応を複数方向から�
 - Orphaned payment ledger rows
 - Duplicate payment digest records
 - Orders with multiple payment attempts
+
+Shop order snapshot schemaとPayPay ledger snapshot schemaの表示が両方 `OK` であることも必須。どちらかが `FAILED` の場合、dry-runは書き込みを行わず、`--apply` は拒否する。金額・数量・時刻・暗号化blob等の型や範囲が不正な注文行、時刻や状態が不正なledger行も部分的なimportを拒否する。
 
 さらに、不正な注文行または不正な決済台帳行が1件でもあれば、部分的なimportを拒否する。決済済み注文は同一注文IDのledger行に対応し、そのattempt stateも `paid` でなければならない。digestの中身や注文IDは表示しないため、旧snapshotを安全な環境で照合してから再実行する。
 
@@ -283,7 +285,7 @@ PayPay ledger snapshot自体が見つからない場合も `--apply` は拒否�
 - 実PayPayログイン・受取・実ゲーム処理は、ユーザーの明示的な承認なしに行わない。
 - すべての検証が完了するまで `SHOP_LIVE_ORDERS_ENABLED=0` を維持し、Renderは削除・停止しない。
 
-## 14. 予算と安全停止
+## 15. 予算と安全停止
 
 Cloud Billing予算アラートは通知であり、サービスの自動停止を保証しない。Cloud Run max instances、Job並列数、Cloud Tasks queue rate、Firestore読み書き、Logging量を制限する。月額1,000円を超える見込みが出た場合は実注文を有効化しない。Jobの実行時間・CPU/メモリ・progress write頻度を実測してから費用を再計算する。
 
@@ -301,7 +303,7 @@ Cloud Billing予算アラートは通知であり、サービスの自動停止�
 無料枠はサービスごとに適用単位が異なり、請求先アカウント単位で他プロジェクトと共有されるものがある。無料枠を使い切っている場合や、東京リージョンの料金が異なる場合は追加料金が発生する。Firestoreの無料枠は日次でリセットされる。**この無料枠表だけでは月額1,000円以内を保証できない。**
 
 
-## 15. Cloud Run Job終了状態の照合スケジュール
+## 16. Cloud Run Job終了状態の照合スケジュール
 
 Dispatcherには /reconcile エンドポイントも実装されている。Workerが強制終了し、Firestoreに最終状態を書けなかった場合に、Cloud Run Job Executionの実際の終了状態を照合して注文をreviewへ移す。
 
@@ -309,17 +311,7 @@ Cloud Schedulerに catsdaiko-execution-reconcile を追加し、1分ごとに非
 
 この照合は成功扱い・自動再実行を行わない。Cloud Run Executionが終了済みなのにFirestoreがrunningのままの場合は、結果不明としてreviewにし、worker slotのみ解放する。transfer lockは保持し、管理者がゲーム側の状態を確認するまで同じ引継ぎコードを再利用しない。
 
-Schedulerの登録例:
-
-```bash
-gcloud scheduler jobs create http catsdaiko-execution-reconcile \\
-  --location=asia-northeast1 \\
-  --schedule="* * * * *" \\
-  --uri="$DISPATCHER_URL/reconcile" \\
-  --http-method=POST \\
-  --oidc-service-account="$SCHEDULER_SA" \\
-  --project="$PROJECT_ID"
-```
+このScheduler jobはセクション11のScheduler設定で既に作成する。ここで同名jobを重複作成しない。既存jobがある場合は `gcloud scheduler jobs update http` で設定を更新する。
 
 Cloud Run JobのExecution APIを読むため、Dispatcher Service Accountには対象Job/Projectの実行状態を取得できる最小権限を追加する。roles/run.viewerをProject全体へ付与する前に、可能なら対象リソース単位の権限境界を確認する。
 
@@ -327,7 +319,7 @@ Dispatcherがslot予約後、Cloud Run JobのExecution名をFirestoreへ保存�
 
 **このケースではslotを自動解放しない。** Job起動APIが受理済みか否かを確認できないため、slotを解放して再起動すると同じ注文が二重処理される危険がある。管理者はCloud Run JobのExecutions一覧・該当注文・Firestore execution/outboxを照合し、起動していないことを確認できた場合だけ、専用の安全な復旧手順でslotを解除する。現時点で自動解除機能は未実装。
 
-## 15. 公式仕様リンク
+## 17. 公式仕様リンク
 
 - [Cloud Run Job execution / overrides](https://cloud.google.com/run/docs/execute/jobs)
 - [Cloud Run IAM roles](https://cloud.google.com/run/docs/reference/iam/roles)
@@ -341,7 +333,7 @@ Dispatcherがslot予約後、Cloud Run JobのExecution名をFirestoreへ保存�
 - [Artifact Registry pricing](https://cloud.google.com/artifact-registry/pricing)
 
 
-## 16. Worker snapshot log/report chunk保存
+## 18. Worker snapshot log/report chunk保存
 
 Firestore Execution本体には進捗メタデータのみを保存し、`log` / `warn` / `report` / `skipped` は `execution_logs/{execution_id}/chunks/{chunk_id}` に分離する。
 
@@ -354,17 +346,17 @@ Firestore Execution本体には進捗メタデータのみを保存し、`log` /
 このchunk化はFirestore EmulatorのCI成功を確認してから本番切替候補とする。現時点ではFirestore backendはproductionで有効化しない。
 
 
-## 17. PayPay ledger snapshotのschema確認
+## 19. PayPay ledger snapshotのschema確認
 
 本番migrationの `--apply` 前に、暗号化ledger snapshotの存在だけでなく、SQLite内に `links` テーブルと `digest` / `order_id` / `state` / `created` 列がすべて存在することを確認する。欠落・schema不一致の場合はFirestore書き込み前に停止する。dry-runでの調査は可能だが、空台帳としてimportを続けてはいけない。
 
 
-## 18. Worker reportのsecret redaction
+## 20. Worker reportのsecret redaction
 
 Workerはlog/warn/errorだけでなく、Firestoreに保存するreport/skipped配列のネストしたdict/listも再帰的にsecret redactionする。転送コード・PINなどを含む文字列を置換し、reportの構造と長さは維持する。単一itemや総chunk数がFirestore chunk上限を超える場合は自動切り捨てせずreviewへ回す。
 
 
-## 19. Unknown Job launchの読み取り専用調査
+## 21. Unknown Job launchの読み取り専用調査
 
 Dispatcherの `run_job` 呼び出しがタイムアウトすると、Cloud Run側でJobが受理されたかどうか分からないまま、Firestoreは `review / outcome_unknown` になる。この場合はslotとtransfer lockを保持し、自動再実行しない。
 
@@ -389,12 +381,12 @@ python shop_cloud_run_recovery.py \
 **このコマンドは読み取り専用であり、slot解放・transfer lock解除・Job再実行は一切行わない。** no-matchを根拠に手動解除もしない。別途Cloud Run ConsoleのExecutions、Cloud Audit Logs、Firestoreのorder/execution/outboxを照合し、二重実行がないと確証を得るまでreviewを維持する。
 
 
-## 20. Dispatcher operation名のみ保存された曖昧起動
+## 22. Dispatcher operation名のみ保存された曖昧起動
 
 Cloud Run Job起動のlong-running operation名はFirestoreに保存できたが、Execution名がまだ取得できない状態が600秒以上続く場合、reconcilerは `launching` / `dispatched` のどちらからでも注文・executionをreview/outcome_unknownへ移す。slotは解放せず、transfer lockがある場合も保持する。その後はsection 19の読み取り専用InspectorでExecution引数を照合する。
 
 
-## 21. Runtime service account IAM
+## 23. Runtime service account IAM
 
 実環境を作成する前に [Cloud Run IAM matrix](CLOUD_RUN_IAM_MATRIX.md) を確認する。Web / Dispatcher / Worker / Cloud Tasks OIDC / Scheduler OIDCはidentityを分離する。runtime service accountへOwner / Editor / Project-wide run.admin / Project-wide Secret Accessorを付与しない。Firestore server SDKは `roles/datastore.user`、Inspectorはread-onlyの `roles/datastore.viewer` を使い、Secret Managerは個別Secret単位で付与する。
 
