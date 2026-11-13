@@ -13,6 +13,7 @@ class ShopStoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         os.environ["SHOP_DB_PATH"] = str(Path(self.tmp.name) / "orders.sqlite3")
+        os.environ["SHOP_STORAGE_BACKEND"] = "legacy"
         os.environ["PAYPAY_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
         os.environ["SHOP_CATALOG_JSON"] = json.dumps([
             {"id": "svc-a", "title": "テスト商品", "price_yen": 1234, "description": "説明"}
