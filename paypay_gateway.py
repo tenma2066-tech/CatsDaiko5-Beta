@@ -414,7 +414,7 @@ def _legacy_ledger_contains_digest(digest: str) -> bool:
     """Check the pre-Firestore ledger without creating or uploading a database."""
     if github_runtime_store.enabled():
         encrypted = github_runtime_store.read_blob_readonly(
-            "paypay-ledger.sqlite3", _LEDGER_FILE
+            "paypay-ledger.sqlite3"
         )
         if encrypted is None:
             raise PayPayError(
