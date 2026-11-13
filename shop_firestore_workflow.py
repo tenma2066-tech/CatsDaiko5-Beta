@@ -133,7 +133,7 @@ class FirestoreWorkflowRepository:
             if not snapshot.exists:
                 raise WorkflowStateError("outbox item not found")
             data = snapshot.to_dict()
-            if data.get("state") != "pending":
+            if data.get("state") != "task_enqueued":
                 return None
             tx.update(reference, {
                 "state": "launching",
