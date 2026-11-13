@@ -175,6 +175,7 @@ def public_order(order_id: str, access_token: str):
     ):
         return None
     return {"id": row["id"], "title": row["title"], "amount": row["amount"],
+            "quantity": row.get("quantity", 1), "unit_price_yen": row.get("unit_price_yen", 0),
             "status": row["status"], "credentials_submitted": bool(row["credentials_submitted"]),
             "created": int(row["created"])}
 
@@ -183,12 +184,14 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
     if status not in allowed:
         raise ShopError("不正な注文状態です。")
     with _db() as db:
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT status,credentials_submitted FROM orders WHERE id=?", (order_id,)).fetchone()
         if not row:
             raise ShopError("注文が見つかりません。")
         current = row["status"]
         transitions = {
-            "awaiting_payment": {"paid", "review", "cancelled"},
+            "awaiting_payment": {"review", "cancelled"},
+            "payment_processing": {"review", "cancelled"},
             "paid": {"fulfilling", "cancelled"},
             "review": {"paid", "cancelled"},
             "fulfilling": {"completed"},
@@ -198,9 +201,11 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
             raise ShopError("この注文状態からは変更できません。")
         if status == "fulfilling" and not row["credentials_submitted"]:
             raise ShopError("購入者の引継ぎ情報が未入力です。")
-        db.execute("""UPDATE orders SET status=?,payment_digest=COALESCE(?,payment_digest),
-                      payment_note=?,updated=? WHERE id=?""",
-                   (status, payment_digest, (note or "")[:300], time.time(), order_id))
+        changed = db.execute("""UPDATE orders SET status=?,payment_digest=COALESCE(?,payment_digest),
+                                payment_note=?,updated=? WHERE id=? AND status=?""",
+                             (status, payment_digest, (note or "")[:300], time.time(), order_id, current))
+        if changed.rowcount != 1:
+            raise ShopError("注文状態が同時に更新されました。再読み込みしてください。")
 
 def admin_orders(limit=100):
     with _db() as db:
