@@ -845,3 +845,30 @@ F. execution完了:
 - Firestore adapter/Emulator、Cloud Tasks outbox、Job dispatcher/entrypoint、slot lease/transfer lockは未実装。GCP/Render/PayPay/実注文は未変更。SHOP_LIVE_ORDERS_ENABLED=0を維持。
 
 次の作業は最新CIを確認し、必要な修正を行う。次段階ではFirestore adapterに必要なトランザクション契約を定義し、Firestore Emulatorを用いた並行claim・重複Task・不確定決済結果の試験を追加する。
+
+## 22. Firestore Repository adapterの初期実装（2026-11-13）
+
+### 22.1 追加したもの
+
+- shop_firestore_repository.py を追加し、FirestoreOrderRepositoryとFirestorePaymentRepositoryの初期実装を作成した。
+- FirestoreOrderRepositoryは注文作成、取得、一覧、引継ぎ情報の暗号化Blob保存、実行claim、Job bind/release、注文状態遷移を実装。状態変更はFirestore transaction内で読み取り・条件確認・更新する。
+- FirestorePaymentRepositoryは決済claim/releaseと、決済完了時のpayment_attempts digest一意化・注文paid更新をtransactionで実施する。
+- requirements.txt に google-cloud-firestore>=2.16 を追加。
+- test_firestore_repository.py を追加。FIRESTORE_EMULATOR_HOSTがある場合、決済・資格情報保存・同時実行claim・状態遷移・重複payment digestをFirestore Emulatorで検証する。Emulatorがない通常CIでは明示的にskipする。
+- .github/workflows/ci.yml にFirestore repository test commandを追加。通常CIでは依存パッケージのimportとskip判定まで確認する。
+- Firestore adapterはまだshop_storage / shop_storeの実行時選択へ接続していない。SHOP_STORAGE_BACKEND=firestoreは引き続きfail-closed。PayPay ledgerの全状態移行、OTP state、outbox、worker slot lease、transfer lockが未完了のためである。
+
+### 22.2 注意点・未検証事項
+
+- Firestore Emulatorを起動した統合テストはまだ実行していない。Emulator環境での実トランザクション検証を成功扱いしない。
+- FirestorePaymentRepositoryのpayment_attemptsは初期のdigest重複防止・完了記録であり、既存 paypay-ledger.sqlite3 の attempted / pending / review / outcome_unknown ライフサイクル全体を置き換えたものではない。
+- Firestoreへの本番データ移行、Secret Managerへの暗号化鍵移設、Cloud Tasks/Cloud Run Job連携、Firestore Security Rules/IAM、費用実測は未実施。
+- Google Cloud credentials/project/billingは不要なまま。認証情報をコードやGitHubへ追加していない。
+
+### 22.3 安全状態
+
+- 専用ブランチ feature/cloud-run-firestore-foundation とDraft PR #9のみ変更。mainへ未マージ。
+- Render設定・デプロイ・runtime-data・PayPay認証/決済データは変更なし。実ログイン・実決済・実注文なし。
+- SHOP_LIVE_ORDERS_ENABLED=0を維持。安定版CatsDaiko5とBeta mainは未変更。
+
+次の作業は最新CIを確認し、Firestore adapterのEmulator実行環境を用意するか、テスト可能な専用CIジョブを設ける。その後、既存PayPay ledger/OTP状態を含む決済Repositoryの完全な移行境界を設計し、Cloud Tasks outbox・slot lease・transfer lockを実装する。
