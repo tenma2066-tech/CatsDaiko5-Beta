@@ -63,3 +63,6 @@ jobs:
 
       - name: Shop store tests
         run: python -m unittest -v test_shop_store.py
+
+      - name: Firestore repository tests
+        run: python -m unittest -v test_firestore_repository.py
