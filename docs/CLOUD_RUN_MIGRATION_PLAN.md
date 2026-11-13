@@ -1312,3 +1312,14 @@ F. execution完了:
 - Runbook変更commitと本checkpointはこの後に保存。専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はScheduler command例の再fetchを確認。続いてCloud Runのrequest-based min=0、Job maxRetries=0、実行時間上限、Cloud Tasks queue retry cap、Secret/Firestore IAMの最終構成を監査する。GCP Project/Billing/credentialsの用意が必要になるまで実環境リソースは作成しない。
+
+
+## 49. Dispatcher Gunicorn bind portのshell展開依存を除去（2026-11-13）
+
+- Dispatcher ServiceのGunicorn起動argsに `--bind 0.0.0.0:$PORT` と書いていたが、Cloud Runのcommand/argsはshellを介さず直接実行されるため、`$PORT` は展開されず文字列のまま渡る可能性がある。
+- RunbookをCloud Run port `8080`、Gunicorn bind `0.0.0.0:8080` に固定するよう修正。WebのDockerfile既定CMDは `sh -c` 内でPORTを展開するため変更不要。
+- Dispatcher command/argsのshell展開依存をなくし、Cloud RunのPORT設定と一致させる。
+- これはRunbookのみの修正。直前コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI/parallelはsuccess。最新docs HEAD CIは確認待ち。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はRunbookのGunicorn bindが8080固定になったことを再fetchして確認する。実Cloud Run deploy時は `--port=8080` を明示する。
