@@ -1270,3 +1270,15 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はCloud Tasks unit tests / Firestore Emulatorでtask_enqueued recoveryを確認する。taskが削除されていない間は再登録せず、taskがない場合だけ新generationで再登録することを検証する。
+
+
+## 45. Cloud Tasks retry loopの上限設定（2026-11-13）
+
+- `task_enqueued` outboxのsweep回復を追加した結果、Dispatcherが恒久的に利用不能な場合にCloud Tasksが100回試行→削除→新generationで再登録、を無制限に繰り返し費用が増える可能性を確認。
+- Queueの `max-attempts` を100から10へ変更するRunbook案。
+- Firestore `task_generation` は0～3（合計4世代）まで許可。generation 3のTask名が削除済みで再登録不能になった場合、Firestore transactionでoutbox / execution / orderをreviewへ移し、sweep対象から外して自動再登録を停止。
+- このreview遷移はexecutionがqueuedでowner/slot未取得のときだけ実行する。既にlaunching/runningの実行やtransfer lockを巻き戻さない。
+- Emulator testでgeneration cap到達後のreview遷移、unit testでpublisherが再登録を停止することを追加。コードcommit `86b4f8b9eb9f9d229648ae32acb829a50c1c63a1`, `44f96b20d4cec38f3a54ad58d5505a0fb57b64e7`, `5d3d755607b92d7ddb99b312c7ac33b79baa8e08`, malformed order ref guard `e7a61be6b4382b0d707817d44b581c368d48e560`。最新CIはこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はCloud Tasks retry cap / review transitionのFirestore Emulator testを確認。費用暴走を防ぎつつ、実行開始後はslot/transfer lockを保持する安全性を確認する。
