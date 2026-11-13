@@ -1346,8 +1346,9 @@ def shop_submit_credentials(order_id):
         if (operation.get("clone") or operation.get("integrity_only")) and not (transfer_code and pin):
             return jsonify(error="複製・保全チェックには既存セーブの引継ぎコードと暗証番号が必要です。"), 400
         try:
-            shop_store.save_credentials(order_id, key, transfer_code, pin)
-            execution_id = shop_store.enqueue_execution(order_id, key)
+            execution_id = shop_store.submit_credentials_and_enqueue(
+                order_id, key, transfer_code, pin
+            )
             try:
                 published = shop_store.publish_execution(execution_id)
             except shop_store.ShopError:
