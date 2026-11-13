@@ -410,6 +410,73 @@ def _ledger():
     except github_runtime_store.RuntimeStoreError as exc:
         raise PayPayError("runtime_store", str(exc)) from exc
 
+def _legacy_ledger_contains_digest(digest: str) -> bool:
+    """Check the pre-Firestore ledger without creating or uploading a database."""
+    if github_runtime_store.enabled():
+        encrypted = github_runtime_store.read_blob_readonly(
+            "paypay-ledger.sqlite3", _LEDGER_FILE
+        )
+        if encrypted is None:
+            raise PayPayError(
+                "runtime_store",
+                "移行前のPayPay決済台帳が見つからないため、重複確認を実行できません。",
+            )
+        try:
+            raw = _cipher().decrypt(encrypted)
+        except Exception as exc:
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳を復号できません。"
+            ) from exc
+        connection = sqlite3.connect(":memory:")
+        try:
+            connection.deserialize(raw)
+        except sqlite3.DatabaseError as exc:
+            connection.close()
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳が壊れています。"
+            ) from exc
+    else:
+        if not os.path.isfile(_LEDGER_FILE):
+            raise PayPayError(
+                "runtime_store",
+                "移行前のPayPay決済台帳が見つからないため、重複確認を実行できません。",
+            )
+        try:
+            connection = sqlite3.connect(
+                "file:" + os.path.abspath(_LEDGER_FILE) + "?mode=ro", uri=True
+            )
+        except sqlite3.Error as exc:
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳を読み取れません。"
+            ) from exc
+    try:
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "links" not in tables:
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳にlinksテーブルがありません。"
+            )
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(links)")
+        }
+        if not {"digest", "order_id", "state", "created"}.issubset(columns):
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳の形式が正しくありません。"
+            )
+        return connection.execute(
+            "SELECT 1 FROM links WHERE digest=? LIMIT 1", (digest,)
+        ).fetchone() is not None
+    except sqlite3.Error as exc:
+        raise PayPayError(
+            "runtime_store", "移行前のPayPay決済台帳を確認できません。"
+        ) from exc
+    finally:
+        connection.close()
+
+
 async def receive_payment(raw_link: str, amount: int, purchase_id: str, *, external_ledger=False):
     code = _normalize_link(raw_link)
     if not code: raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
@@ -449,12 +516,10 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str, *, exter
             verified=_verify_link(body,amount)
             digest=hashlib.sha256(code.encode()).hexdigest()
             if external_ledger:
-                # Preserve duplicate protection for links recorded before the
-                # Firestore migration. The GitHub-backed legacy ledger is read-only
-                # in this mode; new attempts are written only to Firestore.
-                with _ledger() as db:
-                    if db.execute("SELECT 1 FROM links WHERE digest=?", (digest,)).fetchone():
-                        raise PayPayError("duplicate", "このPayPayリンクは移行前に使用されています。")
+                # Read the pre-migration ledger without opening the normal
+                # read/write SQLite context. Missing/corrupt history fails closed.
+                if _legacy_ledger_contains_digest(digest):
+                    raise PayPayError("duplicate", "このPayPayリンクは移行前に使用されています。")
             else:
                 with _ledger() as db:
                     try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
