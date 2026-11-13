@@ -40,6 +40,10 @@ def _db():
             status TEXT NOT NULL, payment_digest TEXT UNIQUE, payment_note TEXT,
             created REAL NOT NULL, updated REAL NOT NULL
         )""")
+        columns = {row[1] for row in con.execute("PRAGMA table_info(orders)")}
+        if "credentials_submitted" not in columns:
+            con.execute("ALTER TABLE orders ADD COLUMN credentials_submitted INTEGER NOT NULL DEFAULT 0")
+        os.chmod(DB_PATH, 0o600)
         yield con
         con.commit()
     except Exception:
