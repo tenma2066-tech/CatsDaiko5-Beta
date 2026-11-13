@@ -79,10 +79,12 @@ class GoogleCloudRunJobLauncher:
         self._job_resource = job_resource
         self._client = client
 
-    def launch(self, order_id: str, execution_id: str) -> str:
+    def launch(self, order_id: str, execution_id: str, slot_id: str) -> str:
         if not self._job_resource:
             raise ValueError("Cloud Run Job resource is not configured")
         build_task_payload(order_id, execution_id)
+        if not re.fullmatch(r"slot-[0-3]", slot_id or ""):
+            raise ValueError("invalid reserved slot id")
         if self._client is None:
             from google.cloud import run_v2
             self._client = run_v2.JobsClient()
@@ -93,6 +95,7 @@ class GoogleCloudRunJobLauncher:
                     "args": [
                         "--order-id", order_id,
                         "--execution-id", execution_id,
+                        "--slot-id", slot_id,
                     ],
                 }],
             },
@@ -109,9 +112,11 @@ def handle_dispatch_payload(payload: dict[str, Any], repository, job_launcher) -
     claim = repository.begin_dispatch(execution_id)
     if claim is None:
         return {"state": "duplicate_or_already_claimed"}
+    if claim.get("state") == "no_slot":
+        return {"state": "no_slot"}
     try:
         operation_name = job_launcher.launch(
-            claim["order_id"], claim["execution_id"]
+            claim["order_id"], claim["execution_id"], claim["slot_id"]
         )
         repository.mark_dispatch_started(execution_id, operation_name)
         return {"state": "started"}
