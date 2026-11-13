@@ -113,5 +113,58 @@ class ShopStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.public_order(order["id"], "wrong-token"))
 
 
+    def test_original_operation_order_encrypts_payload_and_uses_fixed_price(self):
+        operation = {
+            "items": ["XP"], "subs": [], "others": [], "qty": {},
+            "chars": "", "cat_settings": {}, "safe": True,
+            "dry": False, "clone": False, "integrity_only": False,
+        }
+        order = self.store.create_operation_order(operation, "other-service", 4)
+        self.assertEqual(order["unit_price_yen"], 25)
+        self.assertEqual(order["quantity"], 4)
+        self.assertEqual(order["amount"], 100)
+        public = self.store.public_order(order["id"], order["access_token"])
+        self.assertNotIn("operation", json.dumps(public))
+        self.assertTrue(self.store.claim_payment(order["id"]))
+        self.store.complete_payment(order["id"], "operation-digest")
+        self.store.save_credentials(order["id"], order["access_token"], "transfer-code", "1234")
+        saved = self.store.operation_for_execution(order["id"], order["access_token"])
+        self.assertEqual(saved["items"], ["XP"])
+        self.assertEqual(saved["transfer"], "transfer-code")
+        self.assertEqual(saved["confirm"], "1234")
+        self.assertTrue(self.store.claim_execution(order["id"], order["access_token"]))
+        self.assertFalse(self.store.claim_execution(order["id"], order["access_token"]))
+        self.store.bind_job(order["id"], "job-123")
+        self.assertEqual(
+            self.store.public_order(order["id"], order["access_token"])["job_id"],
+            "job-123",
+        )
+        self.store.set_status(order["id"], "fulfilling")
+        self.store.set_status(order["id"], "completed")
+
+    def test_character_specific_operation_is_always_50_yen_per_character(self):
+        order = self.store.create_operation_order(
+            {"chars": "12,13,14"}, "character-specific", 3
+        )
+        self.assertEqual(order["unit_price_yen"], 50)
+        self.assertEqual(order["amount"], 150)
+
+    def test_operation_order_rejects_invalid_service_and_quantity(self):
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({}, "unknown", 1)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({}, "other-service", 0)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({}, "other-service", 101)
+
+    def test_operation_order_requires_valid_order_token(self):
+        order = self.store.create_operation_order(
+            {"items": ["XP"]}, "other-service", 1
+        )
+        self.assertIsNone(
+            self.store.operation_for_execution(order["id"], "wrong-token")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
