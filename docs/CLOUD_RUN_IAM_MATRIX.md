@@ -39,10 +39,12 @@
 
 実際に必要なSecretは、Cloud Run Web / Dispatcher / Workerそれぞれのimport経路と起動テストを行って確定する。少なくとも次を個別に監査する。
 
-- `PAYPAY_ENCRYPTION_KEY`: 既存暗号化データを復号するため、現行値を維持。再生成・変更禁止。
-- `TRANSFER_LOCK_PEPPER`: WorkerのHMAC transfer lock用。独立したランダム値。Web/Dispatcherには不要なら渡さない。
-- `SECRET_KEY`: Flask session等で使用する場合のみWebへ。
-- `AUTH_GITHUB_TOKEN`: GitHub auth/runtime storeを使用するプロセスだけへ。
+- `PAYPAY_ENCRYPTION_KEY`: 既存暗号化データを復号するため、現行値を維持。WebとWorkerの両方へ同一値を渡す。再生成・変更禁止。
+- `TRANSFER_LOCK_PEPPER`: WorkerのHMAC transfer lock用。独立したランダム値。Worker Jobだけへ。
+- `SECRET_KEY`: Flask session用の安定値。Web Serviceだけへ。
+- `AUTH_GITHUB_TOKEN`: Web Serviceへ。GitHub auth/password storeとruntime-dataの読み書きに必要。
+- `RUNTIME_GITHUB_TOKEN`: 任意の分離token。Webへ。未設定時はAUTH_GITHUB_TOKENへfallback。
+- `APP_PASSWORD`: 設定しない。サイトアクセスパスワードを要求しない構成を維持する。
 - `ADMIN_PASSWORD` 等の既存管理用secret: 実際のコード参照があるプロセスだけへ。
 
 Secretの値を環境変数・GitHub・ログ・CI artifactへ書かない。Cloud RunのSecret Manager連携を使い、値は出力しない。
