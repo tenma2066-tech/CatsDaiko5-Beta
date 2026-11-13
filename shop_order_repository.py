@@ -71,3 +71,34 @@ class SQLiteOrderRepository:
                 "UPDATE orders SET job_id=NULL,updated=? WHERE id=? AND job_id='starting'",
                 (self._clock(), order_id),
             )
+
+    def set_status(self, order_id: str, status: str, *, payment_digest=None, note=None) -> None:
+        transitions = {
+            "awaiting_payment": {"review", "cancelled"},
+            "payment_processing": {"review"},
+            "paid": {"fulfilling", "cancelled"},
+            "review": {"paid", "cancelled"},
+            "fulfilling": {"completed", "review"},
+            "completed": set(),
+            "cancelled": set(),
+        }
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT status,credentials_submitted FROM orders WHERE id=?",
+                (order_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("注文が見つかりません。")
+            current = row["status"]
+            if status not in transitions.get(current, set()):
+                raise ValueError("この注文状態からは変更できません。")
+            if status == "fulfilling" and not row["credentials_submitted"]:
+                raise ValueError("購入者の引継ぎ情報が未入力です。")
+            changed = db.execute(
+                """UPDATE orders SET status=?,payment_digest=COALESCE(?,payment_digest),
+                   payment_note=?,updated=? WHERE id=? AND status=?""",
+                (status, payment_digest, (note or "")[:300], self._clock(), order_id, current),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("注文状態が同時に更新されました。再読み込みしてください。")
