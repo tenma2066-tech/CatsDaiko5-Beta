@@ -53,7 +53,7 @@ Do not enable live order intake merely because the app deploys or the unit tests
 
 ## Runtime constraints
 
-The GitHub runtime store is a commit-backed encrypted snapshot store, not a mounted filesystem or a transactional distributed database. Keep the current single Render instance / single Gunicorn worker assumption. Do not scale horizontally or enable multiple workers without redesigning job coordination and persistence.
+The GitHub runtime store is a commit-backed encrypted snapshot store, not a mounted filesystem or a transactional distributed database. Active worker jobs are still held in process memory; if the service restarts before a customer next checks progress, the order is moved to manual review rather than silently restarted. Keep the current single Render instance / single Gunicorn worker assumption. Do not scale horizontally or enable multiple workers without redesigning job coordination and persistence.
 
 ## Current implementation boundary
 
