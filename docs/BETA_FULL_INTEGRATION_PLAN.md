@@ -35,8 +35,10 @@ Keep the original CatsDaiko5/Discord-derived service UI and processing capabilit
 - Character-specific selection: 50 JPY per selected character.
 - All other service selections: 25 JPY per selected character.
 - Quantity is limited to 1–100 where quantity applies.
-- The server must derive billable character count and total from validated selections. It must not trust a submitted amount, unit price, or arbitrary SKU label.
-- Before implementation, map each original UI operation to the pricing unit explicitly. Do not assume that an item count, quantity value, or selected character count are interchangeable.
+- The billable unit is the order's requested character quantity (1–100), not the number of checkboxes, menu options, or item quantities selected in the original UI.
+- The server selects the unit rate from the service category (character-specific selection = 50 JPY; every other service = 25 JPY) and calculates `amount = character_quantity × unit_rate`.
+- The checkout summary must show the service category, requested character quantity, unit rate, and total. It must not trust a submitted amount, unit price, or arbitrary SKU label.
+- Preserve the original UI selections separately as the operation payload; do not use those checkbox counts as the billing quantity.
 
 ## Implementation sequence
 
