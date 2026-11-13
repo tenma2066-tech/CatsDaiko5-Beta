@@ -151,6 +151,11 @@ def create_operation_order(operation: dict, quantity: int):
     """
     if not isinstance(operation, dict) or len(json.dumps(operation, ensure_ascii=False)) > 100_000:
         raise ShopError("注文内容が大きすぎるか、形式が正しくありません。")
+    for field, default in (("safe", True), ("dry", False), ("clone", False), ("integrity_only", False)):
+        if field in operation and type(operation[field]) is not bool:
+            raise ShopError(f"注文オプション「{field}」の形式が正しくありません。")
+    if operation.get("clone") and operation.get("integrity_only"):
+        raise ShopError("保全チェックとアカウント複製は同時に選択できません。")
     character_count = _selected_character_count(operation.get("chars", ""))
     if character_count:
         service_type = "character-specific"
