@@ -1212,14 +1212,19 @@ def shop_home():
 <p class="muted">次の画面でPayPay決済を行います。決済確認後に引継ぎコードと暗証番号を入力します。</p>
 <button id="place">PayPay決済へ進む</button><p id="error" class="error"></p></div>
 <script>
-const products=__PRODUCTS__;let selected=null;\nconst ordersEnabled=__ORDERS_ENABLED__;\nif(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
+const products=__PRODUCTS__;let selected=null;
+const ordersEnabled=__ORDERS_ENABLED__;\nif(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
 const yen=n=>new Intl.NumberFormat('ja-JP').format(n)+'円';
 const list=document.getElementById('products');
 if(!products.length){document.getElementById('catalog-error').textContent='現在、販売商品が設定されていません。管理者にお問い合わせください。';}
 products.forEach(p=>{const el=document.createElement('button');el.type='button';el.style.textAlign='left';el.innerHTML='';
 el.textContent=p.title+'　'+yen(p.price_yen)+(p.description?' — '+p.description:'');
 el.addEventListener('click',()=>{selected=p;document.getElementById('selected-title').textContent=p.title;document.getElementById('selected-price').textContent=yen(p.price_yen);document.getElementById('checkout').hidden=false;document.getElementById('checkout').scrollIntoView({behavior:'smooth'});});list.appendChild(el);});
-document.getElementById('place').addEventListener('click',async()=>{
+const placeButton=document.getElementById('place');
+placeButton.disabled=!ordersEnabled;
+if(!ordersEnabled)placeButton.textContent='現在注文受付停止中';
+placeButton.addEventListener('click',async()=>{
+ if(!ordersEnabled)return;
  const error=document.getElementById('error');error.textContent='';
  if(!selected)return;
  const button=document.getElementById('place');button.disabled=true;button.textContent='注文を作成中…';
@@ -1288,6 +1293,7 @@ document.getElementById('send-credentials').addEventListener('click',async()=>{
  }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='引継ぎ情報を送信';}
 });
 refresh();
+setInterval(refresh,5000);
 </script>""".replaceAll("__ID__", order.id).replace("__TITLE__", order.title).replace("__AMOUNT__", String(order.amount))
     return _shop_page("注文確認", body)
 
