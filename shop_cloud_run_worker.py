@@ -184,6 +184,24 @@ def _redact(value: Any, secrets_to_redact: tuple[str, ...]) -> str:
     return text[:500]
 
 
+def _redact_nested(value: Any, secrets_to_redact: tuple[str, ...]) -> Any:
+    """Redact secrets recursively without changing report structure or truncating it."""
+    if isinstance(value, str):
+        for secret in secrets_to_redact:
+            if secret:
+                value = value.replace(secret, "[REDACTED]")
+        return value
+    if isinstance(value, dict):
+        return {
+            _redact_nested(str(key), secrets_to_redact):
+            _redact_nested(item, secrets_to_redact)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_nested(item, secrets_to_redact) for item in value]
+    return value
+
+
 class _ProgressPipe:
     def __init__(self, workflow, execution_id, owner, cipher, secrets_to_redact):
         self.workflow = workflow
@@ -209,8 +227,8 @@ class _ProgressPipe:
             "step": step,
             "log": [_redact(line, self.secrets_to_redact) for line in (job.get("log") or [])[-60:]],
             "warn": [_redact(line, self.secrets_to_redact) for line in (job.get("warn") or [])[-100:]],
-            "report": job.get("report") or [],
-            "skipped": job.get("skipped") or [],
+            "report": _redact_nested(job.get("report") or [], self.secrets_to_redact),
+            "skipped": _redact_nested(job.get("skipped") or [], self.secrets_to_redact),
             "dry": job.get("dry"),
             "clone": job.get("clone"),
             "integrity_only": job.get("integrity_only"),
