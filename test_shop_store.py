@@ -33,7 +33,8 @@ class ShopStoreTests(unittest.TestCase):
         self.assertNotIn("transfer-secret", json.dumps(public))
         with self.assertRaises(self.store.ShopError):
             self.store.save_credentials(order["id"], order["access_token"], "transfer-secret", "9876")
-        self.store.set_status(order["id"], "paid", payment_digest="digest-1")
+        self.assertTrue(self.store.claim_payment(order["id"]))
+        self.store.complete_payment(order["id"], "digest-1")
         self.store.save_credentials(order["id"], order["access_token"], "transfer-secret", "9876")
         public_after = self.store.public_order(order["id"], order["access_token"])
         self.assertTrue(public_after["credentials_submitted"])
@@ -43,8 +44,10 @@ class ShopStoreTests(unittest.TestCase):
         self.assertEqual(admin["credentials"]["pin"], "9876")
 
     def test_price_is_always_taken_from_server_catalog(self):
-        order = self.store.create_order("svc-a")
-        self.assertEqual(order["amount"], 1234)
+        order = self.store.create_order("svc-a", quantity=2)
+        self.assertEqual(order["unit_price_yen"], 1234)
+        self.assertEqual(order["quantity"], 2)
+        self.assertEqual(order["amount"], 2468)
 
     def test_unknown_product_rejected(self):
         with self.assertRaises(self.store.ShopError):
@@ -52,7 +55,8 @@ class ShopStoreTests(unittest.TestCase):
 
     def test_order_state_machine_requires_credentials_before_fulfillment(self):
         order = self.store.create_order("svc-a")
-        self.store.set_status(order["id"], "paid", payment_digest="digest-2")
+        self.assertTrue(self.store.claim_payment(order["id"]))
+        self.store.complete_payment(order["id"], "digest-2")
         with self.assertRaises(self.store.ShopError):
             self.store.set_status(order["id"], "fulfilling")
         self.store.save_credentials(order["id"], order["access_token"], "transfer", "9876")
@@ -61,6 +65,28 @@ class ShopStoreTests(unittest.TestCase):
         with self.assertRaises(self.store.ShopError):
             self.store.set_status(order["id"], "paid")
 
+    def test_default_catalog_has_requested_per_unit_prices(self):
+        os.environ.pop("SHOP_CATALOG_JSON", None)
+        items = {item["id"]: item for item in self.store.catalog()}
+        self.assertEqual(items["character-specific"]["unit_price_yen"], 50)
+        self.assertEqual(items["other-service"]["unit_price_yen"], 25)
+
+    def test_payment_claim_is_atomic_and_only_one_request_wins(self):
+        order = self.store.create_order("svc-a")
+        self.assertTrue(self.store.claim_payment(order["id"]))
+        self.assertFalse(self.store.claim_payment(order["id"]))
+        self.assertEqual(self.store.public_order(order["id"], order["access_token"])["status"],
+                         "payment_processing")
+        self.assertTrue(self.store.release_payment(order["id"]))
+        self.assertTrue(self.store.claim_payment(order["id"]))
+        self.store.complete_payment(order["id"], "digest-race")
+        self.assertFalse(self.store.claim_payment(order["id"]))
+
+    def test_quantity_limits_are_enforced(self):
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_order("svc-a", quantity=0)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_order("svc-a", quantity=101)
     def test_wrong_access_token_cannot_read_order(self):
         order = self.store.create_order("svc-a")
         self.assertIsNone(self.store.public_order(order["id"], "wrong-token"))
