@@ -177,6 +177,20 @@ def read_blob(name: str, local_path=None):
             raise
     return None
 
+def read_blob_readonly(name: str, local_path=None):
+    """Read a runtime blob without migrating, creating, committing, or uploading it."""
+    if _config() is None:
+        if local_path and Path(local_path).is_file():
+            return Path(local_path).read_bytes()
+        return None
+    raw, _ = _read_remote(name, use_cache=False)
+    if raw is not None:
+        return raw
+    if local_path and Path(local_path).is_file():
+        return Path(local_path).read_bytes()
+    return None
+
+
 def write_blob(name: str, raw: bytes, *, create_only: bool = False):
     """Atomically create/update one file using the current Git blob SHA."""
     cfg = _config()
