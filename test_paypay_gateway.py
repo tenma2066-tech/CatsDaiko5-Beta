@@ -74,6 +74,20 @@ class PayPayGatewayValidationTests(unittest.TestCase):
         with self.assertRaises(paypay_gateway.PayPayError):
             paypay_gateway.payment_link_digest("https://evil.example/AbCd123456")
 
+    def test_legacy_otp_state_consume_is_single_use(self):
+        original = dict(paypay_gateway._pending_otp)
+        try:
+            paypay_gateway._pending_otp_clear()
+            paypay_gateway._pending_otp_save({"otp_reference_id": "single-use"})
+            first = paypay_gateway._pending_otp_consume()
+            second = paypay_gateway._pending_otp_consume()
+            self.assertEqual(first["otp_reference_id"], "single-use")
+            self.assertEqual(second, {})
+            self.assertFalse(paypay_gateway.otp_pending())
+        finally:
+            paypay_gateway._pending_otp.clear()
+            paypay_gateway._pending_otp.update(original)
+
     def test_legacy_otp_state_helpers_keep_existing_in_memory_behavior(self):
         original = dict(paypay_gateway._pending_otp)
         try:
