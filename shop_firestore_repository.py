@@ -1,8 +1,8 @@
 """Firestore transactional adapters for storefront orders and payments.
 
-These adapters are deliberately not selected by shop_storage yet. The Firestore
-backend stays fail-closed until emulator tests and the full application wiring
-(including the PayPay ledger/outbox) are complete.
+These adapters are selected only when SHOP_STORAGE_BACKEND=firestore. The
+legacy SQLite/GitHub snapshot backend remains the default; Firestore selection
+fails closed rather than silently falling back to legacy storage.
 """
 from __future__ import annotations
 
