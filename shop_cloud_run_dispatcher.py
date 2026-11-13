@@ -36,6 +36,18 @@ class CloudTasksOutboxPublisher:
         self._audience = audience or dispatcher_url
         self._project, self._location, self._queue = project, location, queue
 
+    def publish_pending(self, limit: int = 100) -> dict[str, int]:
+        published = failed = 0
+        for item in self._repository.list_pending_outbox(limit):
+            try:
+                if self.publish(item["execution_id"]):
+                    published += 1
+            except Exception:
+                # Leave the outbox record pending; a later sweep can retry the
+                # deterministic Cloud Tasks create operation safely.
+                failed += 1
+        return {"published": published, "failed": failed}
+
     def publish(self, execution_id: str) -> bool:
         item = self._repository.get_outbox_item(execution_id)
         if not item:
