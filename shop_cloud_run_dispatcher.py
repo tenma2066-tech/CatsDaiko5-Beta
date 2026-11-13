@@ -92,6 +92,7 @@ class GoogleCloudRunJobLauncher:
             "name": self._job_resource,
             "overrides": {
                 "container_overrides": [{
+                    "command": ["python", "shop_cloud_run_worker.py"],
                     "args": [
                         "--order-id", order_id,
                         "--execution-id", execution_id,
