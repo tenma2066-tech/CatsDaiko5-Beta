@@ -8,6 +8,7 @@ overwritten, making an interrupted import safe to rerun.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import sqlite3
@@ -75,6 +76,41 @@ def load_payment_attempts(connection):
     return [dict(row) for row in connection.execute(
         "SELECT digest,order_id,state,created FROM links"
     )]
+
+
+def _is_valid_order_row(row) -> bool:
+    order_id = _row_value(row, "id", "")
+    access_hash = _row_value(row, "access_hash", "")
+    encrypted = _row_value(row, "credential_enc")
+    sku = _row_value(row, "sku", "")
+    title = _row_value(row, "title", "")
+    amount = _row_value(row, "amount")
+    unit_price = _row_value(row, "unit_price_yen", amount)
+    quantity = _row_value(row, "quantity", 1)
+    created = _row_value(row, "created")
+    status = _row_value(row, "status", "review")
+    submitted = _row_value(row, "credentials_submitted", 0)
+    operation_enc = _row_value(row, "operation_enc")
+    service_type = _row_value(row, "service_type", "other-service")
+    job_id = _row_value(row, "job_id")
+    payment_note = _row_value(row, "payment_note", "")
+    return bool(
+        isinstance(order_id, str) and re.fullmatch(r"[A-Z0-9]{10}", order_id)
+        and isinstance(access_hash, str) and re.fullmatch(r"[0-9a-f]{64}", access_hash)
+        and isinstance(encrypted, (bytes, bytearray)) and encrypted
+        and isinstance(sku, str) and 0 < len(sku) <= 80
+        and isinstance(title, str) and 0 < len(title) <= 120
+        and type(amount) is int and 1 <= amount <= 1_000_000
+        and type(unit_price) is int and 0 <= unit_price <= 1_000_000
+        and type(quantity) is int and 1 <= quantity <= 100
+        and type(created) in (int, float) and math.isfinite(float(created))
+        and isinstance(status, str)
+        and type(submitted) in (int, bool) and submitted in (0, 1)
+        and (operation_enc is None or isinstance(operation_enc, (bytes, bytearray)))
+        and isinstance(service_type, str)
+        and (job_id is None or isinstance(job_id, str))
+        and (payment_note is None or isinstance(payment_note, str))
+    )
 
 
 def require_shop_snapshot_for_apply(shop_db):
@@ -206,17 +242,24 @@ def main():
     if shop_db is None:
         raise RuntimeError("encrypted shop runtime snapshot was not found")
     try:
-        orders = load_orders(shop_db)
-        attempts = load_payment_attempts(ledger_db)
+        shop_snapshot_error = ledger_snapshot_error = None
+        try:
+            require_shop_snapshot_for_apply(shop_db)
+        except RuntimeError as exc:
+            shop_snapshot_error = str(exc)
+        try:
+            require_ledger_snapshot_for_apply(ledger_db)
+        except RuntimeError as exc:
+            ledger_snapshot_error = str(exc)
+        orders = load_orders(shop_db) if not shop_snapshot_error else []
+        attempts = load_payment_attempts(ledger_db) if not ledger_snapshot_error else []
         valid_orders = []
         for row in orders:
-            order_id = str(_row_value(row, "id", ""))
-            encrypted = _row_value(row, "credential_enc")
-            access_hash = str(_row_value(row, "access_hash", ""))
-            if (not re.fullmatch(r"[A-Z0-9]{10}", order_id)
-                    or not isinstance(encrypted, (bytes, bytearray)) or not encrypted
-                    or not re.fullmatch(r"[0-9a-f]{64}", access_hash)):
+            if not _is_valid_order_row(row):
                 continue
+            order_id = _row_value(row, "id")
+            encrypted = _row_value(row, "credential_enc")
+            access_hash = _row_value(row, "access_hash")
             valid_orders.append({
                 "id": order_id,
                 "access_hash": access_hash,
@@ -239,30 +282,23 @@ def main():
         valid_order_ids = {row["id"] for row in valid_orders}
         valid_attempts = []
         for row in attempts:
-            digest = str(_row_value(row, "digest", ""))
-            order_id = str(_row_value(row, "order_id", ""))
-            state = str(_row_value(row, "state", ""))
-            if (re.fullmatch(r"[0-9a-f]{64}", digest)
-                    and re.fullmatch(r"[A-Z0-9]{10}", order_id)
+            digest = _row_value(row, "digest", "")
+            order_id = _row_value(row, "order_id", "")
+            state = _row_value(row, "state", "")
+            created = _row_value(row, "created")
+            if (isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+                    and isinstance(order_id, str) and re.fullmatch(r"[A-Z0-9]{10}", order_id)
                     and order_id in valid_order_ids
-                    and state in {"attempted", "pending", "paid", "review"}):
+                    and isinstance(state, str) and state in {"attempted", "pending", "paid", "review"}
+                    and type(created) in (int, float) and math.isfinite(float(created))):
                 valid_attempts.append({
                     "digest": digest,
                     "order_id": order_id,
                     "state": state,
-                    "created": float(_row_value(row, "created", 0) or 0),
+                    "created": float(created),
                 })
 
         digest_coverage = payment_digest_coverage(orders, attempts)
-        shop_snapshot_error = ledger_snapshot_error = None
-        try:
-            require_shop_snapshot_for_apply(shop_db)
-        except RuntimeError as exc:
-            shop_snapshot_error = str(exc)
-        try:
-            require_ledger_snapshot_for_apply(ledger_db)
-        except RuntimeError as exc:
-            ledger_snapshot_error = str(exc)
         print("Dry-run summary" if not args.apply else "Import summary")
         print("Shop order snapshot schema: " + ("OK" if not shop_snapshot_error else "FAILED"))
         print("PayPay ledger snapshot schema: " + ("OK" if not ledger_snapshot_error else "FAILED"))
