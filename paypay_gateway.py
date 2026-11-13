@@ -129,7 +129,8 @@ async def _oauth(payload: dict, referer: str):
 async def begin_login(phone: str, password: str):
     if not re.fullmatch(r"\+?[0-9]{10,15}", phone or "") or not isinstance(password, str) or not 1 <= len(password) <= 256:
         raise PayPayError("invalid_credentials", "電話番号またはパスワードの形式を確認してください。")
-    uuid = str(uuid4())
+    existing = _load_account()
+    uuid = existing["uuid"] if existing and existing.get("phone") == phone else str(uuid4())
     result = await _oauth({"scope":"SIGN_IN","client_uuid":uuid,"grant_type":"password",
                            "username":phone,"password":password,"add_otp_prefix":True,"language":"ja"},
                           "https://www.paypay.ne.jp/app/account/sign-in")
@@ -234,8 +235,23 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
     if not code: raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
     async with _LOCK:
         account = _load_account()
-        if not account or float(account.get("expires_at",0)) <= time.time()+60 or not account.get("session_cookie"):
-            raise PayPayError("login_required", "管理者のPayPay再認証が必要です。")
+        if not account:
+            raise PayPayError("login_required", "管理者のPayPay接続が必要です。")
+        if float(account.get("expires_at",0)) <= time.time()+60 or not account.get("session_cookie"):
+            renewed = await _oauth({"scope":"SIGN_IN","client_uuid":account["uuid"],"grant_type":"password",
+                                    "username":account["phone"],"password":account["password"],
+                                    "add_otp_prefix":True,"language":"ja"},
+                                   "https://www.paypay.ne.jp/app/account/sign-in")
+            if renewed["kind"] == "otp":
+                _pending_otp.clear()
+                _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
+                                    otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"])
+                raise PayPayError("otp_required", "PayPayがSMS認証を要求しました。管理者画面で認証コードを入力してください。")
+            if not renewed.get("session_cookie"):
+                raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
+            account.update(access_token=renewed["access_token"],session_cookie=renewed["session_cookie"],
+                           expires_at=time.time()+renewed["expires_in"])
+            _save_account(account)
         referer=f"https://www.paypay.ne.jp/app/p2p/{code}?pid=SMS&link_key={code}&af_dp=paypay%3A%2F%2Fpending%2Fdetail%3Fsource%3Dsns_link"
         headers=_headers(referer)
         timeout=aiohttp.ClientTimeout(total=25)
