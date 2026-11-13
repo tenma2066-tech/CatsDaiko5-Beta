@@ -6,6 +6,7 @@ grant roles/run.invoker only to the dedicated Cloud Tasks OIDC service account.
 from __future__ import annotations
 
 import os
+import time
 
 from flask import Flask, jsonify, request
 
@@ -63,13 +64,31 @@ def create_app():
             repository = FirestoreWorkflowRepository(client)
             from google.cloud import run_v2
             executions_client = run_v2.ExecutionsClient()
-            checked = reconciled = 0
+            checked = reconciled = unknown_launches = 0
+            stale_launch_seconds = max(
+                60, int(os.environ.get("CLOUD_RUN_STALE_LAUNCH_SECONDS", "600"))
+            )
+            now = time.time()
             for item in repository.list_active_executions(limit=100):
                 owner = item.get("owner")
                 order_id = item.get("order_id")
                 execution_id = item.get("execution_id")
                 execution_name = item.get("cloud_run_execution_name") or owner
-                if not execution_name or not order_id or not execution_id:
+                if not order_id or not execution_id:
+                    continue
+                if not execution_name:
+                    # A dispatcher can die after reserving a slot but before
+                    # persisting the Cloud Run execution name. After a long
+                    # grace period, surface it as unknown for manual review.
+                    # Keep the reserved slot: absence of a name is not proof
+                    # that the Job API did not accept the launch.
+                    started = item.get("updated")
+                    if (item.get("state") == "starting" and isinstance(started, (int, float))
+                            and now - started >= stale_launch_seconds):
+                        repository.mark_dispatch_unknown(
+                            execution_id, "dispatcher_launch_confirmation_timeout"
+                        )
+                        unknown_launches += 1
                     continue
                 if str(execution_name).startswith("worker-"):
                     continue
@@ -91,7 +110,7 @@ def create_app():
                         cloud_run_execution_name=str(execution_name),
                     ):
                         reconciled += 1
-            return jsonify(checked=checked, reconciled=reconciled), 200
+            return jsonify(checked=checked, reconciled=reconciled, unknown_launches=unknown_launches), 200
         except Exception:
             application.logger.exception("Cloud Run execution reconciliation failed")
             return jsonify(error="reconciliation temporarily unavailable"), 503
