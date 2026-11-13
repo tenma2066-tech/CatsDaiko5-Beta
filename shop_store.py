@@ -15,6 +15,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 import shop_storage
 from shop_payment_repository import PaymentRepositoryError, SQLitePaymentRepository
+from shop_order_repository import SQLiteOrderRepository
 
 DB_PATH = Path(os.environ.get("SHOP_DB_PATH", "instance/shop.sqlite3"))
 ORDER_ID_RE = re.compile(r"^[A-Z0-9]{10}$")
@@ -69,6 +70,7 @@ def _db():
         raise ShopError(str(exc)) from exc
 
 _payment_repository = SQLitePaymentRepository(_db)
+_order_repository = SQLiteOrderRepository(_db)
 
 
 def catalog():
@@ -113,13 +115,13 @@ def create_order(sku: str, quantity=1):
         {"transfer_code": "", "pin": ""}, ensure_ascii=False
     ).encode("utf-8"))
     now = time.time()
-    with _db() as db:
-        db.execute("""INSERT INTO orders
-            (id,access_hash,sku,title,amount,unit_price_yen,quantity,credential_enc,
-             credentials_submitted,status,created,updated)
-            VALUES(?,?,?,?,?,?,?, ?,0,'awaiting_payment',?,?)""",
-            (order_id, hashlib.sha256(access_token.encode()).hexdigest(), sku,
-             item["title"], amount, item["unit_price_yen"], quantity, credentials, now, now))
+    _order_repository.create_order({
+        "id": order_id, "access_hash": hashlib.sha256(access_token.encode()).hexdigest(),
+        "sku": sku, "title": item["title"], "amount": amount,
+        "unit_price_yen": item["unit_price_yen"], "quantity": quantity,
+        "credential_enc": credentials, "operation_enc": None,
+        "service_type": sku, "now": now,
+    })
     return {"id": order_id, "access_token": access_token, "title": item["title"],
             "unit_price_yen": item["unit_price_yen"], "quantity": quantity,
             "amount": amount, "status": "awaiting_payment"}
@@ -182,14 +184,13 @@ def create_operation_order(operation: dict, quantity: int):
     ).encode("utf-8"))
     title = "キャラ特定選択" if service_type == "character-specific" else "その他の代行"
     now = time.time()
-    with _db() as db:
-        db.execute("""INSERT INTO orders
-            (id,access_hash,sku,title,amount,unit_price_yen,quantity,credential_enc,
-             operation_enc,service_type,job_id,credentials_submitted,status,created,updated)
-            VALUES(?,?,?,?,?,?,?,?,?,?,NULL,0,'awaiting_payment',?,?)""",
-            (order_id, hashlib.sha256(access_token.encode()).hexdigest(),
-             "original-" + service_type, title, amount, unit_price, quantity,
-             credential_enc, operation_enc, service_type, now, now))
+    _order_repository.create_order({
+        "id": order_id, "access_hash": hashlib.sha256(access_token.encode()).hexdigest(),
+        "sku": "original-" + service_type, "title": title, "amount": amount,
+        "unit_price_yen": unit_price, "quantity": quantity,
+        "credential_enc": credential_enc, "operation_enc": operation_enc,
+        "service_type": service_type, "now": now,
+    })
     return {"id": order_id, "access_token": access_token, "title": title,
             "unit_price_yen": unit_price, "quantity": quantity,
             "amount": amount, "status": "awaiting_payment"}
@@ -240,28 +241,20 @@ def claim_execution(order_id: str, access_token: str):
         row["access_hash"], hashlib.sha256((access_token or "").encode()).hexdigest()
     ):
         raise ShopError("注文が見つかりません。")
-    with _db() as db:
-        changed = db.execute("""UPDATE orders SET job_id='starting',updated=?
-            WHERE id=? AND status='paid' AND credentials_submitted=1 AND job_id IS NULL""",
-            (time.time(), order_id))
-        if changed.rowcount != 1:
-            raise ShopError("この注文は既に処理開始済み、または状態が変わりました。")
+    if not _order_repository.claim_execution(
+        order_id, hashlib.sha256((access_token or "").encode()).hexdigest()
+    ):
+        raise ShopError("この注文は既に処理開始済み、または状態が変わりました。")
     return True
 
 
 def bind_job(order_id: str, job_id: str):
-    with _db() as db:
-        changed = db.execute("""UPDATE orders SET job_id=?,updated=?
-            WHERE id=? AND status='paid' AND credentials_submitted=1 AND job_id='starting'""",
-            (job_id, time.time(), order_id))
-        if changed.rowcount != 1:
-            raise ShopError("処理開始状態を確定できません。管理者による確認が必要です。")
+    if not _order_repository.bind_job(order_id, job_id):
+        raise ShopError("処理開始状態を確定できません。管理者による確認が必要です。")
 
 
 def release_execution(order_id: str):
-    with _db() as db:
-        db.execute("UPDATE orders SET job_id=NULL,updated=? WHERE id=? AND job_id='starting'",
-                   (time.time(), order_id))
+    _order_repository.release_execution(order_id)
 
 
 def claim_payment(order_id: str):
@@ -300,12 +293,11 @@ def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: 
     encrypted = _cipher().encrypt(json.dumps(
         {"transfer_code": transfer_code, "pin": pin}, ensure_ascii=False
     ).encode("utf-8"))
-    with _db() as db:
-        updated = db.execute("""UPDATE orders SET credential_enc=?,credentials_submitted=1,updated=?
-                                WHERE id=? AND status='paid' AND credentials_submitted=0 AND job_id IS NULL""",
-                             (encrypted, time.time(), order_id))
-        if updated.rowcount != 1:
-            raise ShopError("引継ぎ情報は既に送信済み、または注文状態が変わりました。注文画面を再読み込みしてください。")
+    updated = _order_repository.save_credentials(
+        order_id, hashlib.sha256((access_token or "").encode()).hexdigest(), encrypted
+    )
+    if not updated:
+        raise ShopError("引継ぎ情報は既に送信済み、または注文状態が変わりました。注文画面を再読み込みしてください。")
 
 def _row(order_id):
     if not ORDER_ID_RE.fullmatch(order_id or ""):
