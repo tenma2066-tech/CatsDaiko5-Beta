@@ -47,3 +47,4 @@ jobs:
           python -m unittest -v test_cat_customization.py
           python -m unittest -v test_github_auth_store.py
           python -m unittest -v test_shop_store.py
+          python -m unittest -v test_paypay_gateway.py
