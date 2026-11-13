@@ -77,8 +77,8 @@ Firestoreのデータベースは1 Projectにつき既定DBを利用する。Fir
 
 用途別に分ける。
 
-- `catsdaiko-web`: Firestore read/write、Cloud Tasks enqueue、必要なSecret read。
-- `catsdaiko-dispatcher`: Firestore read/write、Cloud Run Jobをoverride付きで起動、outbox sweep時のCloud Tasks enqueue。
+- `catsdaiko-web`: Firestore read/write、注文登録直後のCloud Tasks enqueue/get_task、Task Invoker SAを指定するためのactAs、必要なSecret read。
+- `catsdaiko-dispatcher`: Firestore read/write、Cloud Run Jobをoverride付きで起動、outbox sweep時のCloud Tasks enqueue/get_task、Task Invoker SAを指定するためのactAs。
 - `catsdaiko-worker`: Firestore read/write、`PAYPAY_ENCRYPTION_KEY` と `TRANSFER_LOCK_PEPPER` のSecret read。
 - `catsdaiko-task-invoker`: Cloud Tasksから非公開Dispatcher Serviceを呼ぶOIDC用。
 - `catsdaiko-scheduler-invoker`: Cloud Schedulerから非公開Dispatcherの `/sweep` を呼ぶOIDC用。
@@ -87,13 +87,13 @@ IAMは必要なリソース単位で付与する。
 
 | Principal | Role / Scope |
 |---|---|
-| Web SA | `roles/datastore.user`（Project）、`roles/cloudtasks.enqueuer`（Project）、Secret accessor（必要なSecretのみ） |
-| Dispatcher SA | `roles/datastore.user`、`roles/run.jobsExecutorWithOverrides`（catsdaiko-worker Job）、`roles/run.viewer`（catsdaiko-worker JobのExecution参照）、`roles/cloudtasks.enqueuer`（Project） |
+| Web SA | `roles/datastore.user`（Project）、`roles/cloudtasks.enqueuer` + `roles/cloudtasks.viewer`（対象Queue）、`roles/iam.serviceAccountUser`（Task Invoker SAのみ）、Secret accessor（必要なSecretのみ） |
+| Dispatcher SA | `roles/datastore.user`、`roles/run.jobsExecutorWithOverrides` + `roles/run.viewer`（catsdaiko-worker Job）、`roles/cloudtasks.enqueuer` + `roles/cloudtasks.viewer`（対象Queue）、`roles/iam.serviceAccountUser`（Task Invoker SAのみ） |
 | Worker SA | `roles/datastore.user`、Secret accessor（暗号化鍵・Pepperのみ） |
-| Task Invoker SA | `roles/run.invoker`（catsdaiko-dispatcher Service） |
-| Scheduler Invoker SA | `roles/run.invoker`（catsdaiko-dispatcher Service） |
+| Task Invoker SA | `roles/run.servicesInvoker`（catsdaiko-dispatcher Service） |
+| Scheduler Invoker SA | `roles/run.servicesInvoker`（catsdaiko-dispatcher Service） |
 
-Cloud Tasks用OIDCサービスアカウントはQueueと同じProjectに置く。Web SA（タスク作成者）にはTask Invoker SAへの `roles/iam.serviceAccountUser` を付与する。Cloud Tasks Service Agent（`service-PROJECT_NUMBER@gcp-sa-cloudtasks.iam.gserviceaccount.com`）にもTask Invoker SAへのService Account Userを付与する。Cloud Scheduler用SAにもDispatcher ServiceへのInvokerを付与する。
+Cloud Tasks用OIDCサービスアカウントはQueueと同じProjectに置く。Taskを作成するWeb SAとDispatcher SAにはTask Invoker SAへの `roles/iam.serviceAccountUser` を付与する。Cloud Tasks Service Agent（`service-PROJECT_NUMBER@gcp-sa-cloudtasks.iam.gserviceaccount.com`）にもTask Invoker SAへのService Account Userを付与する。Cloud Scheduler用SAにはDispatcher Serviceへの `roles/run.servicesInvoker` を付与する。
 
 Cloud Run Jobs起動には `roles/run.jobsExecutorWithOverrides` が必要。通常のInvokerだけではoverride付き起動を許可できない。
 
