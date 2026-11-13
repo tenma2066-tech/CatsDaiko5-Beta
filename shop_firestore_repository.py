@@ -7,6 +7,7 @@ backend stays fail-closed until emulator tests and the full application wiring
 from __future__ import annotations
 
 import time
+import re
 from typing import Any
 
 from google.cloud import firestore
