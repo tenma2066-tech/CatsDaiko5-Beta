@@ -80,6 +80,13 @@ class PayPayGatewayValidationTests(unittest.TestCase):
         with self.assertRaises(paypay_gateway.PayPayError):
             paypay_gateway.payment_link_digest("https://evil.example/AbCd123456")
 
+    def test_payment_failure_states_fail_closed_for_uncertain_ledger(self):
+        self.assertEqual(paypay_gateway.payment_failure_state("temporary_hold"), "pending")
+        self.assertEqual(paypay_gateway.payment_failure_state("accept_uncertain"), "outcome_unknown")
+        self.assertEqual(paypay_gateway.payment_failure_state("duplicate"), "review")
+        self.assertEqual(paypay_gateway.payment_failure_state("runtime_store"), "review")
+        self.assertEqual(paypay_gateway.payment_failure_state("link_network"), "rejected")
+
     def test_legacy_ledger_duplicate_check_uses_readonly_encrypted_snapshot(self):
         key = Fernet.generate_key()
         db = sqlite3.connect(":memory:")
