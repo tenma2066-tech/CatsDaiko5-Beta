@@ -275,3 +275,16 @@ Dispatcherがslot予約後、Cloud Run JobのExecution名をFirestoreへ保存�
 - [Cloud Run container runtime contract（CLOUD_RUN_EXECUTION）](https://cloud.google.com/run/docs/container-contract)
 - [Cloud Tasks HTTP target tasks / OIDC](https://cloud.google.com/tasks/docs/create-http-task)
 - [Firestore locations](https://cloud.google.com/firestore/docs/locations)
+
+
+## 16. Worker snapshot log/report chunk保存
+
+Firestore Execution本体には進捗メタデータのみを保存し、`log` / `warn` / `report` / `skipped` は `execution_logs/{execution_id}/chunks/{chunk_id}` に分離する。
+
+- 1chunkあたり推定128KiB以下、最大32chunk。
+- 1つの配列itemが上限を超える、または合計chunk数が32を超える場合は自動切り捨てせず、snapshot保存を明示的に失敗させてreviewへ回す。
+- snapshotの更新はtransaction内で旧chunkを削除し、新revisionのchunk群を作成してからExecution revisionを更新する。旧chunkが残り続けない。
+- 読み出しは `get_execution()` がindex順にchunkを結合し、従来の配列形式を返す。古いinline配列を持つExecutionも読み出せる。
+- Emulatorで大容量logの分割・復元・更新時の旧chunk削除を検証する。
+
+このchunk化はFirestore EmulatorのCI成功を確認してから本番切替候補とする。現時点ではFirestore backendはproductionで有効化しない。
