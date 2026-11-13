@@ -1167,3 +1167,17 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新CIのFirestore Emulatorでdispatched→unknown testを確認し、read-only inspectorもCIに含めて確認する。unknown起動のslot解放は引き続き自動化しない。
+
+
+## 37. Runtime IAMの最小権限マトリクスを追加（2026-11-13）
+
+- Cloud Run Web / Dispatcher / Worker / Cloud Tasks OIDC / Scheduler OIDC / 手動Inspector / migration operatorのidentityを分離したIAM matrixを `docs/CLOUD_RUN_IAM_MATRIX.md` に追加。
+- Firestoreは `roles/datastore.user`（runtime read/write）と `roles/datastore.viewer`（Inspector read-only）を区別。Firestore Security Rulesはclient read/write denyのまま、server SDKはIAMで制御する。
+- Dispatcherは対象Queueの `roles/cloudtasks.enqueuer`、対象Worker Jobの `roles/run.jobsExecutorWithOverrides` と `roles/run.viewer` に限定。Cloud Tasks / Scheduler OIDC SAはPrivate Dispatcher Serviceの `roles/run.servicesInvoker` のみ。
+- Secret Managerは個別Secret resourceへ `roles/secretmanager.secretAccessor` を付与し、Project-wide accessを禁止。PAYPAY_ENCRYPTION_KEYは現行値を維持し、TRANSFER_LOCK_PEPPERはWorkerに限定する案。
+- `roles/run.jobsExecutorWithOverrides` にはcancel権限も含まれるため、その余分な権限を明記。必要ならcustom role検討だが、custom roleのproject scopeとresource binding制約を確認するまで安易に切替しない。
+- 直前HEAD `c5ec0c5590d98a7c01c0c5e41aee8295859ccab0` のCI run `43442916297` は全工程success（Cloud Run recovery inspector tests / Firestore Emulator / Docker build含む）、parallel regression run `43442916589` もsuccess。
+- IAM matrix commit `bcda23676c5e5c6ce8bdaab6155abb1c584a54c2`。runbook / migration checkpointの追記を含む最新HEAD CIはこれから確認。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はIAM matrixとrunbookの整合を確認し、最新HEAD CIを通す。IAMは設計案であり、Project作成後にPolicy Simulatorと実権限テストで検証するまで付与済みとは扱わない。
