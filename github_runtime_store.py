@@ -130,25 +130,28 @@ def read_blob(name: str, local_path=None):
         if local_path and Path(local_path).exists():
             return Path(local_path).read_bytes()
         return None
+    legacy = None
     with _lock("blob:" + name):
         raw, _ = _read_remote(name)
         if raw is not None:
             return raw
         if local_path and Path(local_path).is_file():
             legacy = Path(local_path).read_bytes()
-            try:
-                write_blob(name, legacy, create_only=True)
-                return legacy
-            except RuntimeStoreError:
-                # Another writer may have initialized the remote file between our
-                # first read and create attempt. Prefer that remote copy; never
-                # replace it with the older local snapshot.
-                current, _ = _read_remote(name)
-                if current is not None:
-                    return current
-                raise
-        return None
-
+    if legacy is not None:
+        try:
+            # Do not hold the per-blob read lock while acquiring the global
+            # write lock; all writes use global-lock -> blob-lock ordering.
+            write_blob(name, legacy, create_only=True)
+            return legacy
+        except RuntimeStoreError:
+            # Another writer may have initialized the remote file between our
+            # first read and create attempt. Prefer that remote copy; never
+            # replace it with the older local snapshot.
+            current, _ = _read_remote(name)
+            if current is not None:
+                return current
+            raise
+    return None
 
 def write_blob(name: str, raw: bytes, *, create_only: bool = False):
     """Atomically create/update one file using the current Git blob SHA."""
