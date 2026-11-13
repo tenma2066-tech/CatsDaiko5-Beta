@@ -1303,3 +1303,12 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はCloud Tasks unit tests、Firestore Emulatorのgeneration上限review遷移、Docker buildを最新HEADで通す。
+
+
+## 48. Cloud Schedulerの実行例とCI成功を記録（2026-11-13）
+
+- Runbook section 11にCloud Schedulerの2ジョブ（`/sweep` / `/reconcile`）をAsia/Tokyo・1分間隔・OIDC audience明示で作成するgcloud例を追加。
+- 最新コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI run `43446372753` は全工程success。Cloud Tasks publisher unit tests、Cloud Run recovery inspector tests、Firestore Emulator integration tests（generation上限review遷移含む）、Docker buildをすべて確認。parallel regression run `43446372769` もsuccess。
+- Runbook変更commitと本checkpointはこの後に保存。専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はScheduler command例の再fetchを確認。続いてCloud Runのrequest-based min=0、Job maxRetries=0、実行時間上限、Cloud Tasks queue retry cap、Secret/Firestore IAMの最終構成を監査する。GCP Project/Billing/credentialsの用意が必要になるまで実環境リソースは作成しない。
