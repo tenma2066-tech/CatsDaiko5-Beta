@@ -151,6 +151,38 @@ class RuntimeMigrationParserTests(unittest.TestCase):
         )
         self.assertEqual(result["invalid_attempts"], 1)
 
+    def test_order_row_validation_rejects_bad_numeric_and_blob_fields(self):
+        from migrate_runtime_data_to_firestore import _is_valid_order_row
+
+        valid = {
+            "id": "0123456789",
+            "access_hash": "a" * 64,
+            "credential_enc": b"encrypted",
+            "sku": "sku",
+            "title": "title",
+            "amount": 50,
+            "unit_price_yen": 50,
+            "quantity": 1,
+            "created": 1_800_000_000.0,
+            "status": "paid",
+            "credentials_submitted": 1,
+            "operation_enc": None,
+            "service_type": "other-service",
+            "job_id": None,
+            "payment_note": "",
+        }
+        self.assertTrue(_is_valid_order_row(valid))
+        for key, value in (
+            ("amount", "invalid"),
+            ("quantity", 101),
+            ("created", float("nan")),
+            ("credential_enc", ""),
+            ("status", {}),
+        ):
+            invalid = dict(valid)
+            invalid[key] = value
+            self.assertFalse(_is_valid_order_row(invalid), key)
+
     def test_apply_requires_complete_shop_orders_schema(self):
         from migrate_runtime_data_to_firestore import require_shop_snapshot_for_apply
 
