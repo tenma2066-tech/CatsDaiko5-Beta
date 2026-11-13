@@ -18,7 +18,9 @@ from google.cloud import firestore
 
 class WorkflowStateError(RuntimeError):
     pass
-\n\ndef _estimate_firestore_payload_size(value: Any) -> int:
+
+
+def _estimate_firestore_payload_size(value: Any) -> int:
     """Conservatively estimate serialized payload bytes before a document write."""
     if value is None:
         return 1
