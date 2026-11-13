@@ -410,6 +410,17 @@ def _ledger():
     except github_runtime_store.RuntimeStoreError as exc:
         raise PayPayError("runtime_store", str(exc)) from exc
 
+def payment_failure_state(error_code: str) -> str:
+    """Choose a conservative Firestore attempt state for a PayPay failure."""
+    if error_code == "temporary_hold":
+        return "pending"
+    if error_code == "accept_uncertain":
+        return "outcome_unknown"
+    if error_code in {"accept_unconfirmed", "duplicate", "runtime_store"}:
+        return "review"
+    return "rejected"
+
+
 def _legacy_ledger_contains_digest(digest: str) -> bool:
     """Check the pre-Firestore ledger without creating or uploading a database."""
     if github_runtime_store.enabled():
