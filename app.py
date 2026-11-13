@@ -1315,6 +1315,7 @@ def shop_order_status(order_id):
 def shop_submit_credentials(order_id):
     data = request.get_json(silent=True) or {}
     key = data.get("key", "")
+    claimed = False
     try:
         order = shop_store.public_order(order_id, key)
         if not order:
@@ -1323,6 +1324,7 @@ def shop_submit_credentials(order_id):
             return jsonify(error="この注文は既に処理開始済みです。"), 409
         shop_store.save_credentials(order_id, key, data.get("transfer_code", ""), data.get("pin", ""))
         shop_store.claim_execution(order_id, key)
+        claimed = True
         operation = shop_store.operation_for_execution(order_id, key)
         # Reuse the original /run validation, queue and worker path. The internal
         # request is scoped to this order and never exposes /run to customers.
@@ -1336,15 +1338,18 @@ def shop_submit_credentials(order_id):
             result = response.get_json(silent=True) or {}
             if response_status >= 400 or not result.get("job"):
                 shop_store.release_execution(order_id)
+                claimed = False
                 return jsonify(error=result.get("error", "処理を開始できませんでした。")), response_status
         shop_store.bind_job(order_id, result["job"])
         shop_store.set_status(order_id, "fulfilling", note="決済確認済み・処理開始")
         return jsonify(ok=True, job=result["job"], message="引継ぎ情報を受け付け、処理を開始しました。")
     except shop_store.ShopError as exc:
-        shop_store.release_execution(order_id)
+        if claimed:
+            shop_store.release_execution(order_id)
         return jsonify(error=str(exc)), 400
     except Exception:
-        shop_store.release_execution(order_id)
+        if claimed:
+            shop_store.release_execution(order_id)
         app.logger.exception("Could not start paid order %s", order_id)
         return jsonify(error="処理を開始できませんでした。管理者による確認が必要です。"), 500
 
@@ -1361,7 +1366,20 @@ def shop_order_progress(order_id):
     with app.test_request_context("/status/" + job_id, method="GET"):
         session["_order_execution"] = True
         session["job_owner"] = "order:" + order_id
-        return status(job_id)
+        response = status(job_id)
+        job_data = response.get_json(silent=True) if hasattr(response, "get_json") else None
+    if isinstance(job_data, dict) and job_data.get("status") == "done":
+        try:
+            shop_store.set_status(order_id, "completed", note="処理完了")
+        except shop_store.ShopError:
+            pass
+    elif isinstance(job_data, dict) and job_data.get("status") == "error":
+        try:
+            shop_store.set_status(order_id, "review", note="処理エラー・管理者確認待ち")
+        except shop_store.ShopError:
+            pass
+    return response
+
 
 @app.post("/api/shop/order/<order_id>/paypay")
 def shop_paypay_submit(order_id):
@@ -1437,7 +1455,7 @@ def admin_orders_page():
 {% if o.credentials_submitted %}<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>{% else %}<p>引継ぎ情報：購入者の入力待ち</p>{% endif %}
 <form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
 <select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
-        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed"],"completed":[],"cancelled":[]})
+        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed","review"],"completed":[],"cancelled":[]})
     return _shop_page("注文管理", '<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>'+order_body+'</div>')
 
 @app.post("/admin/orders/<order_id>/status")
