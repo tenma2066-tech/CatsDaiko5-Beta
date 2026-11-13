@@ -219,6 +219,8 @@ python migrate_runtime_data_to_firestore.py --apply
 
 このツールはGitHub上の暗号化snapshotだけを読み取り、ローカルSQLiteをGitHubへ自動uploadしない。Firestoreへはcreate-onlyで書き込み、既存docを上書きしない。途中で止まった場合は同じコマンドを再実行できる。旧job_idが残る注文やpayment_processing中の注文はreviewへ移し、実行を自動再開しない。旧PayPay ledgerのattempted状態はoutcome_unknownとして取り込む。
 
+dry-run summaryには、注文DBの `payment_digest` とPayPay ledgerの `links.digest` の照合件数が表示される。**「Order payment digests missing from ledger」と「Invalid order payment digests」が両方0であることを確認するまで `--apply` を実行しない。** 1件でもあればimportはfail-closedで停止する。digestの中身は表示されないため、旧snapshotを安全な環境で照合してから再実行する。
+
 **本番移行前に、dry-runの件数と管理画面の注文数を照合すること。** 取り込み後もPayPay account.encはGitHub runtime-dataに残す。暗号化キーは変更しない。
 
 ## 14. データ移行・切替の未完了ゲート
