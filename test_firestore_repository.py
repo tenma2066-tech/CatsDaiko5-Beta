@@ -100,6 +100,7 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertEqual(order["job_id"], "queued")
         self.assertEqual(workflow.get_execution(execution_id)["state"], "queued")
         self.assertEqual(workflow.get_outbox_item(execution_id)["state"], "pending")
+        self.assertEqual(workflow.get_outbox_item(execution_id)["task_generation"], 0)
         with self.assertRaises(WorkflowStateError):
             workflow.submit_credentials_and_enqueue(
                 self.order_id, self.access_hash, b"replacement", "exec_" + secrets.token_hex(8)
@@ -144,6 +145,36 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         )
         self.assertEqual(self.orders.get_order(self.order_id)["status"], "paid")
         self.client.collection("payment_attempts").document(digest).delete()
+
+    def test_outbox_task_generation_advances_only_while_pending(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        self.assertEqual(
+            workflow.advance_outbox_task_generation(execution_id, 0), 1
+        )
+        # Concurrent sweeps that observed generation 0 converge on generation 1.
+        self.assertEqual(
+            workflow.advance_outbox_task_generation(execution_id, 0), 1
+        )
+        self.assertEqual(
+            workflow.advance_outbox_task_generation(execution_id, 1), 2
+        )
+        workflow.mark_task_enqueued(execution_id)
+        self.assertIsNone(
+            workflow.advance_outbox_task_generation(execution_id, 2)
+        )
+        self.assertEqual(
+            workflow.get_outbox_item(execution_id)["task_generation"], 2
+        )
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("orders").document(self.order_id).delete()
 
     def test_dispatch_accepts_task_delivery_before_publish_state_commit(self):
         workflow = FirestoreWorkflowRepository(self.client)
