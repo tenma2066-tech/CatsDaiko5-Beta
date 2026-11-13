@@ -26,6 +26,8 @@ import aiohttp
 from cryptography.fernet import Fernet
 
 import github_runtime_store
+import shop_storage
+from shop_firestore_workflow import FirestoreWorkflowRepository
 
 TOKEN_ENDPOINT = "https://www.paypay.ne.jp/app/v1/oauth/token"
 LINK_CHECK_ENDPOINT = "https://www.paypay.ne.jp/app/v2/p2p-api/getP2PLinkInfo"
@@ -43,7 +45,66 @@ _ACCOUNT_FILE = _ROOT / "account.enc"
 _LEDGER_FILE = Path(os.environ.get("PAYPAY_LEDGER_PATH", str(_ROOT / "payments.sqlite3")))
 _LOCK = threading.Lock()
 _pending_otp: dict = {}
+_otp_workflow = None
+_otp_workflow_lock = threading.Lock()
+_OTP_SESSION_ID = "paypay-admin-session"
 _logger = logging.getLogger(__name__)
+
+
+def _otp_repository():
+    global _otp_workflow
+    if shop_storage.selected_backend() != "firestore":
+        return None
+    with _otp_workflow_lock:
+        if _otp_workflow is None:
+            _otp_workflow = FirestoreWorkflowRepository(shop_storage.firestore_client())
+        return _otp_workflow
+
+
+def _pending_otp_save(data: dict):
+    repository = _otp_repository()
+    if repository is None:
+        _pending_otp.clear()
+        _pending_otp.update(data)
+        return
+    encrypted = _cipher().encrypt(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    try:
+        repository.save_otp_session(_OTP_SESSION_ID, encrypted, time.time() + 600)
+    except Exception as exc:
+        raise PayPayError("otp_store", "SMS認証状態を安全に保存できません。") from exc
+
+
+def _pending_otp_load():
+    repository = _otp_repository()
+    if repository is None:
+        return dict(_pending_otp)
+    encrypted = repository.get_otp_session(_OTP_SESSION_ID)
+    if not encrypted:
+        return {}
+    try:
+        value = json.loads(_cipher().decrypt(encrypted.encode("ascii")))
+    except Exception as exc:
+        raise PayPayError("otp_store", "保存済みSMS認証状態を読み取れません。") from exc
+    if not isinstance(value, dict):
+        raise PayPayError("otp_store", "保存済みSMS認証状態が不正です。")
+    return value
+
+
+def _pending_otp_clear():
+    repository = _otp_repository()
+    if repository is None:
+        _pending_otp.clear()
+        return
+    try:
+        repository.clear_otp_session(_OTP_SESSION_ID)
+    except Exception as exc:
+        raise PayPayError("otp_store", "SMS認証状態を安全に消去できません。") from exc
+
+
+def otp_pending() -> bool:
+    return bool(_pending_otp_load())
 
 class PayPayError(Exception):
     def __init__(self, code: str, message: str):
@@ -192,22 +253,24 @@ async def begin_login(phone: str, password: str):
                            "username":phone,"password":password,"add_otp_prefix":True,"language":"ja"},
                           "https://www.paypay.ne.jp/app/account/sign-in")
     if result["kind"] == "otp":
-        _pending_otp.clear()
-        _pending_otp.update(phone=phone, password=password, uuid=uuid,
-                            otp_reference_id=result["otp_reference_id"], otp_prefix=result["otp_prefix"],
-                            cookies=result.get("cookies", {}))
+        _pending_otp_save({
+            "phone": phone, "password": password, "uuid": uuid,
+            "otp_reference_id": result["otp_reference_id"],
+            "otp_prefix": result["otp_prefix"],
+            "cookies": result.get("cookies", {}),
+        })
         return {"otp_required": True, "prefix": result["otp_prefix"]}
     if not result["session_cookie"]:
         raise PayPayError("cookie_missing", "PayPayログインは応答しましたが、受取セッションを確認できません。")
     _save_account({"phone":phone,"password":password,"uuid":uuid,
                    "access_token":result["access_token"],"session_cookie":result["session_cookie"],
                    "expires_at":time.time()+result["expires_in"]})
-    _pending_otp.clear()
+    _pending_otp_clear()
     return {"otp_required": False}
 
 async def finish_login(otp: str):
     _cipher()
-    p = dict(_pending_otp)
+    p = _pending_otp_load()
     if not p:
         raise PayPayError("otp_expired", "SMS認証の有効期限が切れました。最初からログインしてください。")
     if not OTP_RE.fullmatch(otp or ""):
@@ -222,7 +285,7 @@ async def finish_login(otp: str):
     _save_account({"phone":p["phone"],"password":p["password"],"uuid":p["uuid"],
                    "access_token":result["access_token"],"session_cookie":result["session_cookie"],
                    "expires_at":time.time()+result["expires_in"]})
-    _pending_otp.clear()
+    _pending_otp_clear()
     return {"connected": True}
 
 def _normalize_link(raw: str):
@@ -335,10 +398,13 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str, *, exter
                                     "add_otp_prefix":True,"language":"ja"},
                                    "https://www.paypay.ne.jp/app/account/sign-in")
             if renewed["kind"] == "otp":
-                _pending_otp.clear()
-                _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
-                                    otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"],
-                                    cookies=renewed.get("cookies", {}))
+                _pending_otp_save({
+                    "phone": account["phone"], "password": account["password"],
+                    "uuid": account["uuid"],
+                    "otp_reference_id": renewed["otp_reference_id"],
+                    "otp_prefix": renewed["otp_prefix"],
+                    "cookies": renewed.get("cookies", {}),
+                })
                 raise PayPayError("otp_required", "PayPayがSMS認証を要求しました。管理者画面で認証コードを入力してください。")
             if not renewed.get("session_cookie"):
                 raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
