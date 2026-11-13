@@ -77,6 +77,28 @@ def load_payment_attempts(connection):
     )]
 
 
+def require_shop_snapshot_for_apply(shop_db):
+    """Require the expected order table and payment-digest column before import."""
+    if shop_db is None:
+        raise RuntimeError("encrypted shop snapshot is missing; refusing Firestore import")
+    tables = {
+        row[0] for row in shop_db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "orders" not in tables:
+        raise RuntimeError("shop orders table is missing; refusing Firestore import")
+    columns = {
+        row[1] for row in shop_db.execute("PRAGMA table_info(orders)")
+    }
+    required = {
+        "id", "access_hash", "sku", "title", "amount",
+        "credential_enc", "status", "payment_digest", "created",
+    }
+    if not required.issubset(columns):
+        raise RuntimeError("shop orders schema is incomplete; refusing Firestore import")
+
+
 def require_ledger_snapshot_for_apply(ledger_db):
     """Require the complete legacy PayPay ledger schema before a live import."""
     if ledger_db is None:
@@ -232,7 +254,18 @@ def main():
                 })
 
         digest_coverage = payment_digest_coverage(orders, attempts)
+        shop_snapshot_error = ledger_snapshot_error = None
+        try:
+            require_shop_snapshot_for_apply(shop_db)
+        except RuntimeError as exc:
+            shop_snapshot_error = str(exc)
+        try:
+            require_ledger_snapshot_for_apply(ledger_db)
+        except RuntimeError as exc:
+            ledger_snapshot_error = str(exc)
         print("Dry-run summary" if not args.apply else "Import summary")
+        print("Shop order snapshot schema: " + ("OK" if not shop_snapshot_error else "FAILED"))
+        print("PayPay ledger snapshot schema: " + ("OK" if not ledger_snapshot_error else "FAILED"))
         print(f"Shop order rows found: {len(orders)}")
         print(f"Valid order rows: {len(valid_orders)}")
         print(f"Invalid order rows skipped: {len(orders) - len(valid_orders)}")
@@ -249,7 +282,10 @@ def main():
         print(f"Duplicate payment digest records: {digest_coverage['duplicate_digest_records']}")
         print(f"Orders with multiple payment attempts: {digest_coverage['duplicate_order_records']}")
         if args.apply:
-            require_ledger_snapshot_for_apply(ledger_db)
+            if shop_snapshot_error:
+                raise RuntimeError(shop_snapshot_error)
+            if ledger_snapshot_error:
+                raise RuntimeError(ledger_snapshot_error)
             if len(valid_orders) != len(orders):
                 raise RuntimeError(
                     "one or more order rows are invalid; refusing partial Firestore import"
