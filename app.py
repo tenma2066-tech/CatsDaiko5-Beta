@@ -1208,7 +1208,9 @@ def shop_home():
     orders_enabled = os.environ.get("SHOP_LIVE_ORDERS_ENABLED") == "1"
     body = r"""<div class="card"><h2>商品を選択</h2><p class="muted">ログイン不要でご注文いただけます。商品を選び、PayPayでお支払い後に引継ぎ情報を入力してください。</p>
 <div id="products"></div><p id="catalog-error" class="error"></p><p class="muted" id="shop-disabled">__SHOP_DISABLED__</p></div>
-<div class="card" id="checkout" hidden><h2 id="selected-title">注文内容</h2><p class="price" id="selected-price"></p>
+<div class="card" id="checkout" hidden><h2 id="selected-title">注文内容</h2>
+<label>代行する体数<input id="quantity" type="number" min="1" max="100" step="1" value="1"></label>
+<p class="muted" id="unit-price"></p><p class="price" id="selected-price"></p>
 <p class="muted">次の画面でPayPay決済を行います。決済確認後に引継ぎコードと暗証番号を入力します。</p>
 <button id="place">PayPay決済へ進む</button><p id="error" class="error"></p></div>
 <script>
@@ -1217,10 +1219,17 @@ const ordersEnabled=__ORDERS_ENABLED__;
 if(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
 const yen=n=>new Intl.NumberFormat('ja-JP').format(n)+'円';
 const list=document.getElementById('products');
+function updatePrice(){
+ if(!selected)return;
+ const q=Number(document.getElementById('quantity').value);
+ document.getElementById('unit-price').textContent='1体あたり '+yen(selected.unit_price_yen);
+ document.getElementById('selected-price').textContent=Number.isInteger(q)&&q>=1&&q<=100?yen(selected.unit_price_yen*q):'数量は1〜100体で指定してください。';
+}
+document.getElementById('quantity').addEventListener('input',updatePrice);
 if(!products.length){document.getElementById('catalog-error').textContent='現在、販売商品が設定されていません。管理者にお問い合わせください。';}
 products.forEach(p=>{const el=document.createElement('button');el.type='button';el.style.textAlign='left';el.innerHTML='';
 el.textContent=p.title+'　'+yen(p.price_yen)+(p.description?' — '+p.description:'');
-el.addEventListener('click',()=>{selected=p;document.getElementById('selected-title').textContent=p.title;document.getElementById('selected-price').textContent=yen(p.price_yen);document.getElementById('checkout').hidden=false;document.getElementById('checkout').scrollIntoView({behavior:'smooth'});});list.appendChild(el);});
+el.addEventListener('click',()=>{selected=p;document.getElementById('selected-title').textContent=p.title;document.getElementById('checkout').hidden=false;updatePrice();document.getElementById('checkout').scrollIntoView({behavior:'smooth'});});list.appendChild(el);});
 const placeButton=document.getElementById('place');
 placeButton.disabled=!ordersEnabled;
 if(!ordersEnabled)placeButton.textContent='現在注文受付停止中';
@@ -1230,7 +1239,7 @@ placeButton.addEventListener('click',async()=>{
  if(!selected)return;
  const button=document.getElementById('place');button.disabled=true;button.textContent='注文を作成中…';
  try{
-  const r=await fetch('/api/shop/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku:selected.id})});
+  const r=await fetch('/api/shop/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku:selected.id,quantity:Number(document.getElementById('quantity').value)})});
   const data=await r.json();if(!r.ok)throw Error(data.error||'注文を作成できませんでした。');
   location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
  }catch(e){error.textContent=e.message;}finally{button.disabled=false;button.textContent='PayPay決済へ進む';}
@@ -1255,7 +1264,7 @@ def shop_order_page(order_id):
     order = shop_store.public_order(order_id, key)
     if not order:
         return _shop_page("注文確認", '<div class="card"><h2>注文が見つかりません</h2><p>注文URLを確認してください。</p></div>'), 404
-    body = r"""<div class="card"><h2>注文内容</h2><p>注文番号：<b>__ID__</b></p><p>商品：<b>__TITLE__</b></p><p class="price">__AMOUNT__円</p>
+    body = r"""<div class="card"><h2>注文内容</h2><p>注文番号：<b>__ID__</b></p><p>商品：<b>__TITLE__</b></p><p>__QUANTITY__体 × __UNIT_PRICE__円</p><p class="price">合計 __AMOUNT__円</p>
 <p id="status">決済待ち</p><p class="muted">まずPayPayでお支払いください。受取確認後、この画面で引継ぎコードと暗証番号を入力できます。</p>
 <div id="payment">
 <label>PayPay送金リンク<input id="paypay-link" maxlength="2048" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off"></label>
@@ -1271,7 +1280,7 @@ async function refresh(){
  try{
   const r=await fetch('/api/shop/order/'+id+'?key='+encodeURIComponent(key));if(!r.ok)return;
   const o=await r.json();
-  const names={awaiting_payment:'決済待ち',paid:'決済確認済み',review:'管理者による確認中',fulfilling:'作業中',completed:'完了',cancelled:'キャンセル'};
+  const names={awaiting_payment:'決済待ち',payment_processing:'決済処理中',paid:'決済確認済み',review:'管理者による確認中',fulfilling:'作業中',completed:'完了',cancelled:'キャンセル'};
   const status=document.getElementById('status'),payment=document.getElementById('payment'),credentials=document.getElementById('credentials');
   status.textContent=names[o.status]||o.status;
   if(o.status==='awaiting_payment'){payment.hidden=false;credentials.hidden=true;}
@@ -1295,7 +1304,7 @@ document.getElementById('send-credentials').addEventListener('click',async()=>{
 });
 refresh();
 setInterval(refresh,5000);
-</script>""".replaceAll("__ID__", order.id).replace("__TITLE__", order.title).replace("__AMOUNT__", String(order.amount))
+</script>""".replaceAll("__ID__", order.id).replace("__TITLE__", order.title).replace("__QUANTITY__", String(order.quantity)).replace("__UNIT_PRICE__", String(order.unit_price_yen)).replace("__AMOUNT__", String(order.amount))
     return _shop_page("注文確認", body)
 
 @app.get("/api/shop/order/<order_id>")
@@ -1323,18 +1332,24 @@ def shop_paypay_submit(order_id):
     if not order:
         return jsonify(error="注文が見つかりません。"), 404
     if order["status"] != "awaiting_payment":
-        return jsonify(error="この注文は決済受付状態ではありません。"), 409
+        return jsonify(error="この注文は決済処理中、または決済受付状態ではありません。"), 409
+    if not shop_store.claim_payment(order_id):
+        return jsonify(error="別の決済リクエストを処理中です。画面を更新してください。"), 409
     try:
         digest = asyncio.run(paypay_gateway.receive_payment(data.get("link", ""), order["amount"], order_id))
-        shop_store.set_status(order_id, "paid", payment_digest=digest)
+        shop_store.complete_payment(order_id, digest)
         return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。管理者が注文を確認します。")
     except paypay_gateway.PayPayError as exc:
-        if exc.code in {"accept_uncertain", "accept_unconfirmed", "temporary_hold", "duplicate"}:
-            try: shop_store.set_status(order_id, "review", note=exc.code)
-            except shop_store.ShopError: pass
+        uncertain = exc.code in {"accept_uncertain", "accept_unconfirmed", "temporary_hold", "duplicate"}
+        shop_store.release_payment(order_id, review=uncertain, note=exc.code)
         return jsonify(error=exc.message), 400
     except shop_store.ShopError as exc:
-        return jsonify(error=str(exc)), 400
+        shop_store.release_payment(order_id, review=True, note="payment_state_error")
+        return jsonify(error=str(exc)), 409
+    except Exception:
+        shop_store.release_payment(order_id, review=True, note="unexpected_payment_error")
+        app.logger.exception("Unexpected payment processing error for order %s", order_id)
+        return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 500
 
 @app.get("/admin/paypay")
 def admin_paypay_page():
