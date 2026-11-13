@@ -85,6 +85,28 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.orders.set_status(self.order_id, "completed")
         self.assertEqual(self.orders.get_order(self.order_id)["status"], "completed")
 
+    def test_credentials_and_outbox_are_created_atomically(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        execution_id = "exec_" + secrets.token_hex(8)
+        result = workflow.submit_credentials_and_enqueue(
+            self.order_id, self.access_hash, b"encrypted-transfer", execution_id
+        )
+        self.assertEqual(result["execution_id"], execution_id)
+        order = self.orders.get_order(self.order_id)
+        self.assertTrue(order["credentials_submitted"])
+        self.assertEqual(order["active_execution_id"], execution_id)
+        self.assertEqual(order["job_id"], "queued")
+        self.assertEqual(workflow.get_execution(execution_id)["state"], "queued")
+        self.assertEqual(workflow.get_outbox_item(execution_id)["state"], "pending")
+        with self.assertRaises(WorkflowStateError):
+            workflow.submit_credentials_and_enqueue(
+                self.order_id, self.access_hash, b"replacement", "exec_" + secrets.token_hex(8)
+            )
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+
     def test_duplicate_payment_digest_is_rejected(self):
         self.assertTrue(self.payments.claim_payment(self.order_id))
         self.payments.complete_payment(self.order_id, self.digest)
