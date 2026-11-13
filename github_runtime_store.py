@@ -134,7 +134,7 @@ def _read_remote(name: str, *, use_cache: bool = True):
         result = (None, None)
     else:
         try:
-            encoded = response.get("content", "").replace("\\n", "")
+            encoded = response.get("content", "").replace("\n", "")
             raw = base64.b64decode(encoded, validate=True)
             if len(raw) > 900_000:
                 raise ValueError("oversized")
@@ -202,6 +202,8 @@ def write_blob(name: str, raw: bytes, *, create_only: bool = False):
         if not isinstance(result, dict) or not isinstance(result.get("content"), dict):
             raise RuntimeStoreError("GitHubへの保存結果を確認できません。")
         new_sha = result["content"].get("sha")
+        if not isinstance(new_sha, str) or not new_sha:
+            raise RuntimeStoreError("GitHubへの保存結果を確認できません。")
         cache_key = repo + ":" + branch + ":" + path
         with _CACHE_LOCK:
             _REMOTE_CACHE[cache_key] = (raw, new_sha, __import__("time").monotonic())
