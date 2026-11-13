@@ -16,7 +16,7 @@
 | Cloud Run Web | `catsdaiko-beta-web` | 公開、min 0 / max 1 |
 | Cloud Run Dispatcher | `catsdaiko-dispatcher` | 非公開、min 0 |
 | Cloud Run Job | `catsdaiko-worker` | 1 task、parallelism 1、max retries 0 |
-| Cloud Scheduler | `catsdaiko-outbox-sweep` | 1分ごとにoutbox回復処理 |
+| Cloud Scheduler | `catsdaiko-outbox-sweep` / `catsdaiko-execution-reconcile` | それぞれ1分ごとにoutbox回復 / Job終了照合 |
 
 Web ServiceはGitHub runtime-data上のPayPayアカウント・旧決済台帳との互換性を保つため、初期は最大インスタンス1に制限する。注文・実行・決済状態の主DBはFirestore。Jobは注文ごとに起動し、4つのグローバルslotをFirestore transactionで予約する。
 
@@ -149,6 +149,8 @@ WorkerはCloud Run標準環境変数 `CLOUD_RUN_EXECUTION` を実行ownerとし�
 - `CLOUD_TASKS_QUEUE=catsdaiko-orders`
 - `CLOUD_RUN_DISPATCHER_URL`（DispatcherのService URL）
 - `CLOUD_TASKS_SERVICE_ACCOUNT`（Task Invoker SAのメール）
+- `CLOUD_RUN_DISPATCHER_AUDIENCE`（Dispatcher Service URLと同じaudience）
+- `CLOUD_RUN_STALE_LAUNCH_SECONDS=600`
 
 Dispatcherは**unauthenticated accessを無効**にする。Cloud Tasksは `/dispatch`、Cloud Schedulerは `/sweep` を呼ぶ。QueueからのOIDCとCloud Run IAMで認証し、アプリ側で公開エンドポイントとして扱わない。
 
@@ -187,7 +189,7 @@ Cloud Schedulerから1分ごとに非公開Dispatcherの `POST /sweep` と `POST
 - Cloud Tasksはcreate直後に配送される可能性があるため、Dispatcherはoutboxが `pending` の状態でもtransactional claimを許可する。Task作成後のpublisher更新は、既に `launching` 以降へ進んだ状態を巻き戻さない。
 - `/reconcile`: Cloud Run Job Executionの完了状態を確認し、Firestoreに最終結果が残らなかった実行をreviewへ移す。worker claim前の終了ならslotのみ解放し、claim後の終了ならslotを解放してtransfer lockは保持する。
 
-Scheduler用サービスアカウントにはDispatcher ServiceへのInvokerだけを付与する。Cloud Schedulerには `catsdaiko-outbox-sweep` と `catsdaiko-execution-reconcile` の2ジョブを作成し、どちらも1分ごとに実行する。
+Scheduler用サービスアカウントにはDispatcher Serviceへの `roles/run.servicesInvoker` だけを付与する。Cloud Schedulerには `catsdaiko-outbox-sweep`（POST /sweep）と `catsdaiko-execution-reconcile`（POST /reconcile）の2ジョブを作成し、どちらも1分ごとに実行する。
 
 ## 12. デプロイ後の検証（注文受付は停止したまま）
 
@@ -247,7 +249,7 @@ Cloud Billing予算アラートは通知であり、サービスの自動停止�
 
 Dispatcherには /reconcile エンドポイントも実装されている。Workerが強制終了し、Firestoreに最終状態を書けなかった場合に、Cloud Run Job Executionの実際の終了状態を照合して注文をreviewへ移す。
 
-Cloud Schedulerに catsdaiko-execution-reconcile を追加し、1分ごとに非公開Dispatcherの POST /reconcile をOIDC認証で呼ぶ。Scheduler用サービスアカウントにはDispatcher Serviceのroles/run.invokerのみを付与する。
+Cloud Schedulerに catsdaiko-execution-reconcile を追加し、1分ごとに非公開Dispatcherの POST /reconcile をOIDC認証で呼ぶ。Scheduler用サービスアカウントにはDispatcher Serviceの `roles/run.servicesInvoker` のみを付与する。
 
 この照合は成功扱い・自動再実行を行わない。Cloud Run Executionが終了済みなのにFirestoreがrunningのままの場合は、結果不明としてreviewにし、worker slotのみ解放する。transfer lockは保持し、管理者がゲーム側の状態を確認するまで同じ引継ぎコードを再利用しない。
 
