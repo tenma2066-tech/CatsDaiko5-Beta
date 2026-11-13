@@ -245,6 +245,14 @@ def _normalize_link(raw: str):
             return None
     return urls[0]
 
+def payment_link_digest(raw_link: str) -> str:
+    """Return the stable SHA-256 digest used to prevent PayPay link reuse."""
+    code = _normalize_link(raw_link)
+    if not code:
+        raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
 def _parse_time(value):
     if not isinstance(value, str): return None
     try:
@@ -314,7 +322,7 @@ def _ledger():
     except github_runtime_store.RuntimeStoreError as exc:
         raise PayPayError("runtime_store", str(exc)) from exc
 
-async def receive_payment(raw_link: str, amount: int, purchase_id: str):
+async def receive_payment(raw_link: str, amount: int, purchase_id: str, *, external_ledger=False):
     code = _normalize_link(raw_link)
     if not code: raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
     with _LOCK:
@@ -349,10 +357,11 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
                 raise PayPayError("link_network", "PayPayリンク確認で通信エラーが発生しました。") from None
             verified=_verify_link(body,amount)
             digest=hashlib.sha256(code.encode()).hexdigest()
-            with _ledger() as db:
-                try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
-                except sqlite3.IntegrityError:
-                    raise PayPayError("duplicate","このPayPayリンクまたは注文は既に処理されています。") from None
+            if not external_ledger:
+                with _ledger() as db:
+                    try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
+                    except sqlite3.IntegrityError:
+                        raise PayPayError("duplicate","このPayPayリンクまたは注文は既に処理されています。") from None
             payload={"requestAt":verified["request_at"],"orderId":verified["order_id"],"requestId":str(uuid4()),
                      "senderChannelUrl":verified["chat_id"],"senderMessageId":verified["message_id"],
                      "verificationCode":code,"client_uuid":account["uuid"],
@@ -363,17 +372,20 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
                     try: reply=await r.json(content_type=None)
                     except Exception: reply=None
             except (aiohttp.ClientError,asyncio.TimeoutError):
-                with _ledger() as db: db.execute("UPDATE links SET state='review' WHERE digest=?",(digest,))
+                if not external_ledger:
+                    with _ledger() as db: db.execute("UPDATE links SET state='review' WHERE digest=?",(digest,))
                 raise PayPayError("accept_uncertain","受取結果が不明です。同じリンクを再送せず、管理者へお問い合わせください。") from None
             ok=(status_code==200 and isinstance(reply,dict) and isinstance(reply.get("header"),dict)
                 and reply["header"].get("resultCode")=="S0000" and isinstance(reply.get("payload"),dict)
                 and reply["payload"].get("orderStatus")=="COMPLETED" and reply.get("error") is None)
             if ok:
-                with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
+                if not external_ledger:
+                    with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
                 return digest
             hold_code = _provider_hold_code(reply)
             state="pending" if hold_code else "review"
-            with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
+            if not external_ledger:
+                with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
             raise PayPayError("temporary_hold" if state=="pending" else "accept_unconfirmed",
                               "PayPay側で一時保留です。状態を確認するまで再送金しないでください。" if state=="pending"
                               else "受取結果を確定できません。再購入せず管理者へお問い合わせください。")
