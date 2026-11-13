@@ -228,7 +228,7 @@ def sqlite_database(name: str, local_path):
             yield con
             con.commit()
             snapshot = con.serialize()
-            if snapshot != initial_snapshot:
+            if not remote_exists or snapshot != initial_snapshot:
                 encrypted = _cipher().encrypt(snapshot)
                 # First creation/migration is create-only: a concurrent remote
                 # initialization must never be overwritten by an older local DB.
