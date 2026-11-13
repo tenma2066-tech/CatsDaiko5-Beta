@@ -1293,3 +1293,13 @@ F. execution完了:
 - 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はretry exhaustionのFirestore Emulator testを再実行し、review後にslot/transfer lockが存在しないこと、UI用job_id/payment_noteが整合することを確認する。
+
+
+## 47. Cloud Tasks fake clientを新get_task契約へ更新（2026-11-13）
+
+- CI run `43445995710` でCloud Tasks publisher unit testsに2件失敗。既存Fake Clientが新しい `get_task` 呼び出しを実装していなかったことと、deleted-task testが削除済み親Fake Clientを継承していたことが原因。
+- 既存のdeterministic task testにlive `get_task` 応答を追加。deleted-task rotation testは独立Fake Clientへ変更し、generation 0のget_task/create_taskがNotFound/AlreadyExists、generation 1のcreate_taskが成功する状況を明示。
+- 本番コード変更ではなくテストfixtureの更新。修正commit `cfd0e754fb91fa9317f52787c01fee6d8f1e56a2`。最新HEAD CI/parallel結果はこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はCloud Tasks unit tests、Firestore Emulatorのgeneration上限review遷移、Docker buildを最新HEADで通す。
