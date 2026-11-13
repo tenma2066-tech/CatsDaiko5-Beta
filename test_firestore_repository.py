@@ -13,6 +13,7 @@ from shop_firestore_repository import (
     FirestoreOrderRepository,
     FirestorePaymentRepository,
 )
+from shop_payment_repository import PaymentRepositoryError
 
 
 @unittest.skipUnless(
@@ -97,7 +98,7 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         })
         try:
             self.assertTrue(self.payments.claim_payment(second_id))
-            with self.assertRaises(Exception):
+            with self.assertRaises(PaymentRepositoryError):
                 self.payments.complete_payment(second_id, self.digest)
         finally:
             self.client.collection("orders").document(second_id).delete()
