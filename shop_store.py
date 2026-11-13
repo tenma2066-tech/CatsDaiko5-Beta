@@ -460,7 +460,8 @@ def public_order(order_id: str, access_token: str):
     return {"id": row["id"], "title": row["title"], "amount": row["amount"],
             "quantity": row.get("quantity", 1), "unit_price_yen": row.get("unit_price_yen", 0),
             "status": row["status"], "credentials_submitted": bool(row["credentials_submitted"]),
-            "job_id": row.get("job_id"), "created": int(row["created"])}
+            "job_id": row.get("job_id"), "execution_id": row.get("active_execution_id"),
+            "created": int(row["created"])}
 
 def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
     allowed = {"paid", "review", "fulfilling", "completed", "cancelled"}
