@@ -70,6 +70,9 @@ jobs:
       - name: Cloud Run worker tests
         run: python -m unittest -v test_cloud_run_worker.py
 
+      - name: Runtime migration parser tests
+        run: python -m unittest -v test_migrate_runtime_data.py
+
       - name: Set up Java for Firestore Emulator
         uses: actions/setup-java@v4
         with:
