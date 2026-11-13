@@ -260,22 +260,30 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertEqual(results.count(None), 1)
         self.client.collection("admin_otp_sessions").document(session_id).delete()
 
-    def test_execution_snapshot_rejects_payload_over_safe_document_limit(self):
+    def test_execution_snapshot_splits_large_report_into_bounded_chunks(self):
         workflow = FirestoreWorkflowRepository(self.client)
         execution_id = "exec_" + secrets.token_hex(8)
         self.client.collection("executions").document(execution_id).set({
             "execution_id": execution_id, "state": "running", "owner": "worker-test",
         })
         try:
-            with self.assertRaisesRegex(WorkflowStateError, "execution_snapshot_too_large"):
-                workflow.persist_worker_snapshot(
-                    execution_id, "worker-test",
-                    {"status": "running", "step": 1,
-                     "report": ["oversized-report-entry-" + ("x" * 12000)] * 100},
-                )
+            report = ["large-report-entry-" + ("x" * 12000)] * 100
+            workflow.persist_worker_snapshot(
+                execution_id, "worker-test",
+                {"status": "running", "step": 1, "report": report},
+            )
             stored = workflow.get_execution(execution_id)
-            self.assertNotIn("report", stored)
+            self.assertEqual(stored["report"], report)
+            self.assertGreater(stored["worker_snapshot_chunk_count"], 1)
+            self.assertLessEqual(stored["worker_snapshot_chunk_count"], 32)
         finally:
+            chunks = (
+                self.client.collection("execution_logs").document(execution_id)
+                .collection("chunks").stream()
+            )
+            for chunk in chunks:
+                chunk.reference.delete()
+            self.client.collection("execution_logs").document(execution_id).delete()
             self.client.collection("executions").document(execution_id).delete()
 
     def test_dispatch_defers_when_all_global_slots_are_occupied(self):
