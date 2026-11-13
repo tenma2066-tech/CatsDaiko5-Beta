@@ -45,6 +45,59 @@ class FirestoreWorkflowRepository:
         self._locks = client.collection("transfer_locks")
         self._otp = client.collection("admin_otp_sessions")
 
+    def submit_credentials_and_enqueue(
+        self, order_id: str, access_hash: str, encrypted_credentials: bytes,
+        execution_id: str,
+    ) -> dict[str, str]:
+        """Persist credentials and create the execution/outbox atomically."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", execution_id or ""):
+            raise ValueError("invalid execution id")
+        order_ref = self._orders.document(order_id)
+        execution_ref = self._executions.document(execution_id)
+        outbox_ref = self._outbox.document(execution_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def submit(tx):
+            order = order_ref.get(transaction=tx)
+            execution = execution_ref.get(transaction=tx)
+            outbox = outbox_ref.get(transaction=tx)
+            if not order.exists:
+                raise WorkflowStateError("order not found")
+            data = order.to_dict()
+            if data.get("access_hash") != access_hash:
+                raise WorkflowStateError("order access denied")
+            if (data.get("status") != "paid"
+                    or data.get("credentials_submitted") is True
+                    or data.get("job_id") is not None
+                    or data.get("active_execution_id")):
+                raise WorkflowStateError("order is not eligible for credential submission")
+            if execution.exists or outbox.exists:
+                raise WorkflowStateError("execution id already exists")
+            now = self._clock()
+            tx.update(order_ref, {
+                "credential_enc": encrypted_credentials,
+                "credentials_submitted": True,
+                "active_execution_id": execution_id,
+                "job_id": "queued",
+                "updated": now,
+            })
+            tx.create(execution_ref, {
+                "execution_id": execution_id, "order_id": order_id,
+                "state": "queued", "progress": 0, "owner": None,
+                "slot_id": None, "transfer_lock_id": None,
+                "cloud_run_operation": None, "outcome_unknown": False,
+                "created": now, "updated": now,
+            })
+            tx.create(outbox_ref, {
+                "task_id": execution_id, "execution_id": execution_id,
+                "order_id": order_id, "state": "pending",
+                "created": now, "updated": now,
+            })
+            return {"execution_id": execution_id, "task_id": execution_id}
+
+        return submit(transaction)
+
     def enqueue_execution(self, order_id: str, execution_id: str) -> dict[str, str]:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", execution_id or ""):
             raise ValueError("invalid execution id")
