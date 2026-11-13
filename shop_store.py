@@ -52,6 +52,8 @@ def _db():
             if "unit_price_yen" not in columns:
                 con.execute("ALTER TABLE orders ADD COLUMN unit_price_yen INTEGER NOT NULL DEFAULT 0")
                 con.execute("UPDATE orders SET unit_price_yen=amount WHERE quantity=1")
+            # Finish one-time schema migration before any caller starts an explicit transaction.
+            con.commit()
             if not github_runtime_store.enabled():
                 os.chmod(DB_PATH, 0o600)
             yield con
