@@ -1446,6 +1446,48 @@ def shop_paypay_submit(order_id):
     if _too_many_fails("paypay:" + order_id):
         return jsonify(error="決済確認の試行回数が上限に達しました。管理者へお問い合わせください。"), 429
     _fail.setdefault("paypay:" + order_id, []).append(time.time())
+    if shop_store.uses_firestore():
+        try:
+            digest = paypay_gateway.payment_link_digest(data.get("link", ""))
+        except paypay_gateway.PayPayError as exc:
+            return jsonify(error=exc.message), 400
+        if not shop_store.claim_payment_attempt(order_id, digest):
+            return jsonify(error="このPayPayリンクまたは注文は既に処理されています。"), 409
+        try:
+            received_digest = asyncio.run(paypay_gateway.receive_payment(
+                data.get("link", ""), order["amount"], order_id, external_ledger=True
+            ))
+            if received_digest != digest:
+                shop_store.transition_payment_attempt(
+                    order_id, digest, "outcome_unknown", "payment_digest_mismatch"
+                )
+                return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 409
+            shop_store.transition_payment_attempt(order_id, digest, "paid")
+            return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。引継ぎ情報を入力できます。")
+        except paypay_gateway.PayPayError as exc:
+            if exc.code == "temporary_hold":
+                state = "pending"
+            elif exc.code == "accept_uncertain":
+                state = "outcome_unknown"
+            elif exc.code in {"accept_unconfirmed", "duplicate"}:
+                state = "review"
+            else:
+                state = "rejected"
+            try:
+                shop_store.transition_payment_attempt(order_id, digest, state, exc.code)
+            except shop_store.ShopError:
+                app.logger.error("Could not persist PayPay state for order %s", order_id)
+                return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 409
+            return jsonify(error=exc.message), 400
+        except Exception:
+            try:
+                shop_store.transition_payment_attempt(
+                    order_id, digest, "outcome_unknown", "unexpected_payment_error"
+                )
+            except shop_store.ShopError:
+                pass
+            app.logger.exception("Unexpected Firestore-backed payment error for order %s", order_id)
+            return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 500
     if not shop_store.claim_payment(order_id):
         return jsonify(error="別の決済リクエストを処理中です。画面を更新してください。"), 409
     try:
