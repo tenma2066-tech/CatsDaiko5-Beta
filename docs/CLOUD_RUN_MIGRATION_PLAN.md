@@ -1219,3 +1219,17 @@ F. execution完了:
 - IAM matrix修正commitはこれから記録。変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はIAM matrix/Inspector runbookの追記を再fetchして確認する。Cloud Tasks role bindingはGCP project作成後、IAM Policy Simulatorでqueue resource単位の付与とget_task実行を検証する。
+
+
+## 41. Web/Dispatcher両publisherのCloud Tasks IAMを整合（2026-11-13）
+
+- コード経路監査で `shop_store.publish_execution()` が注文登録直後にCloud Tasksを作成し、Dispatcherも `/sweep` で同じpublisherを使うことを確認。前のIAM matrixはWeb SAのCloud Tasks権限を不足記載していた。
+- Web SA / Dispatcher SAの両方へ、対象Queueに `roles/cloudtasks.enqueuer`（tasks.create）+ `roles/cloudtasks.viewer`（tasks.get）を付与する案に修正。Project-wide付与はしない。
+- 両SAがTaskのOIDC service accountを指定するため、両SAにTask Invoker SAへの `roles/iam.serviceAccountUser` が必要。Cloud Tasks Service Agentにも同じSAへのService Account Userを付与する。
+- Task Invoker / Scheduler InvokerはCloud Run Serviceだけを呼べる `roles/run.servicesInvoker` を使用し、Job実行権限を含む広い `roles/run.invoker` を避ける。
+- RunbookのSA説明・IAM表をmatrixと一致させた。
+- 公式根拠: Cloud TasksはProject / Queue level IAMをサポート。Enqueuerには `cloudtasks.tasks.create` はあるが `cloudtasks.tasks.get` は含まれず、Viewerにはgetが含まれる。参照: [Cloud Tasks access control](https://cloud.google.com/tasks/docs/access-control)、[Cloud Tasks roles and permissions](https://cloud.google.com/iam/docs/roles-permissions/cloudtasks)。
+- 直前HEAD `43c6629a5687a15048434365147750ce563ff68e` のCI / parallelはsuccess。IAM matrix修正後の最新HEAD CIはこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はIAM matrix/Runbookを再fetchし、Web/Dispatcher両publisherとOIDC actAs権限が整合していることを確認する。Project作成後はQueue resource単位のIAMをPolicy Simulatorで検証する。
