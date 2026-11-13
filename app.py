@@ -1251,7 +1251,7 @@ def shop_order_page(order_id):
 <div id="payment">
 <label>PayPay送金リンク<input id="paypay-link" maxlength="2048" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off"></label>
 <button id="pay">PayPayで支払う</button></div>
-<div id="credentials" hidden><h2>引継ぎ情報の入力</h2>
+<div id="credentials" hidden><h2>引継ぎ情報の入力</h2><p class="muted">新規アカウントの場合は両方空欄でOKです。既存セーブの複製・保全チェックでは両方入力してください。</p>
 <label>引継ぎコード<input id="transfer" maxlength="128" autocomplete="off" autocapitalize="off"></label>
 <label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
 <button id="send-credentials">引継ぎ情報を送信</button></div>
@@ -1322,7 +1322,14 @@ def shop_submit_credentials(order_id):
             return jsonify(error="注文が見つかりません。"), 404
         if order.get("job_id"):
             return jsonify(error="この注文は既に処理開始済みです。"), 409
-        shop_store.save_credentials(order_id, key, data.get("transfer_code", ""), data.get("pin", ""))
+        stored_operation = shop_store.operation_payload(order_id, key)
+        if not stored_operation:
+            return jsonify(error="注文が見つかりません。"), 404
+        transfer_code = data.get("transfer_code", "")
+        pin = data.get("pin", "")
+        if (stored_operation.get("clone") or stored_operation.get("integrity_only")) and not (transfer_code and pin):
+            return jsonify(error="複製・保全チェックには既存セーブの引継ぎコードと暗証番号が必要です。"), 400
+        shop_store.save_credentials(order_id, key, transfer_code, pin)
         shop_store.claim_execution(order_id, key)
         claimed = True
         operation = shop_store.operation_for_execution(order_id, key)
@@ -1396,7 +1403,7 @@ def shop_paypay_submit(order_id):
     try:
         digest = asyncio.run(paypay_gateway.receive_payment(data.get("link", ""), order["amount"], order_id))
         shop_store.complete_payment(order_id, digest)
-        return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。管理者が注文を確認します。")
+        return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。引継ぎ情報を入力できます。")
     except paypay_gateway.PayPayError as exc:
         uncertain = exc.code in {"accept_uncertain", "accept_unconfirmed", "temporary_hold", "duplicate", "runtime_store"}
         shop_store.release_payment(order_id, review=uncertain, note=exc.code)
@@ -2391,7 +2398,7 @@ $('#cRetry').addEventListener('click',async()=>{
 });
 
 /* ---------- 実行前チェック・モード ---------- */
-function goLabel(){ return $('#integrity').checked?($('#dry').checked?'保全チェック（試運転）':'保全チェック'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
+function goLabel(){ return 'PayPay決済へ進む'; }
 function renderChecks(pc,qm,total){
   const L=[]; const add=(lv,t)=>L.push([lv,t]);
   if($('#clone').checked){
