@@ -160,6 +160,8 @@ def create_operation_order(operation: dict, quantity: int):
     if character_count:
         service_type = "character-specific"
         quantity = character_count
+        if quantity > MAX_ORDER_QUANTITY:
+            raise ShopError("一度に注文できるのは100体までです。")
     else:
         service_type = "other-service"
         if type(quantity) is not int or not 1 <= quantity <= MAX_ORDER_QUANTITY:
