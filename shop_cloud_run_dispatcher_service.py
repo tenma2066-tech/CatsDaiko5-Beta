@@ -12,6 +12,7 @@ from flask import Flask, jsonify, request
 from google.cloud import firestore
 
 from shop_cloud_run_dispatcher import (
+    CloudTasksOutboxPublisher,
     GoogleCloudRunJobLauncher,
     handle_dispatch_payload,
 )
@@ -24,6 +25,32 @@ def create_app():
     @application.get("/healthz")
     def healthz():
         return jsonify(ok=True)
+
+    @application.post("/sweep")
+    def sweep():
+        project = os.environ.get("CLOUD_TASKS_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        location = os.environ.get("CLOUD_TASKS_LOCATION", "asia-northeast1")
+        queue = os.environ.get("CLOUD_TASKS_QUEUE")
+        dispatcher_url = os.environ.get("CLOUD_RUN_DISPATCHER_URL")
+        service_account = os.environ.get("CLOUD_TASKS_SERVICE_ACCOUNT")
+        if not all((project, location, queue, dispatcher_url, service_account)):
+            return jsonify(error="outbox publisher is not configured"), 503
+        try:
+            client = firestore.Client(project=project) if project else firestore.Client()
+            repository = FirestoreWorkflowRepository(client)
+            from google.cloud import tasks_v2
+            publisher = CloudTasksOutboxPublisher(
+                tasks_v2.CloudTasksClient(), repository,
+                project=project, location=location, queue=queue,
+                dispatcher_url=dispatcher_url,
+                oidc_service_account=service_account,
+                audience=os.environ.get("CLOUD_RUN_DISPATCHER_AUDIENCE"),
+            )
+            result = publisher.publish_pending(limit=100)
+            return jsonify(result), 200
+        except Exception:
+            application.logger.exception("Cloud Tasks outbox sweep failed")
+            return jsonify(error="outbox sweep temporarily unavailable"), 503
 
     @application.post("/dispatch")
     def dispatch():
