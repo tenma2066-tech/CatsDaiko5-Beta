@@ -340,6 +340,44 @@ class CloudRunDispatcherTests(unittest.TestCase):
         )
         self.assertFalse(publisher.publish("exec_12345678"))
 
+    def test_task_enqueued_retry_exhaustion_stops_republishing(self):
+        class Repo:
+            def __init__(self):
+                self.item = {
+                    "task_id": "exec_12345678", "execution_id": "exec_12345678",
+                    "order_id": "0123456789", "state": "task_enqueued",
+                    "task_generation": 3,
+                }
+
+            def get_outbox_item(self, execution_id):
+                return dict(self.item)
+
+            def advance_outbox_task_generation(self, execution_id, expected):
+                return None
+
+            def mark_task_enqueued(self, execution_id):
+                raise AssertionError("exhausted outbox must not be marked enqueued")
+
+        class Client:
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def task_path(self, project, location, queue, task):
+                return f"projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"
+
+            def get_task(self, request):
+                raise NotFound("deleted task name still reserved")
+
+            def create_task(self, request):
+                raise AlreadyExists("dedupe reservation")
+
+        publisher = CloudTasksOutboxPublisher(
+            Client(), Repo(), project="demo", location="asia-northeast1",
+            queue="orders", dispatcher_url="https://dispatcher.example",
+            oidc_service_account="tasks@example.iam.gserviceaccount.com",
+        )
+        self.assertFalse(publisher.publish("exec_12345678"))
+
     def test_dispatch_rejects_secret_or_extra_payload_fields(self):
         repository = FakeRepository()
         launcher = FakeLauncher()
