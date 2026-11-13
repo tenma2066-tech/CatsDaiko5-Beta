@@ -2,9 +2,9 @@
 
 <!-- coderabbit-ai-generated-section:v1:bca14bcc995e4edcb31cba81431de87ae8ec832f29ffa738a583517046f946ef -->
 
-# にゃんこ代行 Web版（ベータ版・個人用）
+# にゃんこ代行 Web版（ベータ版）
 
-ブラウザから使える版です。課金・PayPay・Discordは入っていません。
+ブラウザから使えるベータ版です。公開ショップ・PayPay決済と、管理者向け代行ツールを分離して提供します。購入者はログイン不要で注文できます。実際の注文受付は、RenderとGitHubの保存設定・PayPay接続確認が完了するまで無効です。
 
 ## ファイル
 - app.py … Webページ本体
