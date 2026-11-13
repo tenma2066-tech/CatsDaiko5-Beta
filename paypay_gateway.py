@@ -101,10 +101,13 @@ def _headers(referer: str, json_body=True):
         result["Content-Type"] = "application/json"
     return result
 
-async def _oauth(payload: dict, referer: str):
+async def _oauth(payload: dict, referer: str, cookies: dict | None = None):
+    from yarl import URL
     timeout = aiohttp.ClientTimeout(total=25)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            if cookies:
+                session.cookie_jar.update_cookies(cookies, response_url=URL("https://www.paypay.ne.jp/"))
             async with session.post(TOKEN_ENDPOINT, json=payload,
                                     headers=_headers(referer)) as response:
                 try:
@@ -113,14 +116,19 @@ async def _oauth(payload: dict, referer: str):
                     raise PayPayError("oauth_response", "PayPayの認証応答を読み取れません。") from None
                 if not isinstance(body, dict):
                     raise PayPayError("oauth_response", "PayPayの認証応答が不正です。")
+                jar = session.cookie_jar.filter_cookies(URL("https://www.paypay.ne.jp/"))
+                cookie_values = {name: morsel.value for name, morsel in jar.items()}
+                session_cookie = cookie_values.get("token", "")
                 if response.status in range(200, 300) and isinstance(body.get("access_token"), str) and len(body["access_token"]) >= 10:
-                    cookie = session.cookie_jar.filter_cookies("https://www.paypay.ne.jp/").get("token")
+                    raw_expiry = body.get("expires_in")
+                    expires_in = min(int(raw_expiry), SESSION_MAX_SECONDS) if type(raw_expiry) in (int, float) and raw_expiry > 0 else SESSION_MAX_SECONDS
                     return {"kind": "token", "access_token": body["access_token"],
-                            "expires_in": min(int(body.get("expires_in") or SESSION_MAX_SECONDS), SESSION_MAX_SECONDS),
-                            "session_cookie": cookie.value if cookie else ""}
+                            "expires_in": expires_in, "session_cookie": session_cookie,
+                            "cookies": cookie_values}
                 otp_id, prefix = body.get("otp_reference_id"), body.get("otp_prefix")
                 if isinstance(otp_id, str) and otp_id and isinstance(prefix, str) and re.fullmatch(r"[A-Za-z]{2,8}", prefix):
-                    return {"kind": "otp", "otp_reference_id": otp_id, "otp_prefix": prefix}
+                    return {"kind": "otp", "otp_reference_id": otp_id, "otp_prefix": prefix,
+                            "cookies": cookie_values}
                 raise PayPayError("oauth_rejected", "PayPayログインに失敗しました。電話番号・パスワードを確認してください。")
     except PayPayError:
         raise
@@ -138,7 +146,8 @@ async def begin_login(phone: str, password: str):
     if result["kind"] == "otp":
         _pending_otp.clear()
         _pending_otp.update(phone=phone, password=password, uuid=uuid,
-                            otp_reference_id=result["otp_reference_id"], otp_prefix=result["otp_prefix"])
+                            otp_reference_id=result["otp_reference_id"], otp_prefix=result["otp_prefix"],
+                            cookies=result.get("cookies", {}))
         return {"otp_required": True, "prefix": result["otp_prefix"]}
     if not result["session_cookie"]:
         raise PayPayError("cookie_missing", "PayPayログインは応答しましたが、受取セッションを確認できません。")
@@ -158,7 +167,7 @@ async def finish_login(otp: str):
                            "otp":otp,"otp_prefix":p["otp_prefix"],
                            "otp_reference_id":p["otp_reference_id"],
                            "username_type":"MOBILE","language":"ja"},
-                          "https://www.paypay.ne.jp/app/account/sign-in")
+                          "https://www.paypay.ne.jp/app/account/sign-in", cookies=p.get("cookies"))
     if result["kind"] != "token" or not result["session_cookie"]:
         raise PayPayError("otp_failed", "SMS認証に失敗しました。")
     _save_account({"phone":p["phone"],"password":p["password"],"uuid":p["uuid"],
@@ -249,7 +258,8 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
             if renewed["kind"] == "otp":
                 _pending_otp.clear()
                 _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
-                                    otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"])
+                                    otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"],
+                                    cookies=renewed.get("cookies", {}))
                 raise PayPayError("otp_required", "PayPayがSMS認証を要求しました。管理者画面で認証コードを入力してください。")
             if not renewed.get("session_cookie"):
                 raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
