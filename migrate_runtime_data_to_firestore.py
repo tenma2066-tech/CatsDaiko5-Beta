@@ -102,23 +102,52 @@ def require_ledger_snapshot_for_apply(ledger_db):
 
 
 def payment_digest_coverage(orders, attempts):
-    """Count order payment digests that cannot be proven present in the old ledger."""
-    ledger_digests = {
-        str(row.get("digest") or "")
-        for row in attempts
-        if re.fullmatch(r"[0-9a-f]{64}", str(row.get("digest") or ""))
+    """Prove each paid order's digest maps back to that exact order in the ledger."""
+    order_ids = {
+        str(row.get("id") or "") for row in orders
+        if re.fullmatch(r"[A-Z0-9]{10}", str(row.get("id") or ""))
     }
+    ledger_by_digest = {}
+    invalid_attempts = 0
+    orphaned_attempts = 0
+    for row in attempts:
+        digest = row.get("digest")
+        order_id = row.get("order_id")
+        if (not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or not isinstance(order_id, str)
+                or not re.fullmatch(r"[A-Z0-9]{10}", order_id)):
+            invalid_attempts += 1
+            continue
+        if order_id not in order_ids:
+            orphaned_attempts += 1
+        ledger_by_digest.setdefault(digest, set()).add(order_id)
+
     missing = set()
     invalid = 0
+    mismatched = 0
+    paid_without_digest = 0
     for row in orders:
+        order_id = str(row.get("id") or "")
         digest = row.get("payment_digest")
         if digest in (None, ""):
+            if row.get("status") in {"paid", "fulfilling", "completed"}:
+                paid_without_digest += 1
             continue
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             invalid += 1
-        elif digest not in ledger_digests:
+        elif digest not in ledger_by_digest:
             missing.add(digest)
-    return {"missing": len(missing), "invalid": invalid}
+        elif order_id not in ledger_by_digest[digest]:
+            mismatched += 1
+    return {
+        "missing": len(missing),
+        "invalid": invalid,
+        "mismatched": mismatched,
+        "paid_without_digest": paid_without_digest,
+        "invalid_attempts": invalid_attempts,
+        "orphaned_attempts": orphaned_attempts,
+    }
 
 
 def main():
@@ -143,7 +172,9 @@ def main():
             order_id = str(_row_value(row, "id", ""))
             encrypted = _row_value(row, "credential_enc")
             access_hash = str(_row_value(row, "access_hash", ""))
-            if (len(order_id) != 10 or not encrypted or len(access_hash) != 64):
+            if (not re.fullmatch(r"[A-Z0-9]{10}", order_id)
+                    or not isinstance(encrypted, (bytes, bytearray)) or not encrypted
+                    or not re.fullmatch(r"[0-9a-f]{64}", access_hash)):
                 continue
             valid_orders.append({
                 "id": order_id,
@@ -164,11 +195,14 @@ def main():
                 "created": _row_value(row, "created", 0),
             })
 
+        valid_order_ids = {row["id"] for row in valid_orders}
         valid_attempts = []
         for row in attempts:
             digest = str(_row_value(row, "digest", ""))
             order_id = str(_row_value(row, "order_id", ""))
-            if len(digest) == 64 and all(ch in "0123456789abcdef" for ch in digest):
+            if (re.fullmatch(r"[0-9a-f]{64}", digest)
+                    and re.fullmatch(r"[A-Z0-9]{10}", order_id)
+                    and order_id in valid_order_ids):
                 valid_attempts.append({
                     "digest": digest,
                     "order_id": order_id,
@@ -186,12 +220,25 @@ def main():
         print(f"Invalid payment rows skipped: {len(attempts) - len(valid_attempts)}")
         print(f"Order payment digests missing from ledger: {digest_coverage['missing']}")
         print(f"Invalid order payment digests: {digest_coverage['invalid']}")
+        print(f"Paid orders without a payment digest: {digest_coverage['paid_without_digest']}")
+        print(f"Payment digest/order mismatches: {digest_coverage['mismatched']}")
+        print(f"Invalid payment ledger rows: {digest_coverage['invalid_attempts']}")
+        print(f"Orphaned payment ledger rows: {digest_coverage['orphaned_attempts']}")
         if args.apply:
             require_ledger_snapshot_for_apply(ledger_db)
-            if digest_coverage["missing"] or digest_coverage["invalid"]:
+            if len(valid_orders) != len(orders):
                 raise RuntimeError(
-                    "payment ledger does not cover every order payment digest; "
-                    "resolve the mismatch before importing"
+                    "one or more order rows are invalid; refusing partial Firestore import"
+                )
+            if len(valid_attempts) != len(attempts):
+                raise RuntimeError(
+                    "one or more payment ledger rows are invalid or orphaned; "
+                    "refusing partial Firestore import"
+                )
+            if any(digest_coverage.values()):
+                raise RuntimeError(
+                    "payment ledger/order integrity checks failed; "
+                    "resolve every mismatch before importing"
                 )
         if not args.apply:
             print("No Firestore writes performed. Re-run with --apply only after reviewing backups.")
