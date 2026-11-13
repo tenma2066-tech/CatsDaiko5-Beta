@@ -156,6 +156,23 @@ def create_operation_order(operation: dict, service_type: str, quantity: int):
             "amount": amount, "status": "awaiting_payment"}
 
 
+def operation_payload(order_id: str, access_token: str):
+    row = _row(order_id)
+    if not row or not secrets.compare_digest(
+        row["access_hash"], hashlib.sha256((access_token or "").encode()).hexdigest()
+    ):
+        return None
+    if not row.get("operation_enc"):
+        raise ShopError("この注文には実行内容が保存されていません。管理者へお問い合わせください。")
+    try:
+        operation = json.loads(_cipher().decrypt(row["operation_enc"]))
+    except Exception:
+        raise ShopError("注文内容を安全に読み取れません。管理者へお問い合わせください。") from None
+    if not isinstance(operation, dict):
+        raise ShopError("注文内容の形式が正しくありません。")
+    return operation
+
+
 def operation_for_execution(order_id: str, access_token: str):
     row = _row(order_id)
     if not row or not secrets.compare_digest(
@@ -164,15 +181,13 @@ def operation_for_execution(order_id: str, access_token: str):
         return None
     if row["status"] != "paid" or not row.get("credentials_submitted"):
         raise ShopError("決済確認と引継ぎ情報の入力が必要です。")
-    if not row.get("operation_enc"):
-        raise ShopError("この注文には実行内容が保存されていません。管理者へお問い合わせください。")
+    operation = operation_payload(order_id, access_token)
     try:
-        operation = json.loads(_cipher().decrypt(row["operation_enc"]))
         credentials = json.loads(_cipher().decrypt(row["credential_enc"]))
     except Exception:
-        raise ShopError("注文内容を安全に読み取れません。管理者へお問い合わせください。") from None
-    if not isinstance(operation, dict) or bool(credentials.get("transfer_code")) != bool(credentials.get("pin")):
-        raise ShopError("注文内容または引継ぎ情報が正しくありません。")
+        raise ShopError("引継ぎ情報を安全に読み取れません。管理者へお問い合わせください。") from None
+    if bool(credentials.get("transfer_code")) != bool(credentials.get("pin")):
+        raise ShopError("引継ぎ情報が正しくありません。")
     if (operation.get("clone") or operation.get("integrity_only")) and not credentials.get("transfer_code"):
         raise ShopError("複製・保全チェックには既存セーブの引継ぎコードと暗証番号が必要です。")
     operation["transfer"] = credentials.get("transfer_code", "")
