@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any
 
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import AlreadyExists, NotFound
 
 
 def build_task_payload(order_id: str, execution_id: str) -> bytes:
@@ -49,41 +49,55 @@ class CloudTasksOutboxPublisher:
         return {"published": published, "failed": failed}
 
     def publish(self, execution_id: str) -> bool:
-        item = self._repository.get_outbox_item(execution_id)
-        if not item:
-            raise ValueError("outbox item not found")
-        if item.get("state") == "task_enqueued":
-            return False
-        if item.get("state") != "pending":
-            return False
-        task_id = item["task_id"]
-        if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", task_id):
-            raise ValueError("invalid task id")
-        task_name = self._client.task_path(
-            self._project, self._location, self._queue, "exec-" + task_id
-        )
         from google.cloud import tasks_v2
 
-        task = tasks_v2.Task(
-            name=task_name,
-            http_request=tasks_v2.HttpRequest(
-                http_method=tasks_v2.HttpMethod.POST,
-                url=self._dispatcher_url,
-                headers={"Content-Type": "application/json"},
-                body=build_task_payload(item["order_id"], item["execution_id"]),
-                oidc_token=tasks_v2.OidcToken(
-                    service_account_email=self._service_account,
-                    audience=self._audience,
+        for _ in range(3):
+            item = self._repository.get_outbox_item(execution_id)
+            if not item:
+                raise ValueError("outbox item not found")
+            if item.get("state") == "task_enqueued":
+                return False
+            if item.get("state") != "pending":
+                return False
+            task_id = item["task_id"]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", task_id):
+                raise ValueError("invalid task id")
+            generation = int(item.get("task_generation") or 0)
+            task_name = self._client.task_path(
+                self._project, self._location, self._queue,
+                f"exec-{task_id}-g{generation}",
+            )
+            task = tasks_v2.Task(
+                name=task_name,
+                http_request=tasks_v2.HttpRequest(
+                    http_method=tasks_v2.HttpMethod.POST,
+                    url=self._dispatcher_url,
+                    headers={"Content-Type": "application/json"},
+                    body=build_task_payload(item["order_id"], item["execution_id"]),
+                    oidc_token=tasks_v2.OidcToken(
+                        service_account_email=self._service_account,
+                        audience=self._audience,
+                    ),
                 ),
-            ),
-        )
-        try:
-            self._client.create_task(request={"parent": self._parent, "task": task})
-        except AlreadyExists:
-            # Deterministic task name makes a retry after an ambiguous create safe.
-            pass
-        self._repository.mark_task_enqueued(execution_id)
-        return True
+            )
+            try:
+                self._client.create_task(request={"parent": self._parent, "task": task})
+            except AlreadyExists:
+                # A deleted/exhausted task name remains reserved for up to 24h
+                # (or longer for legacy queues). Confirm it still exists before
+                # treating AlreadyExists as a successful enqueue.
+                try:
+                    self._client.get_task(request={"name": task_name})
+                except NotFound:
+                    next_generation = self._repository.advance_outbox_task_generation(
+                        execution_id, generation
+                    )
+                    if next_generation is None:
+                        return False
+                    continue
+            self._repository.mark_task_enqueued(execution_id)
+            return True
+        raise RuntimeError("Cloud Tasks task-name collision could not be resolved")
 
 
 class GoogleCloudRunJobLauncher:
