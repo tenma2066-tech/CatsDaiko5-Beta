@@ -133,6 +133,7 @@ Jobは次の条件を必ず守る。
 - 環境変数 `GOOGLE_CLOUD_PROJECT` を設定し、`PAYPAY_ENCRYPTION_KEY` と `TRANSFER_LOCK_PEPPER` をSecretから注入する。
 
 WorkerはJob引数として注文ID・実行ID・slot IDだけを受け取る。注文の引継ぎ情報と操作内容はFirestoreから暗号化Blobとして取得し、Job内でのみ復号する。
+WorkerはCloud Run標準環境変数 `CLOUD_RUN_EXECUTION`（実行名）をownerとして必須にする。この値はCloud Run Jobsが自動注入するため、Job設定で手動定義しない。未設定・不正ならゲーム処理開始前に停止し、予約slotを安全に解放してreviewにする。ランダムownerへのfallbackは行わない。仕様：[Cloud Run container runtime contract](https://cloud.google.com/run/docs/container-contract)。
 WorkerはCloud Run標準環境変数 `CLOUD_RUN_EXECUTION` を実行ownerとして必須にする。未設定・不正ならゲーム処理を開始せず、予約slotを安全に解放してreviewにする。ランダムなownerへfallbackしないため、異常終了時もreconcilerが実Executionを照合できる。
 
 ## 9. 非公開Dispatcher Service
