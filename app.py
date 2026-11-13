@@ -1236,14 +1236,8 @@ def shop_create_operation_order():
 
 @app.post("/api/shop/orders")
 def shop_create_order():
-    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
-        return jsonify(error="現在は注文受付を停止しています。"), 503
-    data = request.get_json(silent=True) or {}
-    try:
-        order = shop_store.create_order(data.get("sku", ""), data.get("quantity", 1))
-        return jsonify(order), 201
-    except shop_store.ShopError as exc:
-        return jsonify(error=str(exc)), 400
+    return jsonify(error="旧商品カタログ方式の注文受付は終了しました。トップ画面から注文してください。"), 410
+
 
 @app.get("/shop/order/<order_id>")
 def shop_order_page(order_id):
