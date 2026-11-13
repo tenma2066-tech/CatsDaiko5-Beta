@@ -189,11 +189,17 @@ def run(body, wait=6.0):
 
 
 print("\n[1] ログインと画面")
-check("未ログインでも / は公開ショップへ", c.get("/").headers.get("Location", "").endswith("/shop"))
+root = c.get("/")
+check("未ログインでも / に元の全機能UIが表示される", root.status_code == 200 and 'role="tab"' in root.get_data(as_text=True))
+check("旧 /shop URL は元のUIへ転送", c.get("/shop").status_code == 302 and c.get("/shop").headers.get("Location", "").endswith("/"))
 check("未ログインは /console がログインへ", c.get("/console").status_code == 302)
-check("公開ショップは未ログインで表示", c.get("/shop").status_code == 200)
-shop_order = c.post("/api/shop/orders", json={"sku":"sample"})
-check("未ログインで注文を作成できる", shop_order.status_code == 201)
+operation = {
+    "safe": False, "dry": False, "clone": False, "integrity_only": False,
+    "items": ["XP"], "qty": {}, "chars": "", "cat_settings": {},
+    "subs": [], "others": [],
+}
+shop_order = c.post("/api/shop/operation-orders", json={"quantity": 1, "operation": operation})
+check("未ログインで元UIの注文を作成できる", shop_order.status_code == 201, shop_order.get_json())
 if shop_order.status_code == 201:
     order_data = shop_order.get_json()
     order_url = "/api/shop/order/"+order_data["id"]+"?key="+order_data["access_token"]
@@ -204,10 +210,18 @@ if shop_order.status_code == 201:
     A.shop_store.claim_payment(order_data["id"])
     A.shop_store.complete_payment(order_data["id"], "selftest-payment")
     submitted = c.post("/api/shop/order/"+order_data["id"]+"/credentials", json={"key":order_data["access_token"],"transfer_code":"transfer-test","pin":"9876"})
+    check("決済後に引継ぎ情報を送信して元の処理を開始できる", submitted.status_code == 200, submitted.get_json())
+    progress_url = "/api/shop/order/"+order_data["id"]+"/progress?key="+order_data["access_token"]
+    progress = c.get(progress_url)
+    for _ in range(100):
+        if progress.status_code == 200 and progress.get_json().get("status") in ("done", "error"):
+            break
+        time.sleep(0.05)
+        progress = c.get(progress_url)
+    check("注文トークンで元ワーカーの進捗を確認できる", progress.status_code == 200 and progress.get_json().get("status") == "done", progress.get_json())
     public_after = c.get(order_url)
-    check("決済後に引継ぎ情報を送信できる", submitted.status_code == 200)
     check("公開注文照会に引継ぎ情報を含めない", public_after.status_code == 200 and "transfer-test" not in public_after.get_data(as_text=True) and public_after.get_json()["credentials_submitted"])
-check("未ログインは API が401", c.get("/api/cats").status_code == 401)
+check("キャラ一覧APIは未ログインでも利用できる", c.get("/api/cats").status_code == 200)
 check("パスワード違いは入れない", c.post("/login", data={"password": "x"}).status_code == 200)
 check("ログインできる", c.post("/login", data={"password": "pw"}).status_code == 302)
 html = c.get("/console").get_data(as_text=True)

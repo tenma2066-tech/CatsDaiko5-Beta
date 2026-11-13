@@ -113,5 +113,84 @@ class ShopStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.public_order(order["id"], "wrong-token"))
 
 
+    def test_original_operation_order_encrypts_payload_and_uses_fixed_price(self):
+        operation = {
+            "items": ["XP"], "subs": [], "others": [], "qty": {},
+            "chars": "", "cat_settings": {}, "safe": True,
+            "dry": False, "clone": False, "integrity_only": False,
+        }
+        order = self.store.create_operation_order(operation, 4)
+        self.assertEqual(order["unit_price_yen"], 25)
+        self.assertEqual(order["quantity"], 4)
+        self.assertEqual(order["amount"], 100)
+        public = self.store.public_order(order["id"], order["access_token"])
+        self.assertNotIn("operation", json.dumps(public))
+        self.assertTrue(self.store.claim_payment(order["id"]))
+        self.store.complete_payment(order["id"], "operation-digest")
+        self.store.save_credentials(order["id"], order["access_token"], "transfer-code", "1234")
+        saved = self.store.operation_for_execution(order["id"], order["access_token"])
+        self.assertEqual(saved["items"], ["XP"])
+        self.assertEqual(saved["transfer"], "transfer-code")
+        self.assertEqual(saved["confirm"], "1234")
+        self.assertTrue(self.store.claim_execution(order["id"], order["access_token"]))
+        with self.assertRaises(self.store.ShopError):
+            self.store.claim_execution(order["id"], order["access_token"])
+        self.store.bind_job(order["id"], "job-123")
+        self.assertEqual(
+            self.store.public_order(order["id"], order["access_token"])["job_id"],
+            "job-123",
+        )
+        self.store.set_status(order["id"], "fulfilling")
+        self.store.set_status(order["id"], "completed")
+
+    def test_character_specific_quantity_and_price_are_derived_from_operation(self):
+        # A forged client quantity of 1 cannot reduce three selected characters to 50 yen.
+        order = self.store.create_operation_order({"chars": "12,13,14"}, 1)
+        self.assertEqual(order["unit_price_yen"], 50)
+        self.assertEqual(order["quantity"], 3)
+        self.assertEqual(order["amount"], 150)
+
+    def test_operation_order_rejects_invalid_quantity_and_character_input(self):
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({}, 0)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({}, 101)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({"chars": "not-a-number"}, 1)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({"chars": "1-101"}, 1)
+
+    def test_operation_order_requires_valid_order_token(self):
+        order = self.store.create_operation_order({"items": ["XP"]}, 1)
+        self.assertIsNone(
+            self.store.operation_for_execution(order["id"], "wrong-token")
+        )
+
+    def test_public_operation_flags_must_be_real_booleans(self):
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({"clone": "false"}, 1)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({"clone": True, "integrity_only": True}, 1)
+
+    def test_new_account_order_accepts_both_credentials_blank(self):
+        order = self.store.create_operation_order(
+            {"items": ["XP"], "clone": False, "integrity_only": False}, 1
+        )
+        self.store.claim_payment(order["id"])
+        self.store.complete_payment(order["id"], "new-account-digest")
+        self.store.save_credentials(order["id"], order["access_token"], "", "")
+        operation = self.store.operation_for_execution(order["id"], order["access_token"])
+        self.assertEqual(operation["transfer"], "")
+        self.assertEqual(operation["confirm"], "")
+
+    def test_existing_save_modes_require_both_credentials(self):
+        order = self.store.create_operation_order({"clone": True}, 1)
+        self.store.claim_payment(order["id"])
+        self.store.complete_payment(order["id"], "clone-digest")
+        self.store.save_credentials(order["id"], order["access_token"], "", "")
+        with self.assertRaises(self.store.ShopError):
+            self.store.operation_for_execution(order["id"], order["access_token"])
+
+
 if __name__ == "__main__":
     unittest.main()
