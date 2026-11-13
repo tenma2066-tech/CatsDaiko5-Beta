@@ -147,6 +147,15 @@ class FirestoreWorkflowRepository:
             order = order_ref.get(transaction=tx)
             if not order.exists:
                 raise WorkflowStateError("order not found")
+            order_data = order.to_dict()
+            if (order_data.get("status") != "paid"
+                    or order_data.get("job_id") != "queued"
+                    or order_data.get("active_execution_id") != execution_id
+                    or order_data.get("credentials_submitted") is not True):
+                now = self._clock()
+                tx.update(outbox_ref, {"state": "cancelled", "updated": now})
+                tx.update(execution_ref, {"state": "cancelled", "finished": now, "updated": now})
+                return None
             # All slot reads happen before the first write in this transaction.
             candidates = []
             for index in range(self._max_slots):
