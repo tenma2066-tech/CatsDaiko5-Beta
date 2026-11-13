@@ -191,7 +191,7 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
         current = row["status"]
         transitions = {
             "awaiting_payment": {"review", "cancelled"},
-            "payment_processing": {"review", "cancelled"},
+            "payment_processing": {"review"},
             "paid": {"fulfilling", "cancelled"},
             "review": {"paid", "cancelled"},
             "fulfilling": {"completed"},
