@@ -36,8 +36,10 @@ class FakeRepository:
 
 
 class FakeLauncher:
-    def __init__(self, operation="operations/abc", error=None):
-        self.operation = operation
+    def __init__(self, operation=None, error=None):
+        self.operation = operation or {
+            "operation_name": "operations/abc", "execution_name": None,
+        }
         self.error = error
         self.calls = []
 
@@ -81,7 +83,7 @@ class CloudRunDispatcherTests(unittest.TestCase):
         self.assertEqual(repository.state, "outcome_unknown")
         self.assertEqual(repository.launch_claims, 1)
 
-    def test_cloud_run_job_receives_only_order_and_execution_ids(self):
+    def test_cloud_run_job_receives_order_execution_and_reserved_slot_args(self):
         class Operation:
             name = "operations/123"
             metadata = type("Metadata", (), {"name": "job-run-xyz"})()
