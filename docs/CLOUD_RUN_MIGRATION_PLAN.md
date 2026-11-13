@@ -985,3 +985,16 @@ F. execution完了:
 - PayPay実ログイン・実決済・実注文は未実施。SHOP_LIVE_ORDERS_ENABLED=0 を維持。
 - PAYPAY_ENCRYPTION_KEY は変更していない。
 - 次は今回の最新CIとFirestore Emulator結果を確認し、失敗修正後にPayPay ledgerの完全なRepository化、OTP single-use接続、bounded execution log chunks、outbox/slot recoveryへ進む。
+
+
+## 25. Worker終了後の回復設計をRunbookへ反映（2026-11-13）
+
+- Dispatcherに追加された /reconcile エンドポイントを運用手順へ反映。
+- Cloud Schedulerから1分ごとに非公開Dispatcherの /reconcile をOIDC認証で呼び出す手順を docs/CLOUD_RUN_DEPLOYMENT_RUNBOOK.md に追加。
+- Cloud Run Job Executionが終了済みなのにFirestoreがrunningのままの場合、成功扱いも自動再実行もせず、reviewへ移行してslotのみ解放する。ゲーム側結果が不明なためtransfer lockは保持する方針を明記。
+- DispatcherにはCloud Run Job Execution状態を取得する最小権限が必要。Project全体への広いroles/run.viewer付与は避け、可能な限り権限範囲を絞る。
+- Runbook変更commit: 7671540cebfcc57fa5bdb0c0f25750297d7531fc。
+- この更新時点で最新PR CIは複数commitに対して再実行中・一部cancelled。Emulator統合テストを含む最新HEADのCI成功は未確認。
+- 作業は専用ブランチ / Draft PR #9のみ。main・Render・GCP実リソース・PayPay実アカウント・実注文は変更せず、SHOP_LIVE_ORDERS_ENABLED=0を維持。
+
+次は最新CIを確認し、PayPay旧ledgerのFirestore移行・OTPの並行処理保護・ログdocument分割・outbox task retry exhausted時の回復とslot reaperを実装する。これらが完了するまではFirestore backendを本番で有効化しない。
