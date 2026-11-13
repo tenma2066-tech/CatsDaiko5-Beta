@@ -358,7 +358,7 @@ class FirestoreWorkflowRepository:
             order = order_ref.get(transaction=tx)
             if not order.exists:
                 raise WorkflowStateError("order not found")
-            if outbox.to_dict().get("state") != "launching":
+            if outbox.to_dict().get("state") not in {"launching", "dispatched"}:
                 return
             now = self._clock()
             tx.update(outbox_ref, {
