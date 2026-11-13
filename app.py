@@ -2255,11 +2255,8 @@ function refresh(){
     $('#sel-'+g).textContent=n+' / '+TOTALS[g];
     $('#n-'+g).textContent=n+' / '+TOTALS[g];
   });
-  const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
-  let m, bm;
-  if(!t&&!c){m='<b>初期アカウント</b>から新しく作ります。'; bm='初期アカウントから作成';}
-  else if(t&&c){m=$('#integrity').checked?'<b>引継ぎコード</b>のセーブを保全チェックします。':$('#clone').checked?'<b>引継ぎコード</b>のデータから、元・複製の2アカウントを別々に作成します。':'<b>引継ぎコード</b>のデータを取得して書き換えます。'; bm=$('#integrity').checked?'既存セーブの保全チェック':'引継ぎコードから取得';}
-  else{m='<b>片方だけ入力されています。</b>両方入力するか、両方空欄にしてください。'; bm='入力を確認してください';}
+  const m='<b>注文内容</b>を確定するとPayPay決済画面へ進みます。決済確認後に引継ぎコードと暗証番号を入力します。';
+  const bm=$('#integrity').checked?'保全チェック（決済後に引継ぎ情報入力）':$('#clone').checked?'アカウント複製（決済後に引継ぎ情報入力）':'PayPay決済後に引継ぎ情報入力';
   $('#mode').innerHTML=m; $('#barmode').textContent=bm;
   $('#total').textContent='選択 '+total+'件';
   if(!t===!c) $('#inputErr').textContent='';
