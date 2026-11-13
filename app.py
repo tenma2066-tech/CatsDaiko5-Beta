@@ -1211,54 +1211,9 @@ def storefront_root():
 
 @app.get("/shop")
 def shop_home():
-    # Keep the historical URL working, but use the original full UI for customers.
+    # Historical storefront URL now opens the original full customer interface.
     return redirect("/")
-    try:
-        products = shop_store.catalog()
-    except shop_store.ShopError:
-        products = []
-    product_json = json.dumps(products, ensure_ascii=False).replace("</", "<\\/")
-    orders_enabled = os.environ.get("SHOP_LIVE_ORDERS_ENABLED") == "1"
-    body = r"""<div class="card"><h2>商品を選択</h2><p class="muted">ログイン不要でご注文いただけます。商品を選び、PayPayでお支払い後に引継ぎ情報を入力してください。</p>
-<div id="products"></div><p id="catalog-error" class="error"></p><p class="muted" id="shop-disabled">__SHOP_DISABLED__</p></div>
-<div class="card" id="checkout" hidden><h2 id="selected-title">注文内容</h2>
-<label>代行する体数<input id="quantity" type="number" min="1" max="100" step="1" value="1"></label>
-<p class="muted" id="unit-price"></p><p class="price" id="selected-price"></p>
-<p class="muted">次の画面でPayPay決済を行います。決済確認後に引継ぎコードと暗証番号を入力します。</p>
-<button id="place">PayPay決済へ進む</button><p id="error" class="error"></p></div>
-<script>
-const products=__PRODUCTS__;let selected=null;
-const ordersEnabled=__ORDERS_ENABLED__;
-if(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
-const yen=n=>new Intl.NumberFormat('ja-JP').format(n)+'円';
-const list=document.getElementById('products');
-function updatePrice(){
- if(!selected)return;
- const q=Number(document.getElementById('quantity').value);
- document.getElementById('unit-price').textContent='1体あたり '+yen(selected.unit_price_yen);
- document.getElementById('selected-price').textContent=Number.isInteger(q)&&q>=1&&q<=100?yen(selected.unit_price_yen*q):'数量は1〜100体で指定してください。';
-}
-document.getElementById('quantity').addEventListener('input',updatePrice);
-if(!products.length){document.getElementById('catalog-error').textContent='現在、販売商品が設定されていません。管理者にお問い合わせください。';}
-products.forEach(p=>{const el=document.createElement('button');el.type='button';el.style.textAlign='left';el.innerHTML='';
-el.textContent=p.title+'　'+yen(p.unit_price_yen)+'/体'+(p.description?' — '+p.description:'');
-el.addEventListener('click',()=>{selected=p;document.getElementById('selected-title').textContent=p.title;document.getElementById('checkout').hidden=false;updatePrice();document.getElementById('checkout').scrollIntoView({behavior:'smooth'});});list.appendChild(el);});
-const placeButton=document.getElementById('place');
-placeButton.disabled=!ordersEnabled;
-if(!ordersEnabled)placeButton.textContent='現在注文受付停止中';
-placeButton.addEventListener('click',async()=>{
- if(!ordersEnabled)return;
- const error=document.getElementById('error');error.textContent='';
- if(!selected)return;
- const button=document.getElementById('place');button.disabled=true;button.textContent='注文を作成中…';
- try{
-  const r=await fetch('/api/shop/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku:selected.id,quantity:Number(document.getElementById('quantity').value)})});
-  const data=await r.json();if(!r.ok)throw Error(data.error||'注文を作成できませんでした。');
-  location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
- }catch(e){error.textContent=e.message;}finally{button.disabled=false;button.textContent='PayPay決済へ進む';}
-});
-</script>""".replace("__ORDERS_ENABLED__", "true" if orders_enabled else "false").replace("__SHOP_DISABLED__", "").replace("__PRODUCTS__", product_json)
-    return _shop_page("商品一覧", body)
+
 
 @app.post("/api/shop/operation-orders")
 def shop_create_operation_order():
@@ -2711,7 +2666,7 @@ async function start(){
   if(!characterSpecific){
     const entered=window.prompt('代行する体数を入力してください（1〜100体）。料金は1体25円です。','1');
     if(entered===null)return;
-    if(!/^\\d+$/.test(entered.trim()) || Number(entered)<1 || Number(entered)>100){
+    if(!/^[0-9]+$/.test(entered.trim()) || Number(entered)<1 || Number(entered)>100){
       toast('代行体数は1〜100の整数で入力してください'); return;
     }
     quantity=Number(entered);
