@@ -47,6 +47,33 @@ class RuntimeMigrationParserTests(unittest.TestCase):
         )
         connection.close()
 
+    def test_payment_digest_coverage_blocks_missing_or_invalid_ledger_records(self):
+        orders = [
+            {"id": "0000000001", "payment_digest": "a" * 64},
+            {"id": "0000000002", "payment_digest": "b" * 64},
+            {"id": "0000000003", "payment_digest": "not-a-digest"},
+            {"id": "0000000004", "payment_digest": None},
+        ]
+        attempts = [{"digest": "a" * 64, "order_id": "0000000001"}]
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        self.assertEqual(
+            payment_digest_coverage(orders, attempts),
+            {"missing": 1, "invalid": 1},
+        )
+
+    def test_payment_digest_coverage_accepts_complete_ledger(self):
+        from migrate_runtime_data_to_firestore import payment_digest_coverage
+
+        digest = "c" * 64
+        self.assertEqual(
+            payment_digest_coverage(
+                [{"payment_digest": digest}],
+                [{"digest": digest, "order_id": "0000000001"}],
+            ),
+            {"missing": 0, "invalid": 0},
+        )
+
     def test_missing_tables_return_empty_lists(self):
         connection = sqlite3.connect(":memory:")
         self.assertEqual(load_orders(connection), [])
