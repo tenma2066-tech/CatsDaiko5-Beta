@@ -25,15 +25,15 @@ class ShopStoreTests(unittest.TestCase):
             os.environ.pop(key, None)
 
     def test_order_uses_server_catalog_and_hides_credentials_from_public_view(self):
-        order = self.store.create_order("svc-a", "transfer-secret", "1234")
+        order = self.store.create_order("svc-a", "transfer-secret", "9876")
         self.assertEqual(order["amount"], 1234)
         public = self.store.public_order(order["id"], order["access_token"])
         self.assertEqual(public["status"], "awaiting_payment")
         self.assertNotIn("transfer-secret", json.dumps(public))
-        self.assertNotIn("1234", json.dumps(public))
+        self.assertNotIn("9876", json.dumps(public))
         admin = self.store.get_order_for_admin(order["id"])
         self.assertEqual(admin["credentials"]["transfer_code"], "transfer-secret")
-        self.assertEqual(admin["credentials"]["pin"], "1234")
+        self.assertEqual(admin["credentials"]["pin"], "9876")
 
     def test_client_cannot_choose_price(self):
         order = self.store.create_order("svc-a", "abc", "9999")
@@ -41,10 +41,10 @@ class ShopStoreTests(unittest.TestCase):
 
     def test_unknown_product_rejected(self):
         with self.assertRaises(self.store.ShopError):
-            self.store.create_order("not-for-sale", "abc", "1234")
+            self.store.create_order("not-for-sale", "abc", "9876")
 
     def test_order_state_machine(self):
-        order = self.store.create_order("svc-a", "abc", "1234")
+        order = self.store.create_order("svc-a", "abc", "9876")
         self.store.set_status(order["id"], "paid", payment_digest="digest-1")
         self.store.set_status(order["id"], "fulfilling")
         self.store.set_status(order["id"], "completed")
@@ -52,7 +52,7 @@ class ShopStoreTests(unittest.TestCase):
             self.store.set_status(order["id"], "paid")
 
     def test_wrong_access_token_cannot_read_order(self):
-        order = self.store.create_order("svc-a", "abc", "1234")
+        order = self.store.create_order("svc-a", "abc", "9876")
         self.assertIsNone(self.store.public_order(order["id"], "wrong-token"))
 
 
