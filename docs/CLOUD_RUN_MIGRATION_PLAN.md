@@ -1181,3 +1181,18 @@ F. execution完了:
 - 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はIAM matrixとrunbookの整合を確認し、最新HEAD CIを通す。IAMは設計案であり、Project作成後にPolicy Simulatorと実権限テストで検証するまで付与済みとは扱わない。
+
+
+## 38. Cloud Tasks AlreadyExists後の削除済みTask検出・generation rotation（2026-11-13）
+
+- Cloud Tasks公式仕様を再確認。Task名はTask削除/成功/試行枯渇後も最大24時間、旧queue.yaml/queue.xml由来のQueueでは最大9日再利用できず、同名createはALREADY_EXISTSとなる。GetTaskは削除済みTaskにNOT_FOUNDを返す。
+- 従来publisherはALREADY_EXISTSを無条件で成功扱いしていたため、Taskが既に削除されていてもoutboxをtask_enqueuedにし、実際にはDispatcherへ届かないまま注文が待ち続ける可能性があった。
+- outboxに `task_generation` を追加。Cloud Tasks名を `exec-{task_id}-g{generation}` に変更し、Firestore transactionでpending状態・期待generationを確認してgenerationを原子的に進める。
+- create_taskがALREADY_EXISTSの場合、get_taskで実Taskが存在することを確認してからtask_enqueuedにする。get_taskがNOT_FOUNDならgenerationを進めて新しいTask名で再作成。get_taskが権限/通信エラーならoutboxをpendingのまま残し、sweepで再試行する。
+- Firestoreの業務claim（begin_dispatch）は唯一のJob起動gateのまま。generation違いのTaskが重複配送されても、先にlaunchingへ進めた一つだけがJobを起動する。
+- Unit testにlive TaskがあるALREADY_EXISTS、削除済みTask名のgeneration rotationを追加。Emulator testにgenerationのtransaction競合・pending以外の拒否を追加。
+- 公式根拠: Cloud Tasks CreateTaskは削除済みTask名を最大24h（旧Queue形式は9日）予約し、GetTaskは削除済みTaskにNOT_FOUNDを返す。参照: [CreateTask / deduplication](https://cloud.google.com/tasks/docs/reference/rest/v2/projects.locations.queues.tasks/create)、[GetTask](https://cloud.google.com/python/docs/reference/cloudtasks/latest/google.cloud.tasks_v2.services.cloud_tasks.CloudTasksClient)。
+- 最新コード/テストcommit `d693b1cd9e1aab40f03879e9d216be9e1fd36752`, `037bb853d814a6a114f8663ac6adfb1e8117675b`, `ff8026214be7933d597e499f3fed1e64987b824d`, `48f40494d051e6b8dd6bc78856e34b1bd828e1b8`。この変更を含むCI/parallel結果は未確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIのCloud Tasks unit tests / Firestore Emulator / Docker buildを確認し、失敗時は修正する。Queueを本番作成する際は新形式で作成し、旧Queueの最大9日dedupe windowを前提にしない。
