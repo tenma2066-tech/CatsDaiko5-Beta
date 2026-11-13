@@ -1193,7 +1193,21 @@ a{color:inherit}.hidden{display:none!important}
 
 @app.get("/")
 def storefront_root():
-    return redirect("/shop")
+    # Public customers use the original full-featured interface; only checkout
+    # and customer identity are different from the legacy console.
+    groups = [
+        ("items", "アイテム", "選んだものを最大値まで付与します", ITEMS),
+        ("qty", "数量指定", "個数を決めて付与します。空欄は変更しません", ITEMS),
+        ("chars", "キャラ管理", "キャラを選択し、レベル・形態・本能を1体ずつ設定します", []),
+        ("subs", "サブ", "キャラ・ステージなどをまとめて解放・強化します", SUBS),
+        ("others", "その他", "会員状態やミッションなどを設定します", OTHERS),
+    ]
+    return render_template_string(
+        MAIN_HTML, groups=groups, totals={k: len(v) for k, _, _, v in groups},
+        version=APP_VERSION, limits=engine.QUANTITY_ITEM_LIMITS,
+        high=HIGH_RISK_ITEMS, error_nums=sorted(i + DB_OFFSET for i in engine.ERROR_CAT_IDS),
+        public_checkout=True,
+    )
 
 @app.get("/shop")
 def shop_home():
@@ -1243,6 +1257,20 @@ placeButton.addEventListener('click',async()=>{
 });
 </script>""".replace("__ORDERS_ENABLED__", "true" if orders_enabled else "false").replace("__SHOP_DISABLED__", "").replace("__PRODUCTS__", product_json)
     return _shop_page("商品一覧", body)
+
+@app.post("/api/shop/operation-orders")
+def shop_create_operation_order():
+    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
+        return jsonify(error="現在は注文受付を停止しています。"), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        order = shop_store.create_operation_order(
+            data.get("operation"), data.get("service_type"), data.get("quantity")
+        )
+        return jsonify(order), 201
+    except shop_store.ShopError as exc:
+        return jsonify(error=str(exc)), 400
+
 
 @app.post("/api/shop/orders")
 def shop_create_order():
@@ -1314,11 +1342,51 @@ def shop_order_status(order_id):
 @app.post("/api/shop/order/<order_id>/credentials")
 def shop_submit_credentials(order_id):
     data = request.get_json(silent=True) or {}
+    key = data.get("key", "")
     try:
-        shop_store.save_credentials(order_id, data.get("key", ""), data.get("transfer_code", ""), data.get("pin", ""))
-        return jsonify(ok=True, message="引継ぎ情報を送信しました。管理者が確認します。")
+        order = shop_store.public_order(order_id, key)
+        if not order:
+            return jsonify(error="注文が見つかりません。"), 404
+        if order.get("job_id"):
+            return jsonify(error="この注文は既に処理開始済みです。"), 409
+        shop_store.save_credentials(order_id, key, data.get("transfer_code", ""), data.get("pin", ""))
+        shop_store.claim_execution(order_id, key)
+        operation = shop_store.operation_for_execution(order_id, key)
+        # Reuse the original /run validation, queue and worker path. The internal
+        # request is scoped to this order and never exposes /run to customers.
+        with app.test_request_context("/run", method="POST", json=operation):
+            session["_order_execution"] = True
+            session["job_owner"] = "order:" + order_id
+            response = run()
+            result = response.get_json(silent=True) or {}
+            if response.status_code >= 400 or not result.get("job"):
+                shop_store.release_execution(order_id)
+                return jsonify(error=result.get("error", "処理を開始できませんでした。")), response.status_code
+        shop_store.bind_job(order_id, result["job"])
+        shop_store.set_status(order_id, "fulfilling", note="決済確認済み・処理開始")
+        return jsonify(ok=True, job=result["job"], message="引継ぎ情報を受け付け、処理を開始しました。")
     except shop_store.ShopError as exc:
+        shop_store.release_execution(order_id)
         return jsonify(error=str(exc)), 400
+    except Exception:
+        shop_store.release_execution(order_id)
+        app.logger.exception("Could not start paid order %s", order_id)
+        return jsonify(error="処理を開始できませんでした。管理者による確認が必要です。"), 500
+
+
+@app.get("/api/shop/order/<order_id>/progress")
+def shop_order_progress(order_id):
+    key = request.args.get("key", "")
+    order = shop_store.public_order(order_id, key)
+    if not order:
+        return jsonify(error="注文が見つかりません。"), 404
+    job_id = order.get("job_id")
+    if not job_id or job_id == "starting":
+        return jsonify(status=order["status"], job_status="not_started")
+    with app.test_request_context("/status/" + job_id, method="GET"):
+        session["_order_execution"] = True
+        session["job_owner"] = "order:" + order_id
+        return status(job_id)
 
 @app.post("/api/shop/order/<order_id>/paypay")
 def shop_paypay_submit(order_id):
@@ -1513,7 +1581,7 @@ def api_cats_refresh():
 
 @app.post("/run")
 def run():
-    if not _logged_in():
+    if not _logged_in() and not session.get("_order_execution"):
         return jsonify(error="ログインしてください"), 401
     _gc_jobs()
     data = request.get_json(silent=True) or {}
@@ -1638,7 +1706,7 @@ def run():
 
 @app.get("/status/<job_id>")
 def status(job_id: str):
-    if not _logged_in():
+    if not _logged_in() and not session.get("_order_execution"):
         return jsonify(error="ログインしてください"), 401
     _gc_jobs()
     with _jobs_lock:
@@ -1670,7 +1738,7 @@ def status(job_id: str):
 
 @app.post("/cancel/<job_id>")
 def cancel_job(job_id: str):
-    if not _logged_in():
+    if not _logged_in() and not session.get("_order_execution"):
         return jsonify(error="ログインしてください"), 401
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -2622,43 +2690,43 @@ function watch(id){
   poll();
 }
 async function start(){
-  const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
-  if(!t!==!c){
-    show('input'); $('#inputErr').textContent='引継ぎコードと暗証番号は「両方入力」か「両方空欄」にしてください。'; return;
+  if($('#integrity').checked && $('#clone').checked){
+    toast('保全チェックとアカウント複製は同時に実行できません'); return;
   }
-  if($('#integrity').checked){
-    if(!t||!c){ show('input'); $('#inputErr').textContent='保全チェックには、既存セーブの引継ぎコードと暗証番号の両方が必要です。'; return; }
-    if(!$('#dry').checked){
-      const accepted=window.confirm('既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復対象が見つかった場合は保存データを再登録し、新しい引継ぎコードを発行します。修復対象がなければ再登録しません。BAN回避や安全性を保証する機能ではありません。続行しますか？');
-      if(!accepted) return;
-    }
-  } else if($('#clone').checked){
-    if(!t||!c){ show('input'); $('#inputErr').textContent='複製には、引継ぎコードと暗証番号の両方が必要です。'; return; }
-    if(!$('#dry').checked){
-      const accepted=window.confirm('【実験機能・本番サーバー接続】元アカウントと複製アカウントの2つを別々に登録します。PONOS非公式の方法で、独立プレイや継続利用は保証されません。引継ぎコードは1回限りで、ゲーム内で引継ぎを完了すると元端末のデータが初期化されます。失敗時は元アカウントのコードだけが発行される場合もあります。理解したうえで続行しますか？');
-      if(!accepted) return;
-    }
-  } else {
-  if(parseNums($('#chars').value).err){ show('chars'); toast('キャラ番号を確認してください'); return; }
-  if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('items'); return; }
-  const bad=document.querySelector('.qrow.over');
-  if(bad){ show('qty'); toast('「'+bad.dataset.item+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
+  const parsed=parseNums($('#chars').value);
+  if(parsed.err){ show('chars'); toast('キャラ番号を確認してください'); return; }
+  if(!$('#integrity').checked && !$('#clone').checked){
+    if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('items'); return; }
+    const bad=document.querySelector('.qrow.over');
+    if(bad){ show('qty'); toast('「'+bad.dataset.item+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
   }
-  $('#fail').hidden=true; $('#res').hidden=true; $('#warn').hidden=true; $('#rep').hidden=true; $('#log').textContent='';
-  renderSteps(null); $('#elapsed').textContent='00:00'; $('#updated').textContent='--:--:--';
-  setRunning(true); show('status');
-  $('#log').textContent='開始しました。サーバーが休止していた場合は、最初に1分ほどかかります。';
+  const characterSpecific=parsed.nums.length>0;
+  let quantity=characterSpecific?parsed.nums.length:1;
+  if(!characterSpecific){
+    const entered=window.prompt('代行する体数を入力してください（1〜100体）。料金は1体25円です。','1');
+    if(entered===null)return;
+    if(!/^\\d+$/.test(entered.trim()) || Number(entered)<1 || Number(entered)>100){
+      toast('代行体数は1〜100の整数で入力してください'); return;
+    }
+    quantity=Number(entered);
+  }
+  if(quantity>100){toast('一度に注文できるのは100体までです');return;}
+  if($('#integrity').checked && !window.confirm('決済確認後、入力した引継ぎ情報を使って既存セーブの保全チェックを実行します。続行しますか？'))return;
+  if($('#clone').checked && !window.confirm('決済確認後、入力した引継ぎ情報を使ってアカウント複製を実行します。続行しますか？'))return;
+  const operation={
+    safe:$('#safe').checked,dry:$('#dry').checked,clone:$('#clone').checked,
+    integrity_only:$('#integrity').checked,items:picked('items'),qty:qtyMap(),
+    chars:$('#chars').value,cat_settings:catSettingsPayload(),
+    subs:picked('subs'),others:picked('others')
+  };
+  $('#go').disabled=true;$('#go').textContent='注文を作成中…';
   try{
-    const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c, items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')})});
-    const j=await r.json();
-    if(r.status===401){location.href='/login'; return;}
-    if(!r.ok){ setRunning(false); $('#log').textContent=''; $('#fail').hidden=false; $('#fail').textContent=j.error||'エラー'; return; }
-    jobStart=Date.now(); watch(j.job);
-  }catch(e){
-    setRunning(false); $('#log').textContent='';
-    $('#fail').hidden=false; $('#fail').textContent='サーバーに接続できませんでした。少し待ってからもう一度お試しください。';
-  }
+    const r=await fetch('/api/shop/operation-orders',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({service_type:characterSpecific?'character-specific':'other-service',quantity,operation})});
+    const data=await r.json();
+    if(!r.ok)throw Error(data.error||'注文を作成できませんでした。');
+    location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
+  }catch(e){toast(e.message);$('#go').disabled=false;$('#go').textContent='PayPay決済へ進む';}
 }
 $('#go').addEventListener('click',start);
 
