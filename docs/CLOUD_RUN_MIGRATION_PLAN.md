@@ -1385,3 +1385,15 @@ F. execution完了:
 - 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新HEAD CI/parallelを確認し、dispatcher module docstringとIAM matrixの一致を確認する。
+
+
+## 53. Firestore OTP sessionの期限切れdocumentをbounded cleanup（2026-11-13）
+
+- Firestore OTP sessionは15分のexpires_atを持つが、consume/clear後のdocumentは残る。Firestore TTL deletesはfree tier対象外のためTTLを有効化せず、Dispatcher `/sweep` にcleanupを追加。
+- `cleanup_expired_otp_sessions(limit=100)` は `admin_otp_sessions.expires_at <= now` を最大100件取得し、Firestore batch delete。1 sweepの削除数は100件に制限し、backlogは次の1分周期で順次処理。
+- `/sweep` のレスポンスに `otp_sessions_cleaned` を追加。Cloud Tasks publish後にcleanupする。OTP本文は暗号化済みであり、cleanup logsにはsession IDや内容を出さない。
+- Emulator test `test_expired_otp_sessions_are_deleted_in_bounded_batches` でpending/consumedのexpired docを削除し、未期限docを保持することを確認。
+- 最新コードcommit `a14233d1d6cd6b7813904aacc72e6ed2c2363e3a`, `a0ff3a21366a8c7a77206ef2f7d98ce0d4f06b1c`, `fccd902655e51df26eb5f856f6c8c295098c2bf3`。この変更を含む最新CI/parallel結果はこれから確認。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はOTP cleanupのFirestore Emulator testとDispatcher sweep integrationをCIで確認する。Firestore TTLは引き続き有効化しない。
