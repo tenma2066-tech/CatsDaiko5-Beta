@@ -487,3 +487,136 @@ Firestore移行対象候補は、少なくとも次の4領域となる。
 
 この調査はコード読解のみ。PayPayログイン・受取は実行していない。秘密値、token、Cookie、OTPは取得・記録・表示していない。アプリコード、Render、runtime-data、注文受付設定は変更していない。
 
+
+
+## 15. Phase 1 設計：Firestoreデータモデルと整合性（2026-11-13）
+
+### 15.1 設計原則
+
+- Firestore Native mode / Standard edition / Tokyo asia-northeast1を候補として固定する。
+- 注文・決済・executionの状態変更はFirestore transactionを使い、外部API呼び出し中にtransactionを開いたままにしない。
+- transaction callbackは競合時に再実行され得るため、callback内でPayPay API、Cloud Run Jobs API、Cloud Tasks API、メール送信、ゲームデータ変更などの外部副作用を起こさない。
+- Firestoreは単一ドキュメント1MiB上限とtransaction request 10MiB上限を前提に設計する。長いログや大きなゲームデータ・BCSFEキャッシュはFirestoreに格納しない。
+- 秘密情報はFernet暗号文のまま保存し、平文をドキュメントID・Cloud Tasks payload・Job引数・URL・ログへ出さない。
+- 注文状態の監査履歴は追記型イベントにし、現在状態のドキュメントとは分離する。
+- Cloud Run Jobの初期max retriesは0を候補とする。ゲーム処理は外部状態変更の結果が不明なまま自動再試行すると二重実行の危険があるため、処理段階ごとの安全な再開仕様ができるまで自動retryを有効化しない。
+
+### 15.2 コレクション案
+
+| Collection / document | 主な内容 | 書き込み責任 |
+|---|---|---|
+| orders/{order_id} | 現行ordersの列。amount・商品・数量・status・access_hash・暗号化credential_enc/operation_enc・payment_digest・job/execution ID・時刻 | Web/API |
+| order_events/{event_id} | order_id、from/to state、event type、actor、created、短い非秘密metadata | 状態遷移transaction |
+| payment_attempts/{link_digest} | digest、order_id、attempted/paid/pending/review/outcome_unknown、provider status code等の安全なmetadata、created/updated | 決済処理 |
+| executions/{execution_id} | order_id、state、step、progress、owner、lease expiry、Cloud Run Job execution name、started/heartbeat/finished、outcome_unknown | Dispatcher / Job |
+| execution_logs/{execution_id}/chunks/{chunk_id} | 件数・サイズ上限付きの短いログchunk、時刻、severity。秘密情報・資格情報禁止 | Job |
+| transfer_locks/{hmac_digest} | 引継ぎコードの鍵付きHMAC、owner execution、lease expiry、state | Job |
+| worker_slots/{slot_id} | slot number、execution_id、owner、lease expiry、state | Job |
+| task_outbox/{task_id} | execution_id、task type、pending/dispatching/dispatched/failed、attempt count、lease | Web transaction / Dispatcher |
+| paypay_accounts/{account_id} | account.encと同等のFernet暗号文、version、updated。1管理者アカウントを想定 | 管理者認証処理 |
+| admin_sessions/{session_id}（必要時） | OTPフロー等の短命な暗号化状態とexpiry。通常のWebセッションを無条件にFirestoreへ移さない | 管理者認証処理 |
+
+ID設計:
+- order_idは現行の10文字英数字を維持し、公開アクセスtokenそのものではなくSHA-256 hashのみ保存。
+- payment_attemptsのdocument IDはPayPayリンク文字列そのものではなく、既存同様のSHA-256 digestを使用。ログにdigest全文を出さない。
+- transfer_locksのdocument IDは引継ぎコードの平文SHA-256ではなく、Secret Managerの専用pepperを使うHMAC-SHA256。引継ぎコードを推測する辞書攻撃への耐性を確保する。
+- execution_id / task_idは暗号学的乱数で生成。注文ごとのexecution作成はtransactionで一意にclaimし、再送時は既存executionを返す。
+
+### 15.3 重要なtransaction境界
+
+A. 注文作成:
+1. サーバーで商品・数量・価格を再検証し、暗号化credential/operationを作成。
+2. orders/{id}とorder_eventsのcreatedを同一transactionで作成。
+3. 同じ注文IDが既に存在する場合は新規作成扱いにしない。
+
+B. 決済claim:
+1. PayPayリンクを正規化し、SHA-256 digestを算出。
+2. transaction内で注文がawaiting_paymentであること、payment_attempts/{digest}が存在しないことを確認。
+3. ordersをpayment_processingへ変更し、payment_attemptsをattemptedで作成し、order_eventを追加。
+4. transaction commit後にのみPayPay外部APIを呼び出す。
+5. PayPay受取成功の明確な応答が得られた場合、transactionでpayment_attemptsをpaid、ordersをpaid、eventを追記する。
+6. タイムアウト・HTTP応答不明・プロセス終了・DB確定失敗時はreview/outcome_unknownへfail-closed。成功可否が確認できないリンクを自動再送しない。外部API成功後にDB書き込みだけ失敗した場合も同じ扱いにし、管理者確認・照合を必須とする。
+7. 同じdigestまたは同じorder_idを別注文に使えない一意性を維持する。FirestoreはRDBのUNIQUE制約がないため、digestをdocument IDにしてtransactionで存在確認する。
+
+C. 引継ぎ情報保存:
+1. 注文所有tokenのSHA-256を照合し、注文がpaid、未提出、execution未開始であることをtransaction内で確認。
+2. credential_encをFernet暗号文で保存し、credentials_submitted=1に変更。
+3. 平文transfer code / PINをFirestoreの他フィールド・event・ログへ複製しない。
+
+D. execution enqueue:
+1. transaction内で注文がpaid、credentials_submitted=1、active executionなしを確認。
+2. executions/{id}をqueuedで作成し、orders.active_execution_idを設定し、task_outbox/{task_id}をpendingで作成。
+3. transaction commit後、Cloud Tasks dispatcherがoutboxを送信する。DB更新とCloud Tasks作成の間でクラッシュしてもoutboxを再走査して再送できる。
+4. Cloud Tasksは少なくとも1回配送される前提。task_id / execution_idによる冪等処理を行う。
+
+E. Job claim:
+1. Jobはorder_id / execution_idのみを引数として起動し、DBから状態を再取得。
+2. transactionでexecutionがqueued、注文がpaid、資格情報提出済み、active_execution_id一致を確認。
+3. worker_slotsの空きを読み取り、executionとslotを同じtransactionでrunning/owner/lease付きに更新。transfer lockも同時にclaimする。
+4. slotが空いていない場合は処理を始めない。Dispatcher側の再スケジュールと待機キューで制御し、起動したJobを長時間sleepさせない。
+5. 既に別Jobがclaim済みならこのJobは副作用を起こさず終了する。
+
+F. execution完了:
+1. step更新・進捗・heartbeatをDBへ反映するが、ログ1行ごとに書かず一定時間または段階ごとにまとめる。
+2. 完了結果を確定できた場合、execution completedとorder completedをtransactionで更新し、slot/transfer lockを解放しeventを追加。
+3. 失敗・キャンセル・結果不明では、外部処理が未実行と証明できない限りqueuedへ戻さず、review/outcome_unknownへ移して自動再実行を禁止。
+4. heartbeat消失だけでslotを回収しない。Cloud Run Job executionの実際の状態を照合し、終了済みであることを確認してからreaperが回収する。
+
+### 15.4 Cloud Run Job / Cloud Tasksの初期制限
+
+- 初期Jobは1 executionあたり1 task、parallelism=1。MAX_CONCURRENT_JOBS=4を維持する場合はFirestore worker_slots 4枠をglobal gateとして使う。
+- Cloud Run Jobのmax retries=0から開始し、失敗時はexecutionをreviewへ。副作用のない初期化工程のみ再試行可能と証明できた段階で工程単位のretryを再検討。
+- Cloud Run Job task timeoutは初期値を短く決め打ちしない。Render実測のP50/P95/P99と最長処理時間を取得し、その最大値に余裕を足して設定する。Cloud Run Jobsの公式上限は1 taskあたり最大168時間だが、長いtimeoutは無停止実行を保証しない。
+- Cloud Tasksのdispatch concurrencyはDispatcherへの同時HTTP配信制御に限定し、Job実行中の総数制御はFirestore slot leaseで行う。
+- Dispatcherは短時間で応答し、BCSFE処理を実行しない。Cloud Tasksの再配送で複数Jobが起動しても、DB claimできるexecutionは1つだけにする。
+- Job起動APIがタイムアウトした場合は「起動していない」と決めつけない。Cloud Run Job execution一覧とexecution IDを照合し、同じexecution_idをclaimできるJobだけが処理を開始する。
+
+### 15.5 Firestore操作量の概算（仮置き）
+
+注文1件あたりの初期目標値:
+- 書き込み: 25〜40 document writes（注文・決済attempt・状態イベント・execution・outbox・slot/lock・進捗chunkを含む）。
+- 読み取り: 30〜60 document reads（状態検証、transaction、Job claim、進捗確認を含む）。
+- 実装では進捗ログをまとめ、ステータスのポーリングを最低5秒間隔程度にし、同じ画面内の短時間readをキャッシュする。
+- 50注文/日なら概算で1,250〜2,000 writes/日、1,500〜3,000 reads/日（UI polling・transaction retry増加分を別途加算）。Firestore Standard無料枠の20,000 writes/日・50,000 reads/日より小さい見込み。
+- ただし、管理者一覧の全件取得、進捗ポーリング、transaction競合によるretry、複合indexの読み取りは増加要因。実装後にFirestore usage metricsで実測し、上記は保証値として扱わない。
+- 50注文/日を超える場合は日次無料枠を超える可能性を再計算する。無料枠は月間ではなく日次適用、Pacific timeでリセットされる。
+
+### 15.6 Cloud Run Jobs compute費用シナリオ（仮置き）
+
+前提: 1 vCPU / 1 GiB memory / 1 task per execution、課金対象実行時間は最低1分。Cloud Run Jobsの無料枠は月240,000 vCPU-secondsと450,000 GiB-seconds（請求先アカウント単位でプロジェクト横断集計）。超過時の通常単価の目安は$0.000018/vCPU-second、$0.000002/GiB-second。東京Tier 1の実請求単価・請求通貨・税はCloud Billingで最終確認する。
+
+| 注文数/月 | 1件の平均実行時間 | vCPU秒/月 | メモリGiB秒/月 | 無料枠適用後のJob compute概算 |
+|---:|---:|---:|---:|---:|
+| 100 | 10分 | 60,000 | 60,000 | $0（無料枠内） |
+| 500 | 5分 | 150,000 | 150,000 | $0（無料枠内） |
+| 1,000 | 5分 | 300,000 | 300,000 | 約$1.08（約¥173） |
+| 1,000 | 10分 | 600,000 | 600,000 | 約$6.78（約¥1,082） |
+
+換算は2026-11-13のUSD/JPY約159.9円で単純換算した参考値であり、カード/銀行換算、Google請求通貨、税・その他サービス料金は含まない。実処理が2 vCPUを必要とする場合、CPU費用は増える。Cloud Run Jobsは実行中のinstance-based料金で、1分未満の実行にも最低1分が適用される。
+
+**重要:** 1,000件/月・10分/件ではJob compute単体で月1,000円を少し超える可能性がある。Web Service、Firestore、Tasks、Artifact Registry、Logging、外向き通信も含む総額が目標1,000円を超えるケースがあるため、1,000円を保証しない。実際の処理時間をRenderログ・計測で測ってから再試算する。
+
+### 15.7 今回の設計判断
+
+- Firestore Standard Tokyoを主DB候補として継続。
+- 進捗ログは別collectionのbounded chunksとし、巨大ドキュメント化を避ける。
+- 決済はattemptedを先に確保し、外部受取結果不明時はreview/outcome_unknown。自動再送禁止を維持。
+- Jobはinitially maxRetries=0。副作用が安全に再開可能な単位に分離できるまで自動retryを行わない。
+- Cloud Tasks outboxでDB更新とTask発行の不整合を回復。
+- 4つの共有worker slotsでglobal concurrencyを制限。Job APIの二重起動はexecution claimで排除。
+- GitHub runtime-dataは移行元・バックアップとして残し、同時更新DBにはしない。
+
+### 15.8 今回の作業範囲
+
+本節は設計・概算のみ。Firestore/GCPリソース作成、課金有効化、コード変更、データ移行、Render設定変更、PayPay操作、注文受付有効化は実施していない。Cloud Run Jobの最大168時間・無料枠・価格は公式資料を参照したが、実際の処理時間・CPU使用率は未測定。
+
+### 15.9 参照資料
+
+- Firestore transactions: https://docs.cloud.google.com/firestore/native/docs/manage-data/transactions
+- Firestore quotas and free tier: https://docs.cloud.google.com/firestore/quotas
+- Firestore pricing: https://cloud.google.com/firestore/pricing
+- Cloud Run pricing (Services and Jobs): https://cloud.google.com/run/pricing
+- Cloud Run Job timeout: https://docs.cloud.google.com/run/docs/configuring/task-timeout
+- Cloud Run Jobs create / retries / parallelism: https://docs.cloud.google.com/run/docs/create-jobs
+- USD/JPY reference rate (2026-11-13): https://www.boj.or.jp/en/statistics/market/forex/fxdaily/fxlist/fx261113.pdf
+
