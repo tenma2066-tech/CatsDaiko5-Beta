@@ -1128,3 +1128,15 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新HEADで全CI、特にFirestore EmulatorとDocker buildを確認。失敗があれば原因を修正し再実行する。PayPay ledger schema検証後も、実データdry-runが必要になるまでapplyは行わない。
+
+
+## 34. Worker report / skipped値の再帰的secret redaction（2026-11-13）
+
+- Workerのlog/warn/errorは既に文字列redactionしていたが、Firestoreへ保存するreport/skippedはそのまま保存していた。
+- report/skipped内の文字列・ネストしたdict/listのkey/valueに、transfer codeやPINなどredaction対象が含まれる可能性を考慮し、`_redact_nested()` を追加。構造は維持し、文字列を再帰的に置換する。レポート全体を500文字で切り詰めず、chunk上限による明示的な安全制御を維持する。
+- `test_nested_report_and_skipped_values_are_redacted_without_truncation` を追加。
+- 直前HEAD `146901822a24f50e482260ff7f83fae69ff32aea` のCI run `43441596827` は全工程success（Firestore Emulator integration tests / Docker build含む）、parallel regression run `43441596750` もsuccess。
+- 今回のredaction変更commit `77a53e8c567ead3457852dd34434c1fa1eeaef03`、test `d5f9a76983938f72430749224a1d049f874cc660` を含む最新HEAD CIはこれから実行・確認する。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADのCI/parallel regressionを確認。引き続き管理者のunknown launch復旧方法とIAMの最小権限を詰める。実GCPリソース作成、実データ移行、PayPay実ログイン・決済はユーザーの明示承認前に行わない。
