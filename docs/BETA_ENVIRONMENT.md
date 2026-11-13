@@ -39,7 +39,7 @@
 - `PAYPAY_ENCRYPTION_KEY` は `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` で一度生成し、RenderのSecretとして設定して以後変更しない。変更すると保存済みのPayPay認証情報と注文内の引継ぎ情報を復号できなくなる。
 - RenderのFreeプランではPOSIX永続ディスクを使わず、GitHubの非公開リポジトリにある専用ブランチ `runtime-data` を保存先として使う。Blueprintの `RUNTIME_GITHUB_REPO` / `RUNTIME_GITHUB_BRANCH` / `RUNTIME_GITHUB_PREFIX` はベータ用に設定済み。GitHub APIの認証には `AUTH_GITHUB_TOKEN` を共用し、このトークンにはベータリポジトリの Contents: Read and write が必要。
 - 保存先は `runtime-data/runtime/shop.sqlite3`、`runtime-data/runtime/paypay-ledger.sqlite3`、`runtime-data/runtime/paypay/account.enc`。SQLite DBスナップショットは `PAYPAY_ENCRYPTION_KEY` で暗号化し、PayPay認証情報も暗号化済みのまま保存する。注文内の引継ぎコード・暗証番号も暗号化DB内に含まれる。キーはRender Secretとして設定し、絶対にGitHubへコミットしない。キーを失うと保存済みデータを復号できない。
-- GitHub保存はローカルディスクと同じではなく、ファイル単位のGitコミットによるスナップショット方式。書き込みのたびにGitHub APIを利用するため、API制限・通信障害・競合時は保存を失敗扱いにして処理を止める。複数DBの同時書き込みはアプリ内で直列化し、Renderは1サービスインスタンス・gunicorn 1 workerを維持する。高頻度・大容量用途には向かず、Git履歴にも暗号化済みの旧スナップショットが残る。
+- GitHub保存はローカルディスクと同じではなく、ファイル単位のGitコミットによるスナップショット方式。保存ファイルは900KB以下に制限する。書き込みのたびにGitHub APIを利用するため、API制限・通信障害・競合時は保存を失敗扱いにして処理を止める。複数DBの同時書き込みはアプリ内で直列化し、Renderは1サービスインスタンス・gunicorn 1 workerを維持する。高頻度・大容量用途には向かず、Git履歴にも暗号化済みの旧スナップショットが残る。
 - 初回起動時にローカル保存ファイルが存在する場合は、GitHub保存先が空のときに限りGitHubへ移行する。GitHub側に既存データがある場合はそちらを優先し、ローカルデータで上書きしない。
 - `SHOP_DB_PATH`、`PAYPAY_LEDGER_PATH`、`PAYPAY_DATA_DIR` はGitHub保存を設定しないローカル開発時のフォールバック先。RenderではGitHub保存設定を必須とし、設定不備やGitHub保存失敗時に一時領域へ黙って切り替えない。
 - 安定版のディスク、PayPayアカウント情報、暗号化キー、DBは共有しない。
