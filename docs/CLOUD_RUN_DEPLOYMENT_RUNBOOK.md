@@ -221,6 +221,8 @@ python migrate_runtime_data_to_firestore.py --apply
 
 dry-run summaryには、注文DBの `payment_digest` とPayPay ledgerの `links.digest` の照合件数が表示される。**「Order payment digests missing from ledger」と「Invalid order payment digests」が両方0であることを確認するまで `--apply` を実行しない。** 1件でもあればimportはfail-closedで停止する。digestの中身は表示されないため、旧snapshotを安全な環境で照合してから再実行する。
 
+また、PayPay ledger snapshot自体が見つからない場合も `--apply` は拒否される。注文DBだけを移行して過去のPayPayリンク利用履歴を欠落させないため。dry-runで不足状況を確認し、正しい暗号化ledger snapshotを用意するまで本番importを行わない。
+
 **本番移行前に、dry-runの件数と管理画面の注文数を照合すること。** 取り込み後もPayPay account.encはGitHub runtime-dataに残す。暗号化キーは変更しない。
 
 ## 14. データ移行・切替の未完了ゲート
