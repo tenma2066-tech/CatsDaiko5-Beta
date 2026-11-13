@@ -389,6 +389,16 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.client.collection("executions").document(execution_id).delete()
         self.client.collection("worker_slots").document("slot-0").delete()
 
+    def test_otp_session_consume_is_atomic_and_single_use(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        session_id = "otp_" + secrets.token_hex(12)
+        workflow.save_otp_session(session_id, "encrypted-otp-state", time.time() + 300)
+        first = workflow.consume_otp_session(session_id)
+        second = workflow.consume_otp_session(session_id)
+        self.assertEqual(first, "encrypted-otp-state")
+        self.assertIsNone(second)
+        self.client.collection("admin_otp_sessions").document(session_id).delete()
+
     def test_legacy_import_is_create_only_and_marks_old_active_job_for_review(self):
         legacy_order_id = secrets.token_hex(5).upper()
         values = {
