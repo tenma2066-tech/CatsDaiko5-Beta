@@ -242,6 +242,7 @@ def claim_execution(order_id: str, access_token: str):
             (time.time(), order_id))
         if changed.rowcount != 1:
             raise ShopError("この注文は既に処理開始済み、または状態が変わりました。")
+    return True
 
 
 def bind_job(order_id: str, job_id: str):
