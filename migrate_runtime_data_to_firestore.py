@@ -77,6 +77,14 @@ def load_payment_attempts(connection):
     )]
 
 
+def require_ledger_snapshot_for_apply(ledger_db):
+    """Refuse a live import when the global PayPay link history is unavailable."""
+    if ledger_db is None:
+        raise RuntimeError(
+            "encrypted PayPay ledger snapshot is missing; refusing Firestore import"
+        )
+
+
 def payment_digest_coverage(orders, attempts):
     """Count order payment digests that cannot be proven present in the old ledger."""
     ledger_digests = {
@@ -162,11 +170,13 @@ def main():
         print(f"Invalid payment rows skipped: {len(attempts) - len(valid_attempts)}")
         print(f"Order payment digests missing from ledger: {digest_coverage['missing']}")
         print(f"Invalid order payment digests: {digest_coverage['invalid']}")
-        if args.apply and (digest_coverage["missing"] or digest_coverage["invalid"]):
-            raise RuntimeError(
-                "payment ledger does not cover every order payment digest; "
-                "resolve the mismatch before importing"
-            )
+        if args.apply:
+            require_ledger_snapshot_for_apply(ledger_db)
+            if digest_coverage["missing"] or digest_coverage["invalid"]:
+                raise RuntimeError(
+                    "payment ledger does not cover every order payment digest; "
+                    "resolve the mismatch before importing"
+                )
         if not args.apply:
             print("No Firestore writes performed. Re-run with --apply only after reviewing backups.")
             return 0
