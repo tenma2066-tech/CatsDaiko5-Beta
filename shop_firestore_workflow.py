@@ -52,7 +52,10 @@ def _split_worker_snapshot_arrays(snapshot: dict[str, Any]) -> list[dict[str, An
     """Split worker-visible arrays into bounded, ordered Firestore chunk docs."""
     chunks: list[dict[str, Any]] = []
     for field in _WORKER_ARRAY_FIELDS:
-        values = list(snapshot.get(field) or [])
+        raw_values = snapshot.get(field) or []
+        if not isinstance(raw_values, (list, tuple)):
+            raise WorkflowStateError("execution_snapshot_array_invalid")
+        values = list(raw_values)
         current: list[Any] = []
         current_size = 64
         for value in values:
@@ -662,20 +665,24 @@ class FirestoreWorkflowRepository:
         if not snapshot.exists:
             return None
         result = snapshot.to_dict()
-        for field in _WORKER_ARRAY_FIELDS:
-            # Preserve inline arrays from executions written by earlier beta
-            # revisions; new snapshots are reconstructed from chunk documents.
-            result[field] = list(result.get(field) or [])
-        chunks = (
+        chunks = list(
             self._client.collection("execution_logs")
             .document(execution_id).collection("chunks")
             .order_by("index").stream()
         )
-        for chunk in chunks:
-            data = chunk.to_dict()
-            field = data.get("field")
-            if field in _WORKER_ARRAY_FIELDS:
-                result[field].extend(data.get("items") or [])
+        if chunks:
+            for field in _WORKER_ARRAY_FIELDS:
+                result[field] = []
+            for chunk in chunks:
+                data = chunk.to_dict()
+                field = data.get("field")
+                if field in _WORKER_ARRAY_FIELDS:
+                    result[field].extend(data.get("items") or [])
+        else:
+            # Preserve inline arrays from executions written by earlier beta
+            # revisions until their first chunked snapshot is persisted.
+            for field in _WORKER_ARRAY_FIELDS:
+                result[field] = list(result.get(field) or [])
         return result
 
     def persist_worker_snapshot(
@@ -712,6 +719,9 @@ class FirestoreWorkflowRepository:
                 "worker_snapshot_revision": revision,
                 "worker_snapshot_chunk_count": len(worker_chunks),
                 "updated": self._clock(),
+                # Remove legacy inline arrays on the first chunked update so
+                # get_execution never concatenates old data with new chunks.
+                **{field: firestore.DELETE_FIELD for field in _WORKER_ARRAY_FIELDS},
             }
             if result_enc is not None:
                 data["result_enc"] = result_enc
