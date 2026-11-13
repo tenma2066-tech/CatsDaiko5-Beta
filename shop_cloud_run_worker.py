@@ -244,23 +244,28 @@ def run_worker(order_id: str, execution_id: str, slot_id: str) -> int:
     client = firestore.Client(project=project) if project else firestore.Client()
     orders = FirestoreOrderRepository(client)
     workflow = FirestoreWorkflowRepository(client)
-    cipher = _cipher()
-    pepper = _pepper()
-    order = orders.get_order(order_id)
-    if (not order or order.get("status") != "fulfilling"
-            or order.get("job_id") != execution_id
-            or order.get("credentials_submitted") is not True
-            or order.get("active_execution_id") != execution_id):
+    try:
+        cipher = _cipher()
+        pepper = _pepper()
+        order = orders.get_order(order_id)
+        if (not order or order.get("status") != "fulfilling"
+                or order.get("job_id") != execution_id
+                or order.get("credentials_submitted") is not True
+                or order.get("active_execution_id") != execution_id):
+            raise WorkflowStateError("order_state_mismatch")
+        credentials = _decrypt_json(cipher, order.get("credential_enc"), "credentials")
+        operation = _decrypt_json(cipher, order.get("operation_enc"), "operation")
+        transfer = str(credentials.get("transfer_code") or "").strip()
+        lock_subject = transfer if transfer else "new-order:" + order_id
+        lock_digest = transfer_lock_id(lock_subject, pepper)
+        import app as app_module
+        arguments, metadata = _build_arguments(app_module, operation, credentials)
+    except Exception as exc:
         workflow.fail_reserved_execution(
-            order_id, execution_id, slot_id, "order_state_mismatch"
+            order_id, execution_id, slot_id, "worker_preflight_" + type(exc).__name__.lower()
         )
-        return 2
+        return 4
 
-    credentials = _decrypt_json(cipher, order.get("credential_enc"), "credentials")
-    operation = _decrypt_json(cipher, order.get("operation_enc"), "operation")
-    transfer = str(credentials.get("transfer_code") or "").strip()
-    lock_subject = transfer if transfer else "new-order:" + order_id
-    lock_digest = transfer_lock_id(lock_subject, pepper)
     owner = os.environ.get("CLOUD_RUN_EXECUTION") or ("worker-" + uuid.uuid4().hex)
     if not workflow.claim_execution(
         order_id, execution_id, owner, lock_digest, slot_id
@@ -271,9 +276,6 @@ def run_worker(order_id: str, execution_id: str, slot_id: str) -> int:
         return 3
 
     try:
-        import app as app_module
-
-        arguments, metadata = _build_arguments(app_module, operation, credentials)
         job = {
             "status": "running", "step": 0, "log": [], "warn": [], "report": [],
             "skipped": metadata["skipped"], "dry": metadata["dry"],
