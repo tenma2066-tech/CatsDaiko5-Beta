@@ -67,6 +67,9 @@ jobs:
       - name: Cloud Run dispatcher tests
         run: python -m unittest -v test_cloud_run_dispatcher.py
 
+      - name: Cloud Run worker tests
+        run: python -m unittest -v test_cloud_run_worker.py
+
       - name: Set up Java for Firestore Emulator
         uses: actions/setup-java@v4
         with:
