@@ -1219,6 +1219,11 @@ def shop_home():
 def shop_create_operation_order():
     if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
         return jsonify(error="現在は注文受付を停止しています。"), 503
+    ip = request.remote_addr or ""
+    rate_key = "orders:" + ip
+    if _too_many_fails(rate_key):
+        return jsonify(error="注文作成が続いています。10分ほど待ってからお試しください。"), 429
+    _fail.setdefault(rate_key, []).append(time.time())
     data = request.get_json(silent=True) or {}
     try:
         order = shop_store.create_operation_order(
@@ -1430,6 +1435,9 @@ def shop_paypay_submit(order_id):
         return jsonify(error="注文が見つかりません。"), 404
     if order["status"] != "awaiting_payment":
         return jsonify(error="この注文は決済処理中、または決済受付状態ではありません。"), 409
+    if _too_many_fails("paypay:" + order_id):
+        return jsonify(error="決済確認の試行回数が上限に達しました。管理者へお問い合わせください。"), 429
+    _fail.setdefault("paypay:" + order_id, []).append(time.time())
     if not shop_store.claim_payment(order_id):
         return jsonify(error="別の決済リクエストを処理中です。画面を更新してください。"), 409
     try:
@@ -1465,7 +1473,7 @@ def admin_paypay_page():
 @app.post("/admin/paypay/connect")
 def admin_paypay_connect():
     if not session.get("admin"): return "管理者モードが必要です。", 403
-    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1": return "永続ストレージと商品設定を確認してから注文受付を有効にしてください。", 503
+    # PayPay account setup is safe while customer order intake is disabled.
     token=session.get("admin_csrf","")
     if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
     try:
