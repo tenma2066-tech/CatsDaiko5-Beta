@@ -21,6 +21,50 @@ class FirestoreOrderRepository:
         self._clock = clock
         self._orders = client.collection("orders")
 
+    def import_legacy_order(self, values: dict[str, Any]) -> bool:
+        """Create-only import preserving encrypted blobs and a safe inactive state."""
+        order_id = values["id"]
+        if not re.fullmatch(r"[A-Z0-9]{10}", order_id or ""):
+            raise ValueError("invalid legacy order id")
+        status = values.get("status", "review")
+        if status in {"fulfilling", "payment_processing"}:
+            status = "review"
+        if status not in {
+            "awaiting_payment", "paid", "review", "completed", "cancelled",
+        }:
+            status = "review"
+        if values.get("job_id"):
+            if status == "paid":
+                status = "review"
+        document = self._orders.document(order_id)
+        try:
+            document.create({
+                "id": order_id,
+                "access_hash": values["access_hash"],
+                "sku": values.get("sku", ""),
+                "title": values.get("title", ""),
+                "amount": int(values.get("amount", 0)),
+                "unit_price_yen": int(values.get("unit_price_yen", values.get("amount", 0))),
+                "quantity": int(values.get("quantity", 1)),
+                "credential_enc": values["credential_enc"],
+                "operation_enc": values.get("operation_enc"),
+                "service_type": values.get("service_type") or "other-service",
+                "job_id": None,
+                "active_execution_id": None,
+                "credentials_submitted": bool(values.get("credentials_submitted", False)),
+                "status": status,
+                "payment_digest": values.get("payment_digest"),
+                "payment_note": (values.get("payment_note") or "legacy_import")[:300],
+                "created": float(values.get("created") or self._clock()),
+                "updated": self._clock(),
+                "legacy_imported": True,
+            })
+            return True
+        except Exception as exc:
+            if type(exc).__name__ == "AlreadyExists":
+                return False
+            raise
+
     def create_order(self, values: dict[str, Any]) -> None:
         document = self._orders.document(values["id"])
         data = {
@@ -167,6 +211,33 @@ class FirestorePaymentRepository:
         self._clock = clock
         self._orders = client.collection("orders")
         self._attempts = client.collection("payment_attempts")
+
+    def import_legacy_attempt(
+        self, payment_digest: str, order_id: str, state: str, created: float,
+    ) -> bool:
+        if not re.fullmatch(r"[0-9a-f]{64}", payment_digest or ""):
+            raise ValueError("invalid legacy payment digest")
+        state_map = {
+            "attempted": "outcome_unknown",
+            "pending": "pending",
+            "paid": "paid",
+            "review": "review",
+        }
+        imported_state = state_map.get(state, "review")
+        reference = self._attempts.document(payment_digest)
+        try:
+            reference.create({
+                "order_id": order_id,
+                "state": imported_state,
+                "created": float(created or self._clock()),
+                "updated": self._clock(),
+                "legacy_imported": True,
+            })
+            return True
+        except Exception as exc:
+            if type(exc).__name__ == "AlreadyExists":
+                return False
+            raise
 
     def claim_payment_attempt(self, order_id: str, payment_digest: str) -> bool:
         """Atomically reserve one payment link digest for one awaiting order."""
