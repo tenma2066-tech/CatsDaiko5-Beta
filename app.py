@@ -2403,8 +2403,7 @@ function renderChecks(pc,qm,total){
     return;
   }
   if($('#integrity').checked){
-    const t0=$('#transfer').value.trim(), c0=$('#confirm').value.trim();
-    if(!t0||!c0) add('bad','保全チェックには、既存セーブの引継ぎコードと暗証番号が必要です。');
+    add('ok','決済確認後に引継ぎコードと暗証番号を入力してから実行します。');
     add('warn','選択した編集項目は実行せず、セーブ構造検査と既知のエラーキャラ・参照の確認だけを行います。');
     add('warn','修復対象が見つかった場合だけ保存データを修復・再検査して再登録し、新しい引継ぎコードを発行します。');
     if($('#dry').checked) add('ok','試運転：修復と再検査まで行いますが、アップロード・コード発行はしません。');
