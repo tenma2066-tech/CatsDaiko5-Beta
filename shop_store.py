@@ -480,9 +480,11 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
         row = _row(order_id)
         if status == "paid" and row and row.get("active_execution_id"):
             raise ShopError("実行結果の確認待ちです。決済状態を手動変更できません。")
-        if status == "cancelled" and row and row.get("active_execution_id"):
+        if row and row.get("active_execution_id"):
             execution = _workflow_repository.get_execution(row["active_execution_id"])
-            if execution and (
+            if status == "review" and execution and execution.get("state") in {"starting", "running"}:
+                raise ShopError("Cloud Run Workerが実行中のため、状態を手動変更できません。")
+            if status == "cancelled" and execution and (
                 execution.get("state") == "running" or execution.get("outcome_unknown")
             ):
                 raise ShopError("処理結果が不確定なため、アカウント保護ロックを解除せず確認が必要です。")
