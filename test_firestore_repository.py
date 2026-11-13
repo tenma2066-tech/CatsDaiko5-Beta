@@ -205,7 +205,45 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertEqual(workflow.get_otp_session(session_id), "renewed-encrypted-state")
         workflow.clear_otp_session(session_id)
         self.assertIsNone(workflow.get_otp_session(session_id))
+        workflow.save_otp_session(session_id, "expired-state", time.time() - 1)
+        self.assertIsNone(workflow.consume_otp_session(session_id))
         self.client.collection("admin_otp_sessions").document(session_id).delete()
+
+    def test_otp_session_concurrent_consume_is_single_use(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        session_id = "otp_" + secrets.token_hex(12)
+        workflow.save_otp_session(session_id, "encrypted-single-use", time.time() + 300)
+        barrier = threading.Barrier(3)
+
+        def consume():
+            barrier.wait()
+            return workflow.consume_otp_session(session_id)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(consume) for _ in range(2)]
+            barrier.wait()
+            results = [future.result() for future in futures]
+        self.assertEqual(results.count("encrypted-single-use"), 1)
+        self.assertEqual(results.count(None), 1)
+        self.client.collection("admin_otp_sessions").document(session_id).delete()
+
+    def test_execution_snapshot_rejects_payload_over_safe_document_limit(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        execution_id = "exec_" + secrets.token_hex(8)
+        self.client.collection("executions").document(execution_id).set({
+            "execution_id": execution_id, "state": "running", "owner": "worker-test",
+        })
+        try:
+            with self.assertRaisesRegex(WorkflowStateError, "execution_snapshot_too_large"):
+                workflow.persist_worker_snapshot(
+                    execution_id, "worker-test",
+                    {"status": "running", "step": 1,
+                     "report": ["oversized-report-entry-" + ("x" * 12000)] * 100},
+                )
+            stored = workflow.get_execution(execution_id)
+            self.assertNotIn("report", stored)
+        finally:
+            self.client.collection("executions").document(execution_id).delete()
 
     def test_dispatch_defers_when_all_global_slots_are_occupied(self):
         workflow = FirestoreWorkflowRepository(self.client)
