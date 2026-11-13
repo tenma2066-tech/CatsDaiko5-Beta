@@ -139,6 +139,9 @@ class CloudRunDispatcherTests(unittest.TestCase):
                 self.request = request
                 return request["task"]
 
+            def get_task(self, request):
+                return {"name": request["name"]}
+
         repo = Repo()
         client = Client()
         publisher = CloudTasksOutboxPublisher(
@@ -282,7 +285,19 @@ class CloudRunDispatcherTests(unittest.TestCase):
             def mark_task_enqueued(self, execution_id):
                 self.marked = True
 
-        class RotatingClient(Client):
+        class RotatingClient:
+            def __init__(self):
+                self.names = []
+
+            def queue_path(self, project, location, queue):
+                return f"projects/{project}/locations/{location}/queues/{queue}"
+
+            def task_path(self, project, location, queue, task):
+                return f"projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"
+
+            def get_task(self, request):
+                raise NotFound("task generation is absent")
+
             def create_task(self, request):
                 self.names.append(request["task"].name)
                 if request["task"].name.endswith("-g0"):
