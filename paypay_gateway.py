@@ -150,19 +150,32 @@ async def _oauth(payload: dict, referer: str, cookies: dict | None = None):
                 # Record only protocol metadata. Never log response values, credentials,
                 # tokens, cookies, OTPs, phone numbers, or the raw provider body.
                 provider_code = None
-                for source in (body, body.get("header"), body.get("error"),
-                               body.get("resultInfo"), body.get("result_info")):
-                    if isinstance(source, dict):
-                        for field in ("resultCode", "result_code", "errorCode", "error_code", "code"):
-                            value = source.get(field)
-                            if isinstance(value, (str, int)) and re.fullmatch(r"[0-9]{4,12}", str(value)):
-                                provider_code = str(value)
-                                break
-                    if provider_code:
-                        break
-                _logger.warning("PayPay OAuth rejected (http_status=%s provider_code=%s response_fields=%s)",
+                response_shape = []
+                code_fields = {"resultCode", "result_code", "errorCode", "error_code", "code"}
+                # Inspect only a shallow, bounded structure. Log field paths and
+                # numeric provider codes, never arbitrary values or raw bodies.
+                stack = [(body, "", 0)]
+                while stack and len(response_shape) < 40:
+                    node, prefix, depth = stack.pop()
+                    if isinstance(node, dict):
+                        for key, value in list(node.items())[:20]:
+                            if not isinstance(key, str):
+                                continue
+                            path = f"{prefix}.{key}" if prefix else key
+                            if len(path) <= 120:
+                                response_shape.append(f"{path}:{type(value).__name__}")
+                            if provider_code is None and key in code_fields and isinstance(value, (str, int)):
+                                if re.fullmatch(r"[0-9]{4,12}", str(value)):
+                                    provider_code = str(value)
+                            if depth < 3 and isinstance(value, (dict, list)):
+                                stack.append((value, path, depth + 1))
+                    elif isinstance(node, list):
+                        for index, value in enumerate(node[:10]):
+                            if depth < 3 and isinstance(value, (dict, list)):
+                                stack.append((value, f"{prefix}[{index}]", depth + 1))
+                _logger.warning("PayPay OAuth rejected (http_status=%s provider_code=%s response_shape=%s)",
                                 response.status, provider_code or "unavailable",
-                                ",".join(sorted(k for k in body.keys() if isinstance(k, str))[:20]))
+                                ",".join(response_shape[:40]))
                 raise PayPayError("oauth_rejected", "PayPayログインに失敗しました。認証情報が正しい場合もあります。管理者ログのPayPay OAuth診断情報を確認してください。")
     except PayPayError:
         raise
