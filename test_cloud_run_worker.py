@@ -1,7 +1,9 @@
 """Unit tests for Cloud Run worker input validation and secret handling."""
 from __future__ import annotations
 
+import os
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from shop_cloud_run_worker import _build_arguments, _redact
@@ -53,6 +55,18 @@ class CloudRunWorkerTests(unittest.TestCase):
         self.assertEqual(arguments[2:5], ([], [], []))
         self.assertTrue(metadata["clone"])
         self.assertTrue(metadata["dry"])
+
+    def test_execution_owner_requires_cloud_run_identity(self):
+        from shop_cloud_run_worker import _execution_owner
+
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "identity is missing"):
+                _execution_owner()
+        expected = "projects/demo/locations/asia-northeast1/jobs/test/executions/run-1"
+        with patch.dict(
+            os.environ, {"CLOUD_RUN_EXECUTION": expected}, clear=True
+        ):
+            self.assertEqual(_execution_owner(), expected)
 
     def test_transfer_lock_is_hmac_and_redaction_removes_secrets(self):
         pepper = b"p" * 32
