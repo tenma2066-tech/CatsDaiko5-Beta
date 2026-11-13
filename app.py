@@ -2746,7 +2746,7 @@ async function start(){
   $('#go').disabled=true;$('#go').textContent='注文を作成中…';
   try{
     const r=await fetch('/api/shop/operation-orders',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({service_type:characterSpecific?'character-specific':'other-service',quantity,operation})});
+      body:JSON.stringify({quantity,operation})});
     const data=await r.json();
     if(!r.ok)throw Error(data.error||'注文を作成できませんでした。');
     location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
