@@ -695,3 +695,68 @@ F. execution完了:
 - SHOP_LIVE_ORDERS_ENABLED=0を維持し、注文受付を有効化しない。
 - CatsDaiko5安定版は引き続き変更しない。
 
+
+## 18. Phase 2開始：コード依存関係・永続化境界の実査（2026-11-13）
+
+### 18.1 作業ブランチ
+
+- feature/cloud-run-firestore-foundation を main の最新コミット af77630aa6bb40dccee88d70ffb2a5e3292f44af から作成した。
+- このブランチはCloud Run移行の基盤実装専用。未完成の移行コードを稼働中Renderへ反映しない。
+- 安定版 CatsDaiko5、Betaの main、Render設定・デプロイ、runtime-data は変更していない。
+
+### 18.2 現在のモジュール境界と呼び出し箇所
+
+| 領域 | 現在の実装 | Cloud Run移行で必要な変更 |
+|---|---|---|
+| 公開注文・状態遷移 | shop_store.py | SQLite固有SQLをRepository境界の背後へ移し、Firestoreではトランザクションで同等の状態遷移を実装 |
+| PayPay認証・受取台帳 | paypay_gateway.py | 認証アカウント暗号化Blobと決済台帳を分離。決済結果不明時は自動再試行しない |
+| GitHubランタイム保存 | github_runtime_store.py | Render用互換バックエンドとして残す。GitHub Contents APIのスナップショットを複数Cloud Runインスタンスの主DBにしない |
+| Webルート・処理起動 | app.py | HTTPルートから注文受付・Dispatcher・Job起動を分離。BCSFE処理をWebリクエスト内で実行しない |
+| BCSFEワーカー | app.py 内の _worker_entry / _run_job / _launch_job | Job単位の実行エントリポイントに分離し、進捗・結果・実行ロックを永続化 |
+| 管理者認証 | github_auth_store.py / auth_store.py | GitHub認証ストアを維持するか、永続DBへ移すかを明示選択。一時ディスクを永続保存先にしない |
+| 依存関係 | requirements.txt | Firestore/Cloud Tasksクライアントは必要な段階で追加し、既存Render環境へ不用意な変更を入れない |
+
+### 18.3 実査で確認した重要な永続化リスク
+
+1. app.py の _jobs、_pending_jobs、_slots、_active_transfers はプロセス内の辞書・deque・list・setである。Webプロセス再起動やCloud Runの複数インスタンス化で共有されず、待機中のジョブ・進捗・実行枠・重複防止情報を失う。
+2. 現在のワーカーは multiprocessing で起動され、進捗はPipe経由で親プロセスの _jobs に反映される。Cloud RunではWebコンテナ内の子プロセス管理をそのまま移植せず、Job実行プロセスからFirestoreへ進捗を保存する必要がある。
+3. 現在の実行枠上限4はプロセス内 _slots による制御であり、複数Job/複数インスタンスを横断する排他ではない。Firestore上の4個のslot leaseをトランザクションで取得する設計が必要。
+4. 同一引継ぎコードの重複防止に使う _active_transfers と fcntl/ファイルロックは、コンテナをまたぐ排他として使えない。Firestore上のHMAC digestロックへ置き換える。
+5. paypay_gateway.py の _pending_otp はプロセス内メモリである。Cloud Runのスケールダウン・再起動後にSMS認証の途中状態が失われるため、必要なら短寿命・暗号化・単回利用の永続状態へ変更する。OTP自体は保存・ログ出力しない。
+6. github_runtime_store.sqlite_database はSQLite全体を暗号化スナップショットとしてGitHubへ書き戻し、ロックはプロセス内である。複数Cloud Run writerによる同時更新ではLost Update/競合が起こり得るため、Cloud Runの主DBに流用しない。
+7. shop_store.py の注文状態・価格・暗号化済み資格情報・PayPay決済digest・job_idは同じSQLite行に保存されている。Firestore移行では注文本体、決済試行、実行状態、イベント履歴を分離し、状態遷移の原子性を明示する。
+8. 管理者注文一覧は現在 shop_store.admin_orders() が保存済み引継ぎ情報を復号して返す。Firestore移行後も管理者権限チェックを維持し、公開注文API・ログ・イベント・Task payloadへ資格情報を混入させない。
+
+### 18.4 Webルートと決済・実行の現在の流れ
+
+- 注文作成: shop_create_operation_order → shop_store.create_operation_order。
+- 注文表示・状態確認: shop_order_page / shop_order_status → shop_store.public_order。
+- 引継ぎ情報送信: shop_submit_credentials → save_credentials → claim_execution → 現行ワーカー起動 → bind_job → fulfilling。
+- PayPay受取: shop_paypay_submit → claim_payment → paypay_gateway.receive_payment → complete_payment。外部決済API呼び出しとDB状態確定は単一トランザクションにできないため、結果不明時の review/outcome_unknown を厳守する。
+- 管理者操作: admin_paypay_* と admin_orders_*。現在OTP待機の有無は paypay_gateway._pending_otp を直接参照しているため、将来はGatewayの公開状態APIへ置き換える。
+- 現在の注文受付ガード SHOP_LIVE_ORDERS_ENABLED=0 は維持する。
+
+### 18.5 Phase 2の実装順序（更新）
+
+1. 注文・決済・実行・進捗のRepository契約を定義し、WebルートがSQLite接続・SQLへ直接依存しない境界を作る。
+2. 既存SQLite実装をRender互換アダプターとして保持し、既存テストで振る舞いを固定する。
+3. Firestoreアダプターを追加する。Firestoreのトランザクション・条件付き更新・一意性制約を模擬またはEmulatorでテストし、未設定時に本番コードが誤ってSQLiteへフォールバックしないようにする。
+4. 決済claim、注文作成、資格情報保存、実行claim、slot lease、transfer lock、outboxを個別のトランザクション単位で実装する。
+5. Cloud Tasks DispatcherとCloud Run Job entrypointを追加する。Task payload/Job argsは注文ID・実行IDのみとし、Job再試行は初期 maxRetries=0。
+6. Webアプリの注文・進捗参照をFirestore Repository経由へ切り替え可能にする。バックエンド選択は明示設定のみとし、暗黙の自動切替を禁止する。
+7. PayPay実通信・実注文を使わず、モックとFirestore Emulatorで重複・競合・タイムアウト・不確定結果を試験する。
+
+### 18.6 このチェックポイントでの変更・未変更
+
+実施:
+- 専用作業ブランチを作成。
+- Betaの主要ストレージ・PayPay・ワーカー・管理者認証モジュールとWeb呼び出し箇所を読み、移行依存関係を記録。
+
+未実施:
+- アプリケーションコード変更、Firestore/Cloud Tasksクライアント追加。
+- GCPプロジェクト・課金・IAM・Secret Manager・Firestore・Cloud Tasks・Cloud Runリソース作成。
+- Render設定・デプロイ、runtime-data、PayPay認証・決済データの変更。
+- PayPay実ログイン・実決済・実注文。
+- SHOP_LIVE_ORDERS_ENABLED の有効化。
+
+次の作業は、Repository契約とSQLite互換アダプターの設計・実装。Firestore接続情報がない状態でも既存SQLiteテストを維持できる形で進める。
