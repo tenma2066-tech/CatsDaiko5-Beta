@@ -270,18 +270,21 @@ class FirestoreWorkflowRepository:
             if not order.exists or not execution.exists:
                 return False
             od, ex = order.to_dict(), execution.to_dict()
-            if (od.get("status") != "paid"
-                    or od.get("active_execution_id") != execution_id
+            if (od.get("status") != "fulfilling"
+                    or od.get("job_id") != execution_id
                     or od.get("credentials_submitted") is not True
-                    or ex.get("state") not in {"queued", "starting"}
-                    or ex.get("order_id") != order_id):
+                    or ex.get("state") != "starting"
+                    or ex.get("order_id") != order_id
+                    or ex.get("slot_id") != slot_id):
                 return False
-            if slot.exists and slot.to_dict().get("state") != "released":
+            if (not slot.exists
+                    or slot.to_dict().get("state") != "reserved"
+                    or slot.to_dict().get("owner") != "dispatch:" + execution_id):
                 return False
             if transfer_lock.exists and transfer_lock.to_dict().get("state") != "released":
                 return False
             now = self._clock()
-            tx.set(slot_ref, {
+            tx.update(slot_ref, {
                 "slot_id": slot_id, "state": "active",
                 "owner": owner, "execution_id": execution_id,
                 "claimed": now, "updated": now,
