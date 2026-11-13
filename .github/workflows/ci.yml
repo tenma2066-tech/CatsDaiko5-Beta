@@ -70,6 +70,9 @@ jobs:
       - name: Cloud Run worker tests
         run: python -m unittest -v test_cloud_run_worker.py
 
+      - name: Cloud Run recovery inspection tests
+        run: python -m unittest -v test_cloud_run_recovery.py
+
       - name: Runtime migration parser tests
         run: python -m unittest -v test_migrate_runtime_data.py
 
