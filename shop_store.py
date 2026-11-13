@@ -14,6 +14,11 @@ from cryptography.fernet import Fernet, InvalidToken
 
 DB_PATH = Path(os.environ.get("SHOP_DB_PATH", "instance/shop.sqlite3"))
 ORDER_ID_RE = re.compile(r"^[A-Z0-9]{10}$")
+DEFAULT_CATALOG = [
+    {"id": "character-specific", "title": "キャラ特定選択", "unit_price_yen": 50, "description": "代行するキャラ1体につき50円"},
+    {"id": "other-service", "title": "その他の代行", "unit_price_yen": 25, "description": "代行1体につき25円"},
+]
+MAX_ORDER_QUANTITY = 100
 
 class ShopError(Exception):
     pass
@@ -43,6 +48,10 @@ def _db():
         columns = {row[1] for row in con.execute("PRAGMA table_info(orders)")}
         if "credentials_submitted" not in columns:
             con.execute("ALTER TABLE orders ADD COLUMN credentials_submitted INTEGER NOT NULL DEFAULT 0")
+        if "quantity" not in columns:
+            con.execute("ALTER TABLE orders ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
+        if "unit_price_yen" not in columns:
+            con.execute("ALTER TABLE orders ADD COLUMN unit_price_yen INTEGER NOT NULL DEFAULT 0")
         os.chmod(DB_PATH, 0o600)
         yield con
         con.commit()
@@ -53,32 +62,41 @@ def _db():
         con.close()
 
 def catalog():
-    raw = os.environ.get("SHOP_CATALOG_JSON", "[]")
-    try:
-        rows = json.loads(raw)
-    except ValueError:
-        raise ShopError("商品カタログ設定を読み取れません。") from None
+    raw = os.environ.get("SHOP_CATALOG_JSON", "").strip()
+    if raw:
+        try:
+            rows = json.loads(raw)
+        except ValueError:
+            raise ShopError("商品カタログ設定を読み取れません。") from None
+    else:
+        rows = DEFAULT_CATALOG
     if not isinstance(rows, list) or len(rows) > 100:
         raise ShopError("商品カタログ設定の形式が正しくありません。")
     result, seen = [], set()
     for row in rows:
         if not isinstance(row, dict):
             continue
-        sku, title, price = row.get("id"), row.get("title"), row.get("price_yen")
+        sku, title = row.get("id"), row.get("title")
+        price = row.get("unit_price_yen", row.get("price_yen"))
         if (not isinstance(sku, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", sku)
                 or sku in seen or not isinstance(title, str) or not 1 <= len(title.strip()) <= 80
-                or type(price) is not int or not 1 <= price <= 1_000_000):
+                or type(price) is not int or not 1 <= price <= 1000000):
             continue
         seen.add(sku)
-        result.append({"id": sku, "title": title.strip(), "price_yen": price,
+        result.append({"id": sku, "title": title.strip(), "unit_price_yen": price,
                        "description": str(row.get("description") or "")[:300]})
     return result
 
-def create_order(sku: str):
+def create_order(sku: str, quantity=1):
+    if type(quantity) is not int or not 1 <= quantity <= MAX_ORDER_QUANTITY:
+        raise ShopError("数量は1〜100体で指定してください。")
     items = {x["id"]: x for x in catalog()}
     item = items.get(sku)
     if not item:
         raise ShopError("商品が見つからないか、現在販売していません。")
+    amount = item["unit_price_yen"] * quantity
+    if amount > 1000000:
+        raise ShopError("注文金額が上限を超えています。")
     order_id = secrets.token_hex(5).upper()
     access_token = secrets.token_urlsafe(32)
     credentials = _cipher().encrypt(json.dumps(
@@ -87,12 +105,38 @@ def create_order(sku: str):
     now = time.time()
     with _db() as db:
         db.execute("""INSERT INTO orders
-            (id,access_hash,sku,title,amount,credential_enc,credentials_submitted,status,created,updated)
-            VALUES(?,?,?,?,?,?,0,'awaiting_payment',?,?)""",
+            (id,access_hash,sku,title,amount,unit_price_yen,quantity,credential_enc,
+             credentials_submitted,status,created,updated)
+            VALUES(?,?,?,?,?,?,?, ?,0,'awaiting_payment',?,?)""",
             (order_id, hashlib.sha256(access_token.encode()).hexdigest(), sku,
-             item["title"], item["price_yen"], credentials, now, now))
+             item["title"], amount, item["unit_price_yen"], quantity, credentials, now, now))
     return {"id": order_id, "access_token": access_token, "title": item["title"],
-            "amount": item["price_yen"], "status": "awaiting_payment"}
+            "unit_price_yen": item["unit_price_yen"], "quantity": quantity,
+            "amount": amount, "status": "awaiting_payment"}
+
+def claim_payment(order_id: str):
+    with _db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        changed = db.execute("""UPDATE orders SET status='payment_processing',updated=?
+                                WHERE id=? AND status='awaiting_payment'""",
+                             (time.time(), order_id))
+        return changed.rowcount == 1
+
+def release_payment(order_id: str, *, review=False, note=""):
+    target = "review" if review else "awaiting_payment"
+    with _db() as db:
+        changed = db.execute("""UPDATE orders SET status=?,payment_note=?,updated=?
+                                WHERE id=? AND status='payment_processing'""",
+                             (target, (note or "")[:300], time.time(), order_id))
+        return changed.rowcount == 1
+
+def complete_payment(order_id: str, payment_digest: str):
+    with _db() as db:
+        changed = db.execute("""UPDATE orders SET status='paid',payment_digest=?,payment_note='',
+                                updated=? WHERE id=? AND status='payment_processing'""",
+                             (payment_digest, time.time(), order_id))
+        if changed.rowcount != 1:
+            raise ShopError("決済後の注文状態を確定できません。管理者による確認が必要です。")
 
 def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: str):
     transfer_code, pin = (transfer_code or "").strip(), (pin or "").strip()
