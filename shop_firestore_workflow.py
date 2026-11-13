@@ -571,7 +571,9 @@ class FirestoreWorkflowRepository:
             })
             tx.update(execution_ref, {
                 "state": "running", "owner": owner,
-                "cloud_run_execution_name": owner,
+                # Preserve the full Cloud Run Execution resource name written
+                # by the dispatcher; CLOUD_RUN_EXECUTION is only the worker's
+                # stable owner token and is not a resource-name substitute.
                 "slot_id": slot_id, "transfer_lock_id": transfer_digest,
                 "started": now, "updated": now,
             })
