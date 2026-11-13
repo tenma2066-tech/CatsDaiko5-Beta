@@ -2,8 +2,8 @@
 
 - 作成日: 2026-11-13
 - 対象リポジトリ: `tenma2066-tech/CatsDaiko5-Beta`
-- 対象ブランチ: `main`
-- 状態: **計画・調査段階（実装・移行は未着手）**
+- 対象ブランチ: feature/cloud-run-firestore-foundation
+- 状態: **隔離ブランチで基盤実装中（GCP構築・実環境移行は未着手）**
 - 現行環境: Render（Singapore）
 - 移行候補: Google Cloud Run（東京 `asia-northeast1`）
 - 目標予算: **月額1,000円以内**
@@ -695,3 +695,705 @@ F. execution完了:
 - SHOP_LIVE_ORDERS_ENABLED=0を維持し、注文受付を有効化しない。
 - CatsDaiko5安定版は引き続き変更しない。
 
+
+## 18. Phase 2開始：コード依存関係・永続化境界の実査（2026-11-13）
+
+### 18.1 作業ブランチ
+
+- feature/cloud-run-firestore-foundation を main の最新コミット af77630aa6bb40dccee88d70ffb2a5e3292f44af から作成した。
+- このブランチはCloud Run移行の基盤実装専用。未完成の移行コードを稼働中Renderへ反映しない。
+- 安定版 CatsDaiko5、Betaの main、Render設定・デプロイ、runtime-data は変更していない。
+
+### 18.2 現在のモジュール境界と呼び出し箇所
+
+| 領域 | 現在の実装 | Cloud Run移行で必要な変更 |
+|---|---|---|
+| 公開注文・状態遷移 | shop_store.py | SQLite固有SQLをRepository境界の背後へ移し、Firestoreではトランザクションで同等の状態遷移を実装 |
+| PayPay認証・受取台帳 | paypay_gateway.py | 認証アカウント暗号化Blobと決済台帳を分離。決済結果不明時は自動再試行しない |
+| GitHubランタイム保存 | github_runtime_store.py | Render用互換バックエンドとして残す。GitHub Contents APIのスナップショットを複数Cloud Runインスタンスの主DBにしない |
+| Webルート・処理起動 | app.py | HTTPルートから注文受付・Dispatcher・Job起動を分離。BCSFE処理をWebリクエスト内で実行しない |
+| BCSFEワーカー | app.py 内の _worker_entry / _run_job / _launch_job | Job単位の実行エントリポイントに分離し、進捗・結果・実行ロックを永続化 |
+| 管理者認証 | github_auth_store.py / auth_store.py | GitHub認証ストアを維持するか、永続DBへ移すかを明示選択。一時ディスクを永続保存先にしない |
+| 依存関係 | requirements.txt | Firestore/Cloud Tasksクライアントは必要な段階で追加し、既存Render環境へ不用意な変更を入れない |
+
+### 18.3 実査で確認した重要な永続化リスク
+
+1. app.py の _jobs、_pending_jobs、_slots、_active_transfers はプロセス内の辞書・deque・list・setである。Webプロセス再起動やCloud Runの複数インスタンス化で共有されず、待機中のジョブ・進捗・実行枠・重複防止情報を失う。
+2. 現在のワーカーは multiprocessing で起動され、進捗はPipe経由で親プロセスの _jobs に反映される。Cloud RunではWebコンテナ内の子プロセス管理をそのまま移植せず、Job実行プロセスからFirestoreへ進捗を保存する必要がある。
+3. 現在の実行枠上限4はプロセス内 _slots による制御であり、複数Job/複数インスタンスを横断する排他ではない。Firestore上の4個のslot leaseをトランザクションで取得する設計が必要。
+4. 同一引継ぎコードの重複防止に使う _active_transfers と fcntl/ファイルロックは、コンテナをまたぐ排他として使えない。Firestore上のHMAC digestロックへ置き換える。
+5. paypay_gateway.py の _pending_otp はプロセス内メモリである。Cloud Runのスケールダウン・再起動後にSMS認証の途中状態が失われるため、必要なら短寿命・暗号化・単回利用の永続状態へ変更する。OTP自体は保存・ログ出力しない。
+6. github_runtime_store.sqlite_database はSQLite全体を暗号化スナップショットとしてGitHubへ書き戻し、ロックはプロセス内である。複数Cloud Run writerによる同時更新ではLost Update/競合が起こり得るため、Cloud Runの主DBに流用しない。
+7. shop_store.py の注文状態・価格・暗号化済み資格情報・PayPay決済digest・job_idは同じSQLite行に保存されている。Firestore移行では注文本体、決済試行、実行状態、イベント履歴を分離し、状態遷移の原子性を明示する。
+8. 管理者注文一覧は現在 shop_store.admin_orders() が保存済み引継ぎ情報を復号して返す。Firestore移行後も管理者権限チェックを維持し、公開注文API・ログ・イベント・Task payloadへ資格情報を混入させない。
+
+### 18.4 Webルートと決済・実行の現在の流れ
+
+- 注文作成: shop_create_operation_order → shop_store.create_operation_order。
+- 注文表示・状態確認: shop_order_page / shop_order_status → shop_store.public_order。
+- 引継ぎ情報送信: shop_submit_credentials → save_credentials → claim_execution → 現行ワーカー起動 → bind_job → fulfilling。
+- PayPay受取: shop_paypay_submit → claim_payment → paypay_gateway.receive_payment → complete_payment。外部決済API呼び出しとDB状態確定は単一トランザクションにできないため、結果不明時の review/outcome_unknown を厳守する。
+- 管理者操作: admin_paypay_* と admin_orders_*。現在OTP待機の有無は paypay_gateway._pending_otp を直接参照しているため、将来はGatewayの公開状態APIへ置き換える。
+- 現在の注文受付ガード SHOP_LIVE_ORDERS_ENABLED=0 は維持する。
+
+### 18.5 Phase 2の実装順序（更新）
+
+1. 注文・決済・実行・進捗のRepository契約を定義し、WebルートがSQLite接続・SQLへ直接依存しない境界を作る。
+2. 既存SQLite実装をRender互換アダプターとして保持し、既存テストで振る舞いを固定する。
+3. Firestoreアダプターを追加する。Firestoreのトランザクション・条件付き更新・一意性制約を模擬またはEmulatorでテストし、未設定時に本番コードが誤ってSQLiteへフォールバックしないようにする。
+4. 決済claim、注文作成、資格情報保存、実行claim、slot lease、transfer lock、outboxを個別のトランザクション単位で実装する。
+5. Cloud Tasks DispatcherとCloud Run Job entrypointを追加する。Task payload/Job argsは注文ID・実行IDのみとし、Job再試行は初期 maxRetries=0。
+6. Webアプリの注文・進捗参照をFirestore Repository経由へ切り替え可能にする。バックエンド選択は明示設定のみとし、暗黙の自動切替を禁止する。
+7. PayPay実通信・実注文を使わず、モックとFirestore Emulatorで重複・競合・タイムアウト・不確定結果を試験する。
+
+### 18.6 このチェックポイントでの変更・未変更
+
+実施:
+- 専用作業ブランチを作成。
+- Betaの主要ストレージ・PayPay・ワーカー・管理者認証モジュールとWeb呼び出し箇所を読み、移行依存関係を記録。
+
+未実施:
+- アプリケーションコード変更、Firestore/Cloud Tasksクライアント追加。
+- GCPプロジェクト・課金・IAM・Secret Manager・Firestore・Cloud Tasks・Cloud Runリソース作成。
+- Render設定・デプロイ、runtime-data、PayPay認証・決済データの変更。
+- PayPay実ログイン・実決済・実注文。
+- SHOP_LIVE_ORDERS_ENABLED の有効化。
+
+次の作業は、Repository契約とSQLite互換アダプターの設計・実装。Firestore接続情報がない状態でも既存SQLiteテストを維持できる形で進める。
+## 19. Phase 2実装チェックポイント：保存先選択と決済Repository抽出（2026-11-13）
+
+### 19.1 実装内容
+
+- shop_storage.py を追加し、注文DBの保存先選択を一箇所に集約した。
+- SHOP_STORAGE_BACKEND の既定値は legacy。現在のSQLite + 任意のGitHub暗号化スナップショット経由を維持する。Render側に新しい環境変数を追加しなくても従来動作を保つ。
+- SHOP_STORAGE_BACKEND=firestore はFirestoreアダプターが完成するまで明示的にエラーにし、SQLiteやGitHub保存先へ黙ってフォールバックしない。
+- 未知のバックエンド値もエラーにする。GitHub Runtime Storeの例外はストレージ境界で ShopStorageError に統一する。
+- shop_payment_repository.py を追加し、PaymentRepository Protocolと現行SQLの SQLitePaymentRepository を分離した。
+- claim_payment / release_payment / complete_payment は shop_store.py からRepositoryへ委譲する。既存の条件付きUPDATE、BEGIN IMMEDIATE、決済後状態確定エラーを維持する。
+- test_shop_store.py にFirestore未実装時のfail-closedと未知バックエンド拒否テストを追加し、テストごとにlegacy backendを明示する。
+
+### 19.2 CI検証
+
+- Draft PR #9: https://github.com/tenma2066-tech/CatsDaiko5-Beta/pull/9
+- GitHub Actions CI run 43429994230（初回ストレージ境界実装）: success。
+- GitHub Actions CI run 43430175204（決済Repository抽出を含む最新コード）: success。
+- 最新runでは依存関係インストール、BCSFE API互換性、Application self-test、Save audit/repair、Parallel、Improvement、Character customization、GitHub auth/runtime store、PayPay gateway、Shop store tests がすべて成功。
+- CIはGitHub Actions上で実行済み。Cloud Run/Firestore Emulatorでの統合テストはまだ未実施。
+
+### 19.3 現在のGitHub状態
+
+- 作業ブランチ: feature/cloud-run-firestore-foundation。
+- PR #9はDraft / open / not merged。mainへは未反映。
+- 最新ブランチHEAD: 0697751e4ab816a87ce33b86dcd9761e33c5da28。
+- 変更対象は shop_storage.py、shop_payment_repository.py、shop_store.py、test_shop_store.py、本計画書。
+
+### 19.4 未実施・安全状態
+
+- Firestore adapter、注文全体のRepository抽出、Cloud Tasks outbox、実行claim/slot lease/transfer lock、Job entrypointは未実装。
+- GCP project/billing/IAM/Secret Manager/Firestore/Cloud Tasks/Cloud Runは未作成。
+- Render設定・デプロイ・runtime-data・PayPay認証/決済データは変更していない。
+- PayPay実ログイン・実決済・実注文は実施していない。
+- SHOP_LIVE_ORDERS_ENABLED=0 は維持。CatsDaiko5安定版とBeta mainは変更していない。
+
+次の作業は、注文作成・資格情報保存・実行claimを順番にRepositoryへ抽出し、Firestore transaction adapterに必要な原子操作を明確化する。SQLite互換テストを継続し、Cloud Run用バックエンドが未完成の間はlegacy以外を拒否する。
+
+## 20. Phase 2実装チェックポイント：注文Repositoryの抽出（2026-11-13）
+
+### 20.1 今回の実装
+
+- shop_order_repository.py を追加し、OrderRepository契約とSQLiteOrderRepositoryを実装した。
+- 注文作成（通常商品・代行操作注文）、注文読み出し、管理者一覧取得をRepositoryへ移した。
+- 引継ぎ情報の保存をRepositoryへ移した。アクセスtokenのSHA-256 hash照合と、paid / credentials_submitted=0 / job_id IS NULL の条件付き更新を一つのDB更新で実施する。
+- 実行claimをRepositoryへ移した。access hash、paid、credentials_submitted=1、job_id IS NULLを一つの条件付きUPDATEで検査し、重複実行を拒否する。
+- Job IDのbindとstarting状態のreleaseをRepositoryへ移した。
+- 注文状態遷移（awaiting_payment / payment_processing / paid / review / fulfilling / completed / cancelled）の検証と条件付き更新をSQLiteOrderRepository内のトランザクションへ移した。
+- shop_store.py は入力検証、暗号化、公開APIの返却形式を維持しつつ、注文データのDB操作をRepository経由へ変更した。
+- 通常商品注文の service_type は既存仕様どおり other-service を維持する。既存の価格計算・暗号化・注文ID/アクセスtoken生成は変更していない。
+
+### 20.2 変更ファイル
+
+- shop_order_repository.py（新規）
+- shop_store.py（注文作成・読み書き・資格情報保存・実行claim・状態遷移のRepository委譲）
+- docs/CLOUD_RUN_MIGRATION_PLAN.md（本チェックポイント）
+
+### 20.3 検証状況
+
+- PR #9 の最新コミットはGitHub Actions CIで検証中。最新run ID: 43430730247。
+- 直前の決済Repository抽出時点のCI run 43430175204 は success。
+- 注文Repository抽出後のCI結果はまだ未確定。成功を確認するまでは統合済み・動作確認済みとは扱わない。
+- Firestore Emulator/Cloud Run統合テストは未実施。
+
+### 20.4 安全状態と残作業
+
+- 専用ブランチ feature/cloud-run-firestore-foundation のみを変更。PR #9 はDraftのまま、mainへ未マージ。
+- Firestore adapter、Cloud Tasks outbox、Firestore上の実行claim/slot lease/transfer lock、Job entrypointは未実装。
+- GCP project/billing/IAM/Secret Manager/Firestore/Cloud Tasks/Cloud Runは未作成。
+- Render、runtime-data、PayPay認証・決済データは変更していない。PayPay実ログイン・実決済・実注文も未実施。
+- SHOP_LIVE_ORDERS_ENABLED=0 を維持。安定版 CatsDaiko5 と Beta main は変更していない。
+
+次の作業はCI結果を確認し、失敗があれば修正する。その後、管理者注文読み出し・注文状態の完全なRepository境界を確認し、Firestore側のtransaction contractとEmulatorテスト設計へ進む。
+
+## 21. OrderRepository契約の仕上げ・検証状況（2026-11-13）
+
+- OrderRepository Protocolに、注文作成、注文取得、一覧、資格情報保存、実行claim、Job bind/release、注文状態遷移の全操作を明記した。
+- SQLiteOrderRepositoryは上記契約を実装し、shop_store.pyの注文DBアクセス（スキーマ初期化を除く）をRepository経由へ集約した。
+- 通常注文の service_type が従来どおり other-service になる回帰テストを追加。
+- 誤ったアクセスtokenでは引継ぎ情報保存・実行claimができず、正しいtokenなら成功するテストを追加。
+- 注文Repository抽出時点のGitHub Actions run 43430778059（commit b6afa9be86fe70ed15e77cb6f9f118b632337ead）は全ジョブ・全ステップ成功。Shop store testsも成功。
+- その成功run以降にOrderRepository Protocolと認証/互換性テストを追加したため、最新HEAD（7b453685a7c2e427f32c983f4d2d30a5e6bf6832）でのCIは別途確認が必要。最新CIが成功するまで最終検証済みとはしない。
+- 変更は引き続き feature/cloud-run-firestore-foundation とDraft PR #9のみ。mainへ未マージ。
+- Firestore adapter/Emulator、Cloud Tasks outbox、Job dispatcher/entrypoint、slot lease/transfer lockは未実装。GCP/Render/PayPay/実注文は未変更。SHOP_LIVE_ORDERS_ENABLED=0を維持。
+
+次の作業は最新CIを確認し、必要な修正を行う。次段階ではFirestore adapterに必要なトランザクション契約を定義し、Firestore Emulatorを用いた並行claim・重複Task・不確定決済結果の試験を追加する。
+
+## 22. Firestore Repository adapterの初期実装（2026-11-13）
+
+### 22.1 追加したもの
+
+- shop_firestore_repository.py を追加し、FirestoreOrderRepositoryとFirestorePaymentRepositoryの初期実装を作成した。
+- FirestoreOrderRepositoryは注文作成、取得、一覧、引継ぎ情報の暗号化Blob保存、実行claim、Job bind/release、注文状態遷移を実装。状態変更はFirestore transaction内で読み取り・条件確認・更新する。
+- FirestorePaymentRepositoryは決済claim/releaseと、決済完了時のpayment_attempts digest一意化・注文paid更新をtransactionで実施する。
+- requirements.txt に google-cloud-firestore>=2.16 を追加。
+- test_firestore_repository.py を追加。FIRESTORE_EMULATOR_HOSTがある場合、決済・資格情報保存・同時実行claim・状態遷移・重複payment digestをFirestore Emulatorで検証する。Emulatorがない通常CIでは明示的にskipする。
+- .github/workflows/ci.yml にFirestore repository test commandを追加。通常CIでは依存パッケージのimportとskip判定まで確認する。
+- Firestore adapterはまだshop_storage / shop_storeの実行時選択へ接続していない。SHOP_STORAGE_BACKEND=firestoreは引き続きfail-closed。PayPay ledgerの全状態移行、OTP state、outbox、worker slot lease、transfer lockが未完了のためである。
+
+### 22.2 注意点・未検証事項
+
+- Firestore Emulatorを起動した統合テストはまだ実行していない。Emulator環境での実トランザクション検証を成功扱いしない。
+- FirestorePaymentRepositoryのpayment_attemptsは初期のdigest重複防止・完了記録であり、既存 paypay-ledger.sqlite3 の attempted / pending / review / outcome_unknown ライフサイクル全体を置き換えたものではない。
+- Firestoreへの本番データ移行、Secret Managerへの暗号化鍵移設、Cloud Tasks/Cloud Run Job連携、Firestore Security Rules/IAM、費用実測は未実施。
+- Google Cloud credentials/project/billingは不要なまま。認証情報をコードやGitHubへ追加していない。
+
+### 22.3 安全状態
+
+- 専用ブランチ feature/cloud-run-firestore-foundation とDraft PR #9のみ変更。mainへ未マージ。
+- Render設定・デプロイ・runtime-data・PayPay認証/決済データは変更なし。実ログイン・実決済・実注文なし。
+- SHOP_LIVE_ORDERS_ENABLED=0を維持。安定版CatsDaiko5とBeta mainは未変更。
+
+次の作業は最新CIを確認し、Firestore adapterのEmulator実行環境を用意するか、テスト可能な専用CIジョブを設ける。その後、既存PayPay ledger/OTP状態を含む決済Repositoryの完全な移行境界を設計し、Cloud Tasks outbox・slot lease・transfer lockを実装する。
+
+## 23. Firestore adapter初期実装のCI結果（2026-11-13）
+
+- 最新コード・計画書を含むPR #9 HEAD `c544f0e6aa76a528c0603b5bc26446dc8e3f622e` のGitHub Actions run `43431398137` は success。
+- 依存関係インストール、BCSFE API互換性、Application self-test、Save audit/repair、Parallel、Improvement、Character customization、GitHub auth/runtime store、PayPay gateway、Shop store、Firestore repository test commandの全ステップが成功。
+- Firestore repository test command自体は成功したが、FIRESTORE_EMULATOR_HOST未設定のためEmulator統合ケースはskipされている。Firestore transactionの実接続検証を完了した意味ではない。
+- 最新作業ブランチHEADは本チェックポイント更新前のコードHEAD c544f0e6aa76a528c0603b5bc26446dc8e3f622e。追加した本章はdocsのみ。
+- PR #9はDraft/open/not merged。main、Render、GCP、runtime-data、PayPay設定、実注文に変更なし。SHOP_LIVE_ORDERS_ENABLED=0を維持。
+
+次の実装はFirestore Emulatorを利用した実トランザクション試験環境の整備と、PayPay台帳（attempted / pending / review / outcome_unknown）・OTP状態を含む永続化契約の完成。その後Cloud Tasks outbox、global worker slot lease、transfer lockを追加する。Firestore backendはこれらと本番切替手順が完成するまで有効化しない。
+
+## 24. Cloud Tasks / Cloud Run Workerの実装（2026-11-13）
+
+### 24.1 Dispatcherとoutbox
+
+- shop_cloud_run_dispatcher.py を追加。Cloud Tasks task bodyは order_id と execution_id のみ。PayPayリンク、引継ぎコード、PIN、Cookie、OTP、暗号化blobは入れない。
+- Task名はexecution IDから決定的に生成。Cloud Tasks createがAlreadyExistsの場合は再送成功として扱い、Firestore outboxを task_enqueued に進める。
+- task_outbox は注文とexecutionの作成と同じFirestore transactionで作る。publish途中のプロセス終了に備え、publish_pending による回復処理を追加。
+- shop_cloud_run_dispatcher_service.py を追加。非公開Cloud Run Serviceとして配置し、Cloud Run IAMでCloud Tasks OIDC service accountからの呼び出しだけを許可する。空きslotがない場合はHTTP 503でCloud Tasks retryを要求。
+- /sweep endpointを追加。Cloud Schedulerから定期実行し、未publish outboxを再送する。
+
+### 24.2 グローバル実行slotと重複防止
+
+- DispatcherがJob起動前にFirestore transactionで4つの worker_slots から1枠を予約する。空き枠がなければoutbox状態を変更せず、Taskをretryさせる。
+- Workerは予約済みslotとexecution IDを照合してからclaimする。4枠を超えるJobが同時に実処理へ進まない設計。
+- 引継ぎコードの重複ロックは専用pepperを使うHMAC-SHA256。平文・単純SHA256をFirestoreへ保存しない。
+- Job起動APIの結果が不確定な場合はoutbox/execution/orderをreviewへ移し、slot予約を自動解放しない。ゲーム側結果が不確定な場合はtransfer lockも保持する。
+- Workerが起動前の検証で失敗した場合に限り、自分の予約slotを安全に解放する。
+- キュー待機中の注文はJob起動前にのみキャンセル可能。起動開始後はキャンセルを受け付けない。
+
+### 24.3 Cloud Run Job Worker
+
+- shop_cloud_run_worker.py を追加。Jobは注文ID・execution ID・slot IDだけを引数に受け取り、Firestoreから暗号化済み注文データを取得する。
+- 既存のBCSFE処理 app._worker_entry / _run_job を再利用し、Webプロセス内のin-memory queueに依存せず1注文を1 Jobで処理する。
+- 引継ぎコード・PINはJob内でのみ復号。進捗ログからtransfer code / PIN / access hashをredactする。
+- 処理結果（新しい引継ぎコード等）はPAYPAY_ENCRYPTION_KEYで暗号化してFirestoreへ保存。平文resultは保存しない。
+- Firestoreへのprogress保存に失敗した場合、成功扱い・slot解放をしない。再実行で二重操作が起きないようreview/保留を優先する。
+
+### 24.4 Firestore注文・PayPay状態のアプリ接続
+
+- SHOP_STORAGE_BACKEND=firestore を明示選択できるようにし、Firestore選択時にSQLiteへ自動fallbackしない。
+- Webの注文作成、引継ぎ情報保存、注文一覧、注文進捗、待機中キャンセルをFirestoreへ接続。
+- PayPayリンクdigestを受取処理の前にFirestore transactionでclaim。既存GitHub runtime-dataの旧PayPay ledgerは読み取り専用の重複チェックとして残し、新しいattemptはFirestoreへ記録する。
+- PayPay attempt状態はattempted / pending / paid / review / outcome_unknown / rejectedをtransactionで管理。曖昧な受取結果をawaiting_paymentへ自動で戻さない。
+- 管理者SMS OTP stateはPAYPAY_ENCRYPTION_KEYで暗号化してFirestoreへ短時間保存し、Cloud Runのscale-to-zero後も継続できるようにした。
+- Web Serviceは初期max instances 1を推奨。GitHub runtime-data上のPayPay account / 旧ledgerのwriter競合を避けるため。主DBはFirestore。
+
+### 24.5 コンテナと構築手順
+
+- Dockerfile と .dockerignore を追加。.env、runtime data、SQLite、ログ、暗号化blob、鍵ファイルをimage build contextから除外する。
+- firebase.json / firestore.rules を追加し、GitHub Actions上でFirestore Emulatorを起動する構成にした。
+- docs/CLOUD_RUN_DEPLOYMENT_RUNBOOK.md を追加。東京region、Artifact Registry、Firestore、Cloud Tasks、サービスアカウントIAM、Secret Manager、Cloud Run Web/Dispatcher/Job、Cloud Schedulerの構築順を記載。
+- Cloud Run Job commandはJob定義時に python shop_cloud_run_worker.py と設定し、実行ごとのoverrideはargsだけにする。Cloud Run ContainerOverrideはcommand overrideをサポートしないため。
+
+## 25. 最新の検証・未完了ゲート（2026-11-13）
+
+- 既存CI run 43431398137 はsuccess。
+- Cloud Tasks / Worker / Webの追加テストを含む最新CIはrun 43434924529。Python依存関係、既存回帰テスト、PayPay gateway、Shop store、Cloud Run dispatcher、Cloud Run worker testsまでsuccess。Firestore Emulator起動・transaction integration tests・Docker buildはこのrunの完了待ち。
+- Firestore Emulator testsは注文/決済状態、同時claim、payment digest重複、outbox重複配送、4枠予約、transfer lock保持、OTP暗号化状態、shop_store Firestore接続を検証する。
+- CIのFirestore Emulatorは本番GCP接続ではない。本番Firestore/Cloud Runの実トランザクションとIAMは未検証。
+- GitHub runtime-dataの既存注文DB/旧PayPay ledgerの完全なFirestore移行・照合ツールは未完成。PayPay account.encは引き続きGitHub runtime-dataを使用する。
+- Workerの異常終了後にCloud Run Execution状態を照合するreconciler/管理者解除フローは未完成。unknown outcome時のslot/transfer lockは自動解放しないため安全側だが、手動復旧が必要。
+- GCP Project/Billing/API/Firestore/Cloud Tasks/Cloud Run/Secret Managerは未作成。Renderも未変更。
+- SHOP_LIVE_ORDERS_ENABLED=0 を維持。安定版CatsDaiko5とBeta mainは未変更。
+
+次の実装は最新CIのEmulator transaction結果を確認し、失敗を修正する。その後、Cloud Run Executionのreconciliation、既存runtime-dataの読み取り専用export/import照合、Firestoreのadmin review解決手順を実装する。これらが終わって初めてGCP Project/Billing設定をユーザーに依頼する。
+
+## 24. Cloud Run実行基盤の初期配線・原子性レビュー（2026-11-13）
+
+### 24.1 追加済み実装（ブランチ上）
+
+- Firestore Workflow Repositoryにtransactional outbox、Cloud Tasks配送状態、4枠のglobal worker slot予約、HMAC transfer lock、実行claim/進捗/終了、短時間暗号化OTP stateの初期実装を追加。
+- Cloud Tasks publisherはexecution IDから決定的なTask名を作り、payloadにはorder_id / execution_idだけを含める。AlreadyExistsは配送再試行として扱う。
+- Private Dispatcher ServiceとCloud Run Job launcher / Worker entrypointを追加。Job引数はorder ID・execution ID・slot IDのみ。
+- WorkerはFirestoreから暗号化済み注文情報を読み、既存のBCSFE worker entrypointを再利用する。ゲーム処理開始後の例外は結果不明としてreviewにし、transfer lockを保持する。
+- Firestore backend選択時のPayPay決済attempt stateとOTP stateをFirestoreへ置く初期経路を追加。PayPayアカウント本体と既存SQLite ledgerはまだ移行していない。
+- Cloud Run用Dockerfile、.dockerignore、Firestore rules、CI Emulator起動、Cloud Run Deployment Runbookを追加。
+- RunbookはTokyo region、min instances 0、Web max instances 1、Worker maxRetries 0、Cloud Tasks 4 concurrent dispatch、Scheduler outbox sweepを前提にする。
+
+### 24.2 今回見つけて修正した原子性の問題
+
+- 以前のFirestore注文画面は、引継ぎ情報保存とexecution/outbox作成を別々のtransactionで実行していた。
+- その間にWeb processが停止すると、credentials_submittedだけがtrueになり、execution/outboxが存在しない孤立注文になる可能性があった。
+- FirestoreWorkflowRepository.submit_credentials_and_enqueue() を追加し、暗号化引継ぎ情報、credentials_submitted、active_execution_id、job_id=queued、execution document、task_outbox documentを単一Firestore transactionで作成するよう変更。
+- Firestore注文画面は新しい shop_store.submit_credentials_and_enqueue() を呼び、従来の2段階更新を使わない。
+- Firestore Emulator統合テスト test_credentials_and_outbox_are_created_atomically を追加し、成功時の注文・execution・outbox整合性と二重送信拒否を検証する。
+
+### 24.3 現在のCI状況
+
+- 直近の既存コード検証ではCloud Run Dispatcher tests、Worker tests、Shop store testsまで成功。
+- Firestore Emulatorを含むCI run 43434924529 は進行中だった（Firebase CLI導入・Emulator test前）。
+- 今回の原子性修正後、GitHub Actions run 43435141360（parallel regression）は進行中。修正後のCI結果は完了を確認するまで成功扱いしない。
+- Emulator統合テストはCIで実行する設定を追加済みだが、最新runの最終結果待ち。
+
+### 24.4 残っている重要な移行ゲート
+
+- PayPay payments.sqlite3 のattempted / pending / paid / review / outcome_unknown / rejected lifecycle全体、重複リンク履歴の移行と照合。
+- PayPay account.enc のGitHub runtime-data保管をSecret/Firestore等へ移すか、単一writer制約を維持して安全に継続するかの最終設計。
+- OTP状態のconsumeを実際のSMS認証処理フローに接続し、同時要求・再送・期限切れのテストを追加。
+- Workerの進捗・結果・監査レポートをFirestore document上限内で保持する設計。現在の配列ログ保存は上限到達リスクがあるため、bounded chunksへの移行が必要。
+- Dispatcherの起動APIタイムアウト時、Cloud Run Job実行一覧との照合・回復手順を追加する。結果不明時にJobを再起動しない安全方針は維持。
+- Cloud Tasks task retry exhausted / outbox task_enqueued滞留の回復、reserved slotのreaper、Cloud Run実行状態を照合したslot解放を実装する。lease期限だけでslotを再利用しない。
+- Firestore Security Rules / IAMの最小権限レビュー、データ移行ツール、旧データとの照合、Cloud Run実機・費用検証。
+- Firestore backendはPayPay ledger移行、OTP consume、outbox回復、Workerログ分割、Emulator試験が完了するまで本番切替しない。
+
+### 24.5 安全状態と次の作業
+
+- 変更先は引き続き feature/cloud-run-firestore-foundation / Draft PR #9のみ。mainへ未マージ。
+- CatsDaiko5安定版、Beta main、Render設定・デプロイ、GitHub runtime-dataは変更していない。
+- GCP project/billing/IAM/Secret Manager/Firestore/Cloud Tasks/Cloud Runリソースは未作成。
+- PayPay実ログイン・実決済・実注文は未実施。SHOP_LIVE_ORDERS_ENABLED=0 を維持。
+- PAYPAY_ENCRYPTION_KEY は変更していない。
+- 次は今回の最新CIとFirestore Emulator結果を確認し、失敗修正後にPayPay ledgerの完全なRepository化、OTP single-use接続、bounded execution log chunks、outbox/slot recoveryへ進む。
+
+
+## 25. Worker終了後の回復設計をRunbookへ反映（2026-11-13）
+
+- Dispatcherに追加された /reconcile エンドポイントを運用手順へ反映。
+- Cloud Schedulerから1分ごとに非公開Dispatcherの /reconcile をOIDC認証で呼び出す手順を docs/CLOUD_RUN_DEPLOYMENT_RUNBOOK.md に追加。
+- Cloud Run Job Executionが終了済みなのにFirestoreがrunningのままの場合、成功扱いも自動再実行もせず、reviewへ移行してslotのみ解放する。ゲーム側結果が不明なためtransfer lockは保持する方針を明記。
+- DispatcherにはCloud Run Job Execution状態を取得する最小権限が必要。Project全体への広いroles/run.viewer付与は避け、可能な限り権限範囲を絞る。
+- Runbook変更commit: 7671540cebfcc57fa5bdb0c0f25750297d7531fc。
+- この更新時点で最新PR CIは複数commitに対して再実行中・一部cancelled。Emulator統合テストを含む最新HEADのCI成功は未確認。
+- 作業は専用ブランチ / Draft PR #9のみ。main・Render・GCP実リソース・PayPay実アカウント・実注文は変更せず、SHOP_LIVE_ORDERS_ENABLED=0を維持。
+
+次は最新CIを確認し、PayPay旧ledgerのFirestore移行・OTPの並行処理保護・ログdocument分割・outbox task retry exhausted時の回復とslot reaperを実装する。これらが完了するまではFirestore backendを本番で有効化しない。
+
+
+## 26. PayPay SMS認証状態のsingle-use化（2026-11-13）
+
+- PayPay OAuthのOTP stateをFirestoreへ保存する既存経路を確認。従来のfinish_login()は状態を読み取るだけで、成功後にclearするため、並行した複数リクエストが同じSMS認証stateを同時に利用できる競合があった。
+- paypay_gateway.pyに_pending_otp_consume()を追加。Firestore backendではFirestoreWorkflowRepository.consume_otp_session()のtransactionでpending→consumedを原子的に変更し、暗号化stateを一度だけ取得する。legacy backendではプロセスロック下でメモリstateを取り出して消去する。
+- finish_login()はOTP形式検証後にconsumeしてからPayPay OAuthを呼ぶ。これにより同一OTP sessionの同時送信・再利用を防ぐ。OTP認証通信がタイムアウト等で結果不明になった場合もstateは再利用せず、管理者は最初からログインを開始する必要がある。安全性優先のトレードオフ。
+- test_paypay_gateway.pyにlegacy single-use test、test_firestore_repository.pyにFirestore Emulator single-use testを追加。
+- この変更はPayPay実ログイン・SMS送信・決済を実行していない。暗号化キー・保存済みPayPay account.encには触れていない。
+- 今回のコードcommit: e40e0cb190e1c51893c6c98051662f2d63840ab4 / 6ff279294f9679ce787bd68c936c1e0d521c67be / ca40a9013b0fb819a976a156984219ec7e12cf9c。
+- 次は最新CIでFirestore Emulator testを含む成功を確認する。次の大きな課題はworker snapshotのbounded chunk化とoutbox retry/reaperの回復ロジック。
+
+
+
+## 27. Firestore文書サイズ保護・OTP並行試験・Dispatcher孤立起動の検出（2026-11-13）
+
+### 27.1 Firestore execution snapshotのサイズ上限
+
+- Worker progress / log / report / audit / 暗号化resultは現在execution documentへ保存する構造。Firestoreの1MiB document上限に対し、report・audit・resultは要素数だけではサイズを制限できない問題を確認。
+- `shop_firestore_workflow.py` にFirestore payloadサイズの保守的な見積もりを追加。snapshotの推定サイズが700KiBを超える場合は `execution_snapshot_too_large` でtransactionを拒否し、Firestore書き込み前に停止する。
+- ログ・警告・report・audit・暗号化resultを黙って切り捨てない。Worker側ではprogress保存失敗として扱われ、処理結果を成功扱いせずreview / outcome_unknown側へ倒す。
+- これはdocument上限超過を防ぐ暫定ガードであり、ログ・reportをsubcollectionのbounded chunksへ分割する最終方式ではない。chunk化は引き続き実装課題。
+
+### 27.2 OTPの期限切れ・同時consume試験
+
+- Firestore Emulator testに期限切れ後のconsume拒否を追加。
+- 2つの並行consumerが同じOTP sessionを取得しようとしても、片方だけが暗号化stateを受け取り、もう片方はNoneになることを追加検証。
+- OTP stateは暗号化状態でのみ保存。OTP値そのものをFirestoreやログに保存しない。
+
+### 27.3 Dispatcher停止時の孤立launch検出
+
+- Dispatcherがslotを予約し、Cloud Run JobのExecution名をFirestoreへ保存する前に終了すると、従来のreconcilerではExecution名がなく、starting / reservedのまま残り続ける経路を発見。
+- `/reconcile` にstale launch監視を追加。Execution名が記録されないstarting状態が既定600秒（環境変数 `CLOUD_RUN_STALE_LAUNCH_SECONDS` で調整）を超えた場合、outboxをoutcome_unknown、注文・executionをreviewへ変更する。
+- これはJobが起動していない証拠ではないため、slotは自動解放しない。重複起動・ゲーム側二重操作を防ぐ安全側の動作。管理者がCloud Run Job Executionsと注文状態を照合してから手動復旧する必要がある。
+- Emulator testでunknown launch後に注文/execution/outboxがreview/outcome_unknownになり、reserved slotが維持されることを追加検証。
+
+### 27.4 最新検証状況
+
+- commit `10be1090aab930c407376fe973ae4ff3e50b3e37` のCI run `43438124320` と並列回帰run `43438124302` は両方success。snapshot guardの構文・Application self-testを含む全ステップ成功。
+- その後、stale launch検出とEmulator testを追加。最新HEAD commit `3793bc05f83f3c7849e588b908f9ee7bd9a16f3d` のCI run `43438423147` と並列回帰run `43438423301` は確認時点で実行中。Firestore Emulator統合テストの最終結果は未確認。
+- 途中commit `994a5ea622957c4cd914e8c99921b7337cb06160` は補助関数の改行エスケープ不備によりApplication self-testが失敗した。修正commit `10be1090aab930c407376fe973ae4ff3e50b3e37` で同テストは成功し、その後のrunも全ステップ成功。
+
+### 27.5 未完了ゲート・安全状態
+
+- Worker log / warn / report / audit / resultのbounded chunk subcollection化と管理画面・購入者進捗APIの読み出し統合。
+- Stale launchでreserved slotを保持した場合の管理者向け照合・解除手順と安全な復旧操作。
+- PayPay旧ledger全状態・重複リンク履歴の実データdry-run照合、旧account.encの移行方針、OTP再ログインの実機確認。
+- Firestore Emulator最新HEADのCI成功、Security Rules / IAM最小権限、GCP実環境でのCloud Run/Tasks/Firestore検証、費用実測。
+- 専用branch `feature/cloud-run-firestore-foundation` / Draft PR #9のみ変更。Beta main・安定版CatsDaiko5・Render・runtime-dataは未変更。GCPリソース未作成。実PayPayログイン・決済・実注文なし。 `SHOP_LIVE_ORDERS_ENABLED=0` を維持。`PAYPAY_ENCRYPTION_KEY` は変更なし。
+
+次は最新CIのFirestore Emulator結果を確認し、失敗を修正する。続けてbounded log chunksと管理者向けunknown launch復旧手順を完成させ、PayPay ledger移行の実データdry-run照合へ進む。ユーザーのGCP project/billing設定が必要になるまでは、Render・GCP・実注文に触れない。
+
+
+## 28. 旧PayPay決済台帳の移行前照合をfail-closed化（2026-11-13）
+
+- 旧注文DBの `orders.payment_digest` と旧PayPay台帳 `links.digest` の照合が移行前に必須であることを確認。
+- 従来の移行スクリプトはledger snapshotが存在しない場合にattempt一覧を空として扱い、注文に保存されたpayment_digestが旧台帳に存在しないままFirestore importを進める可能性があった。
+- `migrate_runtime_data_to_firestore.py` に `payment_digest_coverage()` を追加。注文側にpayment_digestがあるのにledger側に存在しない件数と、不正形式のdigest件数をdry-run summaryへ表示する。
+- `--apply` はmissing / invalidが1件でもあればFirestore書き込み前に停止する。digestそのものはログへ出さない。旧ledger欠損や不整合を無視してリンク重複防止を弱めない。
+- parser testに完全一致・欠損・不正形式のcoverage testを追加。
+- 最新の変更commitは `4ff6c395c48496591c42e8268002a370773760c0`。このHEADのCI結果は実行中のため未確定。直前のCI run `43438124320`（commit `10be1090`）はsuccess。直近の並列回帰run `43438669407`（commit `9a21d1fd`）はsuccess。
+- 変更は専用branch / Draft PR #9のみ。main・Render・GCP・runtime-data・PayPay実アカウントは変更なし。注文受付停止 `SHOP_LIVE_ORDERS_ENABLED=0` を維持。
+
+次は最新CIのmigration parser / Firestore Emulator結果を確認する。coverageが0でない場合は実データimportを行わず、旧DBとledgerの不整合を調査する。引き続きbounded log chunks、unknown launchの手動復旧、Security Rules/IAM、実データdry-run照合を完了させる。
+
+
+## 29. PayPay ledger snapshot欠損時のimport禁止（2026-11-13）
+
+- 注文側payment_digestのcoverage照合に加え、旧PayPay ledger snapshot自体が存在しない場合も、`--apply` を禁止するよう変更。
+- ledgerが存在しない状態で注文DBだけをimportすると、過去に使われたPayPayリンクのattempt履歴が欠落し、リンク再利用防止が弱まる可能性があるため。
+- `require_ledger_snapshot_for_apply()` を追加。dry-runは不足状況の確認を許可するが、applyは暗号化PayPay ledger snapshotが存在することを必須とする。snapshot欠損時はFirestoreへの書き込み前に停止。
+- test_migrate_runtime_data.pyにledger snapshot欠損の拒否テストを追加。
+- 最新コードcommit `1f81e588d0363936df2114eff1dae5da98514335`。CIはこの変更を含む最新HEADの完了待ち。直近の並列回帰run `43438904808`（commit `4ff6c395`）はsuccess。CI run `43438904901` は次のcommit更新でcancelledとなり、最新CI成功とは扱わない。
+- 専用branch / Draft PR #9のみ。Beta main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは変更なし。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADのCI全工程・Firestore Emulator・Docker build結果を確認する。その後、管理者向けのunknown launch復旧手順とbounded log chunksを進め、実データdry-runで注文DB/ledgerの件数・digest coverageが整合することを確認する。旧ledger snapshotがない場合は、ユーザーによる安全なデータ確認が必要になるまでimportを行わない。
+
+
+## 30. Worker実行identityをCloud Run標準値に固定（2026-11-13）
+
+- Cloud Run Workerが `CLOUD_RUN_EXECUTION` を取得できない場合にランダムownerへfallbackしていた経路を廃止。
+- Google Cloud公式のCloud Run container runtime contractで、Jobsには `CLOUD_RUN_EXECUTION`（実行名）が自動設定されることを確認。
+- Workerはこの値が未設定・不正ならゲーム処理開始前に停止し、pre-claim reserved slotを安全に解放して注文をreviewへ移す。ランダムownerを記録しない。
+- Reconciler側の `worker-*` fallback owner skipも削除。Cloud Run execution nameを使ってExecution APIを照合する経路へ統一。
+- test_cloud_run_worker.pyに環境変数未設定時の拒否と有効値の取得テストを追加。
+- 最新コードcommit `a6a2f330e161a892634862a8390a1658dcd3dcc2`。CI run `43439651151` と並列回帰run `43439651140` は確認時点でqueued/pending。直前のcommit `5250b731` のCI run `43439247626` と並列回帰run `43439247620` は全ステップsuccess。新Worker identity変更を含む最新CI成功とは区別する。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CI全工程とFirestore Emulator testを確認する。Cloud Run実環境では `CLOUD_RUN_EXECUTION` は自動注入値なので、Job設定で手動追加しない。引き続きbounded log chunks、unknown launchの手動解除手順、Security Rules/IAM、実データdry-run照合を進める。
+
+
+## 31. Cloud Tasksの早期配送とoutbox状態更新の競合を修正（2026-11-13）
+
+- Cloud Tasks publisherは従来、create_task成功後にFirestore outboxをpending→task_enqueuedへ更新していた。Cloud Tasksは作成直後に配送されるため、Dispatcherが先に到着するとbegin_dispatchがpendingを拒否し、HTTP 200でTaskだけ消費される競合を確認。
+- さらにpublisherがTask作成直後に停止した場合、決定的Task名のAlreadyExists（削除後24時間の名前保持を含む）だけではTaskが現存するか配送済みか判別できず、pending outboxがtask_enqueuedに進んでTaskが残らない可能性があった。
+- `begin_dispatch()` は `pending` と `task_enqueued` の両方を受け付けるよう変更。Taskがoutbox更新より先に配送されても、Dispatcherがtransactionでlaunchingへ進める。
+- `mark_task_enqueued()` はoutboxが既にlaunching / dispatched / outcome_unknown / cancelledへ進んでいる場合、後から状態を巻き戻さずno-opにする。
+- Firestore Emulator test `test_dispatch_accepts_task_delivery_before_publish_state_commit` を追加。pending状態で配送されたTaskがlaunchingへ進み、その後のpublisher更新が状態を上書きしないことを検証する。
+- 最新コードcommit `1bc517e6433a7d24ef1e36d6486e64b7803301ba`。この変更を含むCI / parallel regressionの最終結果は確認待ち。直前のHEAD `546b4bbc` のCI run `43439705092` は進行中で、今回の変更により再実行対象。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIのFirestore Emulatorで早期配送race testを確認する。その後、outbox / slot / transfer lockの管理者復旧手順とbounded log chunk化を進める。Cloud Tasksのat-least-once配送を前提に、Firestoreの業務状態を唯一のclaim gateとして維持する。
+
+
+## 32. Worker実行ログ・レポートをbounded chunkへ分離（2026-11-13）
+
+- 既存Worker snapshotはlog/warn/report/skippedをExecution本体docへ配列保存していた。700KiBを超えると保存を拒否するだけで、レポート量によってはWorkerの進捗保存が失敗し、処理結果がreview扱いになる可能性があった。
+- `execution_logs/{execution_id}/chunks/{chunk_id}` に配列データを分離。1chunkは推定128KiB以下、最大32chunk。単一itemが上限超過、またはchunk数上限超過の場合は明示的にfail-closedする。
+- Snapshot更新はFirestore transactionで既存chunkを読み取り、旧chunk削除・新chunk作成・Execution revision更新をまとめて行う。途中で失敗しても旧snapshotが残り、部分的なchunkセットを公開しない。
+- 各更新で旧revisionのchunkを削除して置き換えるため、実行中の進捗更新で履歴docが無制限に増えない。
+- `get_execution()` はchunkをindex順に再構築して既存shop_store/admin画面向けのlog/warn/report/skipped配列契約を維持する。以前のinline配列を持つ既存Executionとの後方互換も保持。
+- Emulator test `test_worker_snapshot_arrays_are_chunked_and_replaced_atomically` を追加。1MiBを超えるlogを分割して復元できること、更新後に旧chunkが残らないことを確認する。
+- コードcommit: `d02b0b521d72a6a63cf9dc681329ef0d967d0e85`、test: `e349c42228a9f2efa7cf44a38a940234793c2fe4`、後方互換修正: `24e402da6a19209db3e3d53fcb7e59256c54fef9`。
+- 最新HEADのCI `43440765574` はpending、同HEADのparallel regression `43440765854` はin_progress。直前のCI `43439896632` とparallel `43439896714` はsuccess。新しいchunk実装のCI成功とはまだ扱わない。
+- 専用branch / Draft PR #9のみ。Beta main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADのCI/parallel結果、とくにFirestore Emulatorのchunk置換テストを確認する。続いて、管理者向けunknown launch復旧ツール、Cloud Run Job実行ID照合、IAM/Security Rulesをレビューする。実データdry-run前にGCP Project/Billing/ADCが必要になるが、ユーザー承認前にリソース作成やデータ移行はしない。
+
+
+## 33. Chunk移行テストの期待値修正とPayPay ledger schema検証（2026-11-13）
+
+- 最新CI `43441028043` でFirestore Emulator test 19件中、旧テスト `test_execution_snapshot_rejects_payload_over_safe_document_limit` のみ失敗。実装不具合ではなく、従来「1MiB超は拒否」を期待したテストが、新仕様「配列をbounded chunksへ分割」と矛盾していた。
+- テストを `test_execution_snapshot_splits_large_report_into_bounded_chunks` に変更。大きなreportを保存し、全100項目が復元され、chunk数が1～32であることを検証。
+- Chunk readerはchunkが存在する場合のみchunkから復元し、chunk未作成の旧Executionはinline配列を維持。最初のchunk保存時にFirestore `DELETE_FIELD` で旧inline配列を削除し、旧データと新chunkの二重表示を防止。入力配列の型も検証。
+- 移行スクリプトの追加監査で、ledger snapshotファイルが存在してもSQLite内に `links` テーブルや必要な列がなければ、空台帳として誤認してapplyできる懸念を発見。apply前にlinks tableとdigest/order_id/state/created列の存在を必須化。dry-runは引き続き調査可能。
+- 追加テスト: chunk化仕様に合わせた大容量reportテスト、PayPay ledger links table/schema欠損のapply拒否テスト。
+- 最新のコード/テスト変更: `d3da9f581d946bb6250e19310c6ec716cf252e1e`, `eb74151f12c35176fb37fb837e208f7a765e6d52`, `af2e7dd54474d64079644007e290142afa3a1ea9`。CI run `43441028043` はchunk機能のテスト期待値が古く1件failure（他18件success）。その後の修正を含む最新HEAD CI結果はこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADで全CI、特にFirestore EmulatorとDocker buildを確認。失敗があれば原因を修正し再実行する。PayPay ledger schema検証後も、実データdry-runが必要になるまでapplyは行わない。
+
+
+## 34. Worker report / skipped値の再帰的secret redaction（2026-11-13）
+
+- Workerのlog/warn/errorは既に文字列redactionしていたが、Firestoreへ保存するreport/skippedはそのまま保存していた。
+- report/skipped内の文字列・ネストしたdict/listのkey/valueに、transfer codeやPINなどredaction対象が含まれる可能性を考慮し、`_redact_nested()` を追加。構造は維持し、文字列を再帰的に置換する。レポート全体を500文字で切り詰めず、chunk上限による明示的な安全制御を維持する。
+- `test_nested_report_and_skipped_values_are_redacted_without_truncation` を追加。
+- 直前HEAD `146901822a24f50e482260ff7f83fae69ff32aea` のCI run `43441596827` は全工程success（Firestore Emulator integration tests / Docker build含む）、parallel regression run `43441596750` もsuccess。
+- 今回のredaction変更commit `77a53e8c567ead3457852dd34434c1fa1eeaef03`、test `d5f9a76983938f72430749224a1d049f874cc660` を含む最新HEAD CIはこれから実行・確認する。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADのCI/parallel regressionを確認。引き続き管理者のunknown launch復旧方法とIAMの最小権限を詰める。実GCPリソース作成、実データ移行、PayPay実ログイン・決済はユーザーの明示承認前に行わない。
+
+
+## 35. Unknown Job launchの読み取り専用Inspector追加（2026-11-13）
+
+- Cloud Run Job launch APIがタイムアウトし、Jobが受理されたか不明な場合に、Firestore上の `review/outcome_unknown` とCloud Run Execution一覧を照合する読み取り専用CLI `shop_cloud_run_recovery.py` を追加。
+- Firestore execution/outboxの整合性を先に検証し、Cloud Run Executionsを全ページ走査。Executionのcontainer argsから `--order-id` / `--execution-id` / `--slot-id` の3値が完全一致するものだけを候補として返す。
+- 出力はExecution名・作成/開始/完了時刻・task countsのみ。引継ぎコード/PIN/決済リンク等は取得・表示しない。
+- 結果は `matching_execution_found` / `multiple_matching_executions_found` / `no_matching_execution_found`。no-matchはAPI未受理の証明ではないため、どの結果でもslot/transfer lockの自動解除・Job再実行はしない。
+- `test_cloud_run_recovery.py` に完全一致、no-match、Firestore不整合、resource/ID検証テストを追加し、CI workflowへ登録。
+- Runbook section 19にCloud Shell実行例、必要な照合、no-matchの注意点を追加。
+- 直前HEAD `6c8194faa2c9a60a718378ddda760aafddb4e20b` のCI run `43442205219` は全工程success（Firestore Emulator / Docker build含む）、parallel regression `43442205366` もsuccess。
+- Inspectorコード `ed6aede40a0b8f431822c2213285d65df77da8df`、テスト `78f23bd832b3284efb0fedcad98cd2be4212da08`、CI登録 `a1fb67ce3a181c1854d9897d675148d36177634e`、runbook `e5fbc9efc1906b4c2251b2b7e68bce91fad391dc`。最新HEAD CI/parallelはこれから実行。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はInspectorのCI testと既存CIを確認。成功後、GCP service accountごとのIAM権限表、Cloud Scheduler認証、Cloud Run JobのmaxRetries=0 / task timeout / CPU・memory・max instancesを最終監査する。実GCP環境への作成・データ移行・実PayPay操作はユーザーの明示承認前に行わない。
+
+
+## 36. Operation保存後にExecution名が欠ける曖昧起動をreview化（2026-11-13）
+
+- Reconcilerは `starting` でCloud Run Execution名がない状態を600秒後にunknown扱いにするが、`mark_dispatch_unknown()` がoutbox `launching` のみを受け付けていたため、`mark_dispatch_started()` が成功してoutbox `dispatched` / operation_name保存済み / execution_name=Noneとなったケースではreview遷移できない不整合を発見。
+- `mark_dispatch_unknown()` は `launching` と `dispatched` の両状態を受け付けるよう変更。Execution名欠損またはJob API応答不明をreview/outcome_unknownへ進める。予約slotは解放しない。
+- Firestore Emulator test `test_unknown_dispatch_after_operation_persist_but_without_execution_name` を追加。operation_nameを保持したままexecution/outbox/orderをreviewへ移し、slotがreservedのままであることを確認。
+- Inspector CLIはoutbox/executionがoutcome_unknownであることを確認してからExecutions一覧を照合する。slot/lock解除は引き続き行わない。
+- 最新コードcommit `2d6e1b0370e5b4e43d003213a8a33f6220eaee5c`、test `dbd467ae2e3c9b37b6bd31e6991f4495e0b8f930`。最新HEAD CI/parallel結果はこれから確認する。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIのFirestore Emulatorでdispatched→unknown testを確認し、read-only inspectorもCIに含めて確認する。unknown起動のslot解放は引き続き自動化しない。
+
+
+## 37. Runtime IAMの最小権限マトリクスを追加（2026-11-13）
+
+- Cloud Run Web / Dispatcher / Worker / Cloud Tasks OIDC / Scheduler OIDC / 手動Inspector / migration operatorのidentityを分離したIAM matrixを `docs/CLOUD_RUN_IAM_MATRIX.md` に追加。
+- Firestoreは `roles/datastore.user`（runtime read/write）と `roles/datastore.viewer`（Inspector read-only）を区別。Firestore Security Rulesはclient read/write denyのまま、server SDKはIAMで制御する。
+- Dispatcherは対象Queueの `roles/cloudtasks.enqueuer`、対象Worker Jobの `roles/run.jobsExecutorWithOverrides` と `roles/run.viewer` に限定。Cloud Tasks / Scheduler OIDC SAはPrivate Dispatcher Serviceの `roles/run.servicesInvoker` のみ。
+- Secret Managerは個別Secret resourceへ `roles/secretmanager.secretAccessor` を付与し、Project-wide accessを禁止。PAYPAY_ENCRYPTION_KEYは現行値を維持し、TRANSFER_LOCK_PEPPERはWorkerに限定する案。
+- `roles/run.jobsExecutorWithOverrides` にはcancel権限も含まれるため、その余分な権限を明記。必要ならcustom role検討だが、custom roleのproject scopeとresource binding制約を確認するまで安易に切替しない。
+- 直前HEAD `c5ec0c5590d98a7c01c0c5e41aee8295859ccab0` のCI run `43442916297` は全工程success（Cloud Run recovery inspector tests / Firestore Emulator / Docker build含む）、parallel regression run `43442916589` もsuccess。
+- IAM matrix commit `bcda23676c5e5c6ce8bdaab6155abb1c584a54c2`。runbook / migration checkpointの追記を含む最新HEAD CIはこれから確認。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はIAM matrixとrunbookの整合を確認し、最新HEAD CIを通す。IAMは設計案であり、Project作成後にPolicy Simulatorと実権限テストで検証するまで付与済みとは扱わない。
+
+
+## 38. Cloud Tasks AlreadyExists後の削除済みTask検出・generation rotation（2026-11-13）
+
+- Cloud Tasks公式仕様を再確認。Task名はTask削除/成功/試行枯渇後も最大24時間、旧queue.yaml/queue.xml由来のQueueでは最大9日再利用できず、同名createはALREADY_EXISTSとなる。GetTaskは削除済みTaskにNOT_FOUNDを返す。
+- 従来publisherはALREADY_EXISTSを無条件で成功扱いしていたため、Taskが既に削除されていてもoutboxをtask_enqueuedにし、実際にはDispatcherへ届かないまま注文が待ち続ける可能性があった。
+- outboxに `task_generation` を追加。Cloud Tasks名を `exec-{task_id}-g{generation}` に変更し、Firestore transactionでpending状態・期待generationを確認してgenerationを原子的に進める。
+- create_taskがALREADY_EXISTSの場合、get_taskで実Taskが存在することを確認してからtask_enqueuedにする。get_taskがNOT_FOUNDならgenerationを進めて新しいTask名で再作成。get_taskが権限/通信エラーならoutboxをpendingのまま残し、sweepで再試行する。
+- Firestoreの業務claim（begin_dispatch）は唯一のJob起動gateのまま。generation違いのTaskが重複配送されても、先にlaunchingへ進めた一つだけがJobを起動する。
+- Unit testにlive TaskがあるALREADY_EXISTS、削除済みTask名のgeneration rotationを追加。Emulator testにgenerationのtransaction競合・pending以外の拒否を追加。
+- 公式根拠: Cloud Tasks CreateTaskは削除済みTask名を最大24h（旧Queue形式は9日）予約し、GetTaskは削除済みTaskにNOT_FOUNDを返す。参照: [CreateTask / deduplication](https://cloud.google.com/tasks/docs/reference/rest/v2/projects.locations.queues.tasks/create)、[GetTask](https://cloud.google.com/python/docs/reference/cloudtasks/latest/google.cloud.tasks_v2.services.cloud_tasks.CloudTasksClient)。
+- 最新コード/テストcommit `d693b1cd9e1aab40f03879e9d216be9e1fd36752`, `037bb853d814a6a114f8663ac6adfb1e8117675b`, `ff8026214be7933d597e499f3fed1e64987b824d`, `48f40494d051e6b8dd6bc78856e34b1bd828e1b8`。この変更を含むCI/parallel結果は未確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIのCloud Tasks unit tests / Firestore Emulator / Docker buildを確認し、失敗時は修正する。Queueを本番作成する際は新形式で作成し、旧Queueの最大9日dedupe windowを前提にしない。
+
+
+## 39. Cloud Tasks generation初期値のatomic submit経路を修正（2026-11-13）
+
+- 最新CI `43443866008` でCloud Tasks publisher unit testsはsuccessしたが、Firestore Emulatorの `test_credentials_and_outbox_are_created_atomically` がKeyError `task_generation` で失敗。
+- 原因は2つのoutbox作成経路の編集ミス。通常enqueue側に `task_generation: 0` が二重に入り、実際にapp.pyが使用するatomic credential-submit側には初期値が入っていなかった。
+- atomic credential-submit側にも `task_generation: 0` を追加し、通常enqueue側は1項目に整理。最初のテストがassertで止まったためテスト専用outboxがcleanupされず、後続のpending件数テストも2件と誤認して失敗していた。後続失敗はこのcleanup cascade。
+- 修正commit `060b03c3b9706ac1198730553b8c0f0f11fb7c06`。この修正を含む最新CI/parallel結果はこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIでFirestore Emulator全21 testとDocker buildを再確認する。generation初期値が両方のoutbox作成経路に1つずつあることを確認し、成功後にIAM matrixのCloud Tasks get_task read権限を追記する。
+
+
+## 40. Cloud Tasks get_taskに必要なread IAMを追加（2026-11-13）
+
+- Cloud Tasks publisherはALREADY_EXISTS時に `get_task` でタスクが現在も存在するか確認する。
+- IAM公式permission表を確認したところ、`roles/cloudtasks.enqueuer` は `cloudtasks.tasks.create` は含むが `cloudtasks.tasks.get` は含まない。従来のIAM matrixだけではget_taskがPERMISSION_DENIEDとなり、generation rotationが進まない。
+- Dispatcher SAへ対象Queue限定の `roles/cloudtasks.viewer` を追加する案を記載。Project-wide Cloud Tasks Viewerは付与しない。さらに最小化したい場合は `cloudtasks.tasks.get` だけのcustom roleを検討する。
+- Inspector runbookにGitHub branch checkout / requirements install手順を追加。InspectorはFirestore `roles/datastore.viewer` + Worker Job `roles/run.viewer` のread-only権限のみ。
+- 直前HEAD `43c6629a5687a15048434365147750ce563ff68e` のCI run `43444283798` は全工程success（Cloud Tasks publisher tests、Firestore Emulator 21 tests、Docker build含む）、parallel regression run `43444284174` もsuccess。
+- IAM matrix修正commitはこれから記録。変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はIAM matrix/Inspector runbookの追記を再fetchして確認する。Cloud Tasks role bindingはGCP project作成後、IAM Policy Simulatorでqueue resource単位の付与とget_task実行を検証する。
+
+
+## 41. Web/Dispatcher両publisherのCloud Tasks IAMを整合（2026-11-13）
+
+- コード経路監査で `shop_store.publish_execution()` が注文登録直後にCloud Tasksを作成し、Dispatcherも `/sweep` で同じpublisherを使うことを確認。前のIAM matrixはWeb SAのCloud Tasks権限を不足記載していた。
+- Web SA / Dispatcher SAの両方へ、対象Queueに `roles/cloudtasks.enqueuer`（tasks.create）+ `roles/cloudtasks.viewer`（tasks.get）を付与する案に修正。Project-wide付与はしない。
+- 両SAがTaskのOIDC service accountを指定するため、両SAにTask Invoker SAへの `roles/iam.serviceAccountUser` が必要。Cloud Tasks Service Agentにも同じSAへのService Account Userを付与する。
+- Task Invoker / Scheduler InvokerはCloud Run Serviceだけを呼べる `roles/run.servicesInvoker` を使用し、Job実行権限を含む広い `roles/run.invoker` を避ける。
+- RunbookのSA説明・IAM表をmatrixと一致させた。
+- 公式根拠: Cloud TasksはProject / Queue level IAMをサポート。Enqueuerには `cloudtasks.tasks.create` はあるが `cloudtasks.tasks.get` は含まれず、Viewerにはgetが含まれる。参照: [Cloud Tasks access control](https://cloud.google.com/tasks/docs/access-control)、[Cloud Tasks roles and permissions](https://cloud.google.com/iam/docs/roles-permissions/cloudtasks)。
+- 直前HEAD `43c6629a5687a15048434365147750ce563ff68e` のCI / parallelはsuccess。IAM matrix修正後の最新HEAD CIはこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はIAM matrix/Runbookを再fetchし、Web/Dispatcher両publisherとOIDC actAs権限が整合していることを確認する。Project作成後はQueue resource単位のIAMをPolicy Simulatorで検証する。
+
+
+## 42. Dispatcher ServiceをGunicorn起動へ修正（2026-11-13）
+
+- Deployment runbookを再監査し、Dispatcher Serviceが `python shop_cloud_run_dispatcher_service.py` で起動され、Flask組み込み開発サーバーを本番で使う記述になっていた点を発見。
+- Dispatcher ServiceはGunicornで起動するようRunbookを修正。`gunicorn --workers 1 --threads 4 --bind 0.0.0.0:$PORT shop_cloud_run_dispatcher_service:app`。Cloud Run Job Workerは引き続き `python shop_cloud_run_worker.py` で実行する。
+- Dockerfileの既定CMDはWeb Service用Gunicornのまま。Dispatcher Serviceだけcommand/argsをoverrideする。
+- これはRunbook修正のみでコード変更なし。GCP resources未作成、実環境起動未実施。
+- 直前コードHEAD `43c6629a5687a15048434365147750ce563ff68e` はCI/parallel success。IAM/runbook docsの最新HEAD CIは確認待ち。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はRunbookのGunicorn起動記述を再fetchし、latest CI/parallel statusを確認する。
+
+
+## 43. Cloud Scheduler / Dispatcher設定のrunbook整合性修正（2026-11-13）
+
+- Runbook section 11 / 15ではScheduler jobを2つ（outbox sweepとexecution reconcile）必要としていたが、resource一覧tableには1つしか記載されていなかったため修正。
+- Dispatcher Serviceのenv listに `CLOUD_RUN_DISPATCHER_AUDIENCE` と `CLOUD_RUN_STALE_LAUNCH_SECONDS=600` を追加。Dispatcher自身もCloud Tasksをpublishするため、Webと同じOIDC audience設定が必要。
+- Scheduler SAの権限記載を `roles/run.invoker` から `roles/run.servicesInvoker` に統一し、Job実行権限を持たないInvoker roleへ最小化。
+- Runbook table、Dispatcher env、Scheduler scheduleの整合を確認。
+- これはRunbookのみの変更。直前コードHEAD `43c6629a5687a15048434365147750ce563ff68e` のCI/parallelはsuccess。最新docs HEADのCIはpending。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はRunbookのresource table・Dispatcher env・Scheduler roleを再fetchして確認し、最新CI statusを確認する。
+
+
+## 44. Cloud Tasks retry exhausted後のtask_enqueued outbox回復（2026-11-13）
+
+- 追加の運用監査で、Cloud Tasksが最大attempts到達やqueue purgeによりTaskを削除すると、Firestore outboxは `task_enqueued` のまま残り、従来の `list_pending_outbox(state=pending)` ではsweep対象から外れてしまうことを発見。
+- `list_pending_outbox()` は `pending` と `task_enqueued` の両方を返すよう変更。Publisherも両状態を処理する。
+- `task_enqueued` の場合はまず `get_task` で既存Taskを確認。存在すれば再作成せず終了。NotFoundならcreate_taskを試し、削除済みTask名のdedupe予約が残っていてALREADY_EXISTSとなる場合はgenerationをtransactionで増やして別名で再登録する。
+- `advance_outbox_task_generation()` は `pending` / `task_enqueued` のみ許可し、`launching`以降は拒否。Cloud Tasksの古い再試行が尽きても、Dispatcherの業務claim gateで二重Job起動を防ぐ。
+- Tests: Cloud Tasks task_enqueued live task / deleted task retry、Firestore Emulatorのtask_enqueued generation rotationとlaunching state拒否を追加。
+- 最新コードcommit: `d4e9c640742ac370786b6d99dd10b0cdf6a04044`, `b1855afd1b33b7954c8bd2a8ba5d84dc48d56408`, `8957f822ce12f6d033a04bff91f23a5bf4d0f0d2`, `80a134a9bcd4522a3be5a74c7618de4e813efd65`, test fix `9dbdffdfd823f992a00913bb20c21b05072d46a2`。この変更を含むCI結果はこれから確認する。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はCloud Tasks unit tests / Firestore Emulatorでtask_enqueued recoveryを確認する。taskが削除されていない間は再登録せず、taskがない場合だけ新generationで再登録することを検証する。
+
+
+## 45. Cloud Tasks retry loopの上限設定（2026-11-13）
+
+- `task_enqueued` outboxのsweep回復を追加した結果、Dispatcherが恒久的に利用不能な場合にCloud Tasksが100回試行→削除→新generationで再登録、を無制限に繰り返し費用が増える可能性を確認。
+- Queueの `max-attempts` を100から10へ変更するRunbook案。
+- Firestore `task_generation` は0～3（合計4世代）まで許可。generation 3のTask名が削除済みで再登録不能になった場合、Firestore transactionでoutbox / execution / orderをreviewへ移し、sweep対象から外して自動再登録を停止。
+- このreview遷移はexecutionがqueuedでowner/slot未取得のときだけ実行する。既にlaunching/runningの実行やtransfer lockを巻き戻さない。
+- Emulator testでgeneration cap到達後のreview遷移、unit testでpublisherが再登録を停止することを追加。コードcommit `86b4f8b9eb9f9d229648ae32acb829a50c1c63a1`, `44f96b20d4cec38f3a54ad58d5505a0fb57b64e7`, `5d3d755607b92d7ddb99b312c7ac33b79baa8e08`, malformed order ref guard `e7a61be6b4382b0d707817d44b581c368d48e560`。最新CIはこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はCloud Tasks retry cap / review transitionのFirestore Emulator testを確認。費用暴走を防ぎつつ、実行開始後はslot/transfer lockを保持する安全性を確認する。
+
+
+## 46. Retry exhausted order metadataを既存review遷移と統一（2026-11-13）
+
+- generation上限到達時のreview遷移を既存 `mark_dispatch_unknown()` と照合し、order側に `job_id=execution_id` と `payment_note=cloud_tasks_retry_exhausted` も記録するよう統一。
+- UI/管理画面がactive executionを同じIDで追跡でき、payment noteで原因を判別できるようにする。executionは `review` / `outcome_unknown=false` のまま（Job起動前のqueue retry exhaustionであり、ゲーム副作用は開始していない）。
+- test_firestore_repository.pyでorder status/job_id/payment_noteを検証。
+- 修正commit `153aa9799c4659573cf241cebd91719d3c5ee84d`、test `f90fcc6ad9a8a3efb03088b8cf5c4178af37c004`。最新HEAD CI/parallel結果はこれから確認。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はretry exhaustionのFirestore Emulator testを再実行し、review後にslot/transfer lockが存在しないこと、UI用job_id/payment_noteが整合することを確認する。
+
+
+## 47. Cloud Tasks fake clientを新get_task契約へ更新（2026-11-13）
+
+- CI run `43445995710` でCloud Tasks publisher unit testsに2件失敗。既存Fake Clientが新しい `get_task` 呼び出しを実装していなかったことと、deleted-task testが削除済み親Fake Clientを継承していたことが原因。
+- 既存のdeterministic task testにlive `get_task` 応答を追加。deleted-task rotation testは独立Fake Clientへ変更し、generation 0のget_task/create_taskがNotFound/AlreadyExists、generation 1のcreate_taskが成功する状況を明示。
+- 本番コード変更ではなくテストfixtureの更新。修正commit `cfd0e754fb91fa9317f52787c01fee6d8f1e56a2`。最新HEAD CI/parallel結果はこれから確認。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はCloud Tasks unit tests、Firestore Emulatorのgeneration上限review遷移、Docker buildを最新HEADで通す。
+
+
+## 48. Cloud Schedulerの実行例とCI成功を記録（2026-11-13）
+
+- Runbook section 11にCloud Schedulerの2ジョブ（`/sweep` / `/reconcile`）をAsia/Tokyo・1分間隔・OIDC audience明示で作成するgcloud例を追加。
+- 最新コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI run `43446372753` は全工程success。Cloud Tasks publisher unit tests、Cloud Run recovery inspector tests、Firestore Emulator integration tests（generation上限review遷移含む）、Docker buildをすべて確認。parallel regression run `43446372769` もsuccess。
+- Runbook変更commitと本checkpointはこの後に保存。専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はScheduler command例の再fetchを確認。続いてCloud Runのrequest-based min=0、Job maxRetries=0、実行時間上限、Cloud Tasks queue retry cap、Secret/Firestore IAMの最終構成を監査する。GCP Project/Billing/credentialsの用意が必要になるまで実環境リソースは作成しない。
+
+
+## 49. Dispatcher Gunicorn bind portのshell展開依存を除去（2026-11-13）
+
+- Dispatcher ServiceのGunicorn起動argsに `--bind 0.0.0.0:$PORT` と書いていたが、Cloud Runのcommand/argsはshellを介さず直接実行されるため、`$PORT` は展開されず文字列のまま渡る可能性がある。
+- RunbookをCloud Run port `8080`、Gunicorn bind `0.0.0.0:8080` に固定するよう修正。WebのDockerfile既定CMDは `sh -c` 内でPORTを展開するため変更不要。
+- Dispatcher command/argsのshell展開依存をなくし、Cloud RunのPORT設定と一致させる。
+- これはRunbookのみの修正。直前コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI/parallelはsuccess。最新docs HEAD CIは確認待ち。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はRunbookのGunicorn bindが8080固定になったことを再fetchして確認する。実Cloud Run deploy時は `--port=8080` を明示する。
+
+
+## 50. 2026-11-13 作業終了チェックポイント
+
+### 本日の到達点
+- Cloud Run / Firestore移行の実装作業は `feature/cloud-run-firestore-foundation` とDraft PR #9に限定。PR #9はopen / draft / 未merge。
+- コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` で通常CIとparallel regressionの両方がsuccess。CIにはCloud Tasks publisher / dispatcher / worker / recovery tests、Firestore Emulator integration tests、Docker image buildを含む。
+- その後のRunbook/docs修正を含むPR headは `ebe2212f1071f7f757b594a011b73f3778f370e2`。このdocs-only headに対するCI結果は未確認。コードCI成功とdocs最新HEAD CIを混同しない。
+- RunbookのDispatcher Gunicorn bindはCloud Run command/argsでshell展開されない `$PORT` を使わず `0.0.0.0:8080` に固定。Schedulerのoutbox sweep / execution reconcile 2 job、Cloud Tasks max-attempts=10、Task Invoker / Scheduler SAのInvoker role記述を確認。
+- Cloud Tasks outbox recovery: `pending` と `task_enqueued` をsweep対象にし、既存Taskをget_taskで確認。削除済みTaskはgenerationを更新して再登録。最大generation 0～3、retry exhaustionではqueued / 未claimのexecutionとorderをreviewへ移して無限再試行を停止。
+- Firestore/Cloud Tasks/Cloud Runの設計、注文/決済トランザクション、OTP single-use、migration guards、Cloud Run execution identity、早期Task delivery race対応を継続実装。
+- 追加のRunbook/IAM/Plan文書はGitHubで再fetchし、Dispatcher port・Scheduler 2 jobs・retry上限・Invoker roleの記述を確認。
+
+### 現在の安全状態
+- Stable `CatsDaiko5` 未変更。Beta `main` 未変更。Render service / settings / deploy / runtime-data 未変更。
+- GCP Project / Billing / IAM / Firestore / Cloud Tasks / Cloud Run / Secret Manager resourcesは未作成。
+- `SHOP_LIVE_ORDERS_ENABLED=0` 維持。PayPay実ログイン・実決済・実注文テスト未実施。
+- `PAYPAY_ENCRYPTION_KEY` 未変更。既存暗号化データの復号可能性を損なう変更はしていない。
+- ユーザーによるGoogle Cloud側の操作はまだ不要。Firebase pluginは今回ユーザーが導入しない選択をしたため、以後もGitHub CIのFirebase CLI + Firestore Emulatorで検証を続ける。
+
+### 次回の再開手順
+1. このファイル、Runbook、IAM matrixを再fetchし、PR #9 headと最新Actions runsを確認。
+2. docs-only commits後のCIが必要なら実行/確認。最新コード変更が入る場合は通常CI + parallel regressionを両方通す。
+3. Firestore workflow / worker / dispatcherの最終監査を続ける。特に実行ログchunk上限、Job launch timeout reconciliation、worker slot/transfer lock回収、OTP expiry/concurrent consume、ログredactionを実コードとEmulator testsで確認。未検証の機能を完了扱いしない。
+4. 移行データの件数・payment digest coverage・PayPay ledger snapshot・account.enc復号チェックの手順を再確認。
+5. PR #9をmergeする前にレビューと全CIを確認し、ユーザーの明示承認を得る。Beta main / Stable main / Render / GCP resourcesを勝手に変更しない。
+6. GCP Project/Billing/credentialsが必要になる段階でユーザーへ具体的に案内する。実PayPay login/payment/orderは必ず事前承認を得る。
+
+次回はこのチェックポイントから再開する。
+
+
+## 50. Web/Worker Secret割当とGitHub token不足を補正（2026-11-13）
+
+- Web Service環境変数監査で、`AUTH_GITHUB_REPO` を設定しているのにGitHubPasswordStore / github_runtime_storeが必要とする `AUTH_GITHUB_TOKEN` の注入がWeb環境変数一覧から抜けていたことを確認。runtime-data read/writeと管理者認証ストアが利用できなくなるため追記。
+- `PAYPAY_ENCRYPTION_KEY` もWeb環境変数一覧に明示。現行Renderと同じ値をWeb/Worker双方へ渡す。変更・再生成禁止。
+- Secretの役割を明確化: Web=`SECRET_KEY`/`PAYPAY_ENCRYPTION_KEY`/`AUTH_GITHUB_TOKEN`（必要なら別RUNTIME token）、Worker=`PAYPAY_ENCRYPTION_KEY`/`TRANSFER_LOCK_PEPPER`、Dispatcher=Secret不要。
+- `RUNTIME_GITHUB_TOKEN` は任意で、未設定時は `AUTH_GITHUB_TOKEN` にfallback。
+- `APP_PASSWORD` は設定しない。公開ショップにサイトアクセスパスワードを要求しない方針を維持。
+- Runbook/IAM matrixのSecret割当を修正。これはdocsのみの変更。直前コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI/parallelはsuccess。最新docs HEAD CIはpending。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はWeb/Worker Secret割当、GitHub token scopes、PayPay keyの同一性要件を再fetchして確認する。実Secret値はチャットやGitHubへ出さず、GCP Project作成時にユーザー側の安全な保管元からSecret Managerへ登録する。
+
+
+## 51. Dispatcherの内部endpoint説明をScheduler構成に統一（2026-11-13）
+
+- Dispatcher section 9にCloud Tasks `/dispatch`、Cloud Scheduler `/sweep` + `/reconcile` の両方を明記。以前はSchedulerが `/sweep` のみを呼ぶ説明で、実際の2-job構成と一致していなかった。
+- Web/Worker Secret mappingとno-site-password方針はRunbook/IAM matrixで再fetch確認済み。
+- 直前コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` のCI/parallelはsuccess。最新docs HEAD CI/parallelは実行中。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はDispatcher endpoint説明と最新CI statusを確認する。
+
+
+## 52. Dispatcher moduleのInvoker説明をCloud Schedulerと統一（2026-11-13）
+
+- `shop_cloud_run_dispatcher_service.py` のmodule docstringがCloud Tasks OIDC SAのみをInvokerとして記載し、Cloud Scheduler OIDC SAを記載していなかった。実際の内部endpointはCloud Tasksが `/dispatch`、Schedulerが `/sweep` / `/reconcile` を呼ぶ。
+- DocstringをCloud Tasks + Cloud Scheduler OIDC service accountへ修正し、role名も `roles/run.invoker` から `roles/run.servicesInvoker` に統一。機能変更なし。
+- 最新コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` はCI/parallel success。今回のcomment修正を含む最新HEAD CIはこれから確認する。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEAD CI/parallelを確認し、dispatcher module docstringとIAM matrixの一致を確認する。
+
+
+## 53. Firestore OTP sessionの期限切れdocumentをbounded cleanup（2026-11-13）
+
+- Firestore OTP sessionは15分のexpires_atを持つが、consume/clear後のdocumentは残る。Firestore TTL deletesはfree tier対象外のためTTLを有効化せず、Dispatcher `/sweep` にcleanupを追加。
+- `cleanup_expired_otp_sessions(limit=100)` は `admin_otp_sessions.expires_at <= now` を最大100件取得し、Firestore batch delete。1 sweepの削除数は100件に制限し、backlogは次の1分周期で順次処理。
+- `/sweep` のレスポンスに `otp_sessions_cleaned` を追加。Cloud Tasks publish後にcleanupする。OTP本文は暗号化済みであり、cleanup logsにはsession IDや内容を出さない。
+- Emulator test `test_expired_otp_sessions_are_deleted_in_bounded_batches` でpending/consumedのexpired docを削除し、未期限docを保持することを確認。
+- 最新コードcommit `a14233d1d6cd6b7813904aacc72e6ed2c2363e3a`, `a0ff3a21366a8c7a77206ef2f7d98ce0d4f06b1c`, `fccd902655e51df26eb5f856f6c8c295098c2bf3`。この変更を含む最新CI/parallel結果はこれから確認。
+- 専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次はOTP cleanupのFirestore Emulator testとDispatcher sweep integrationをCIで確認する。Firestore TTLは引き続き有効化しない。

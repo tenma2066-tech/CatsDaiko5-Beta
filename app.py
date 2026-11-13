@@ -1332,6 +1332,36 @@ def shop_order_status(order_id):
 def shop_submit_credentials(order_id):
     data = request.get_json(silent=True) or {}
     key = data.get("key", "")
+    if shop_store.uses_firestore():
+        order = shop_store.public_order(order_id, key)
+        if not order:
+            return jsonify(error="注文が見つかりません。"), 404
+        if order.get("job_id"):
+            return jsonify(error="この注文は既に処理開始済みです。"), 409
+        operation = shop_store.operation_payload(order_id, key)
+        if not operation:
+            return jsonify(error="注文が見つかりません。"), 404
+        transfer_code = data.get("transfer_code", "")
+        pin = data.get("pin", "")
+        if (operation.get("clone") or operation.get("integrity_only")) and not (transfer_code and pin):
+            return jsonify(error="複製・保全チェックには既存セーブの引継ぎコードと暗証番号が必要です。"), 400
+        try:
+            execution_id = shop_store.submit_credentials_and_enqueue(
+                order_id, key, transfer_code, pin
+            )
+            try:
+                published = shop_store.publish_execution(execution_id)
+            except shop_store.ShopError:
+                published = False
+                app.logger.warning("Cloud Tasks publication pending for order %s", order_id)
+            message = (
+                "引継ぎ情報を受け付け、処理を開始しました。"
+                if published else
+                "引継ぎ情報を受け付けました。処理の起動待ちです。画面を開いたままにしてください。"
+            )
+            return jsonify(ok=True, job=execution_id, message=message)
+        except shop_store.ShopError as exc:
+            return jsonify(error=str(exc)), 409
     claimed = False
     try:
         order = shop_store.public_order(order_id, key)
@@ -1384,6 +1414,19 @@ def shop_order_progress(order_id):
     order = shop_store.public_order(order_id, key)
     if not order:
         return jsonify(error="注文が見つかりません。"), 404
+    if shop_store.uses_firestore():
+        execution_id = order.get("execution_id")
+        if not execution_id:
+            return jsonify(status=order["status"], job_status="not_started")
+        if order.get("status") == "paid" and order.get("job_id") == "queued":
+            try:
+                shop_store.publish_execution(execution_id)
+            except shop_store.ShopError:
+                pass
+        progress = shop_store.execution_progress(order_id, key)
+        if progress is None:
+            return jsonify(error="処理状況を取得できません。"), 404
+        return jsonify(progress)
     job_id = order.get("job_id")
     if not job_id or job_id == "starting":
         return jsonify(status=order["status"], job_status="not_started")
@@ -1417,9 +1460,14 @@ def shop_order_progress(order_id):
 @app.post("/api/shop/order/<order_id>/cancel")
 def shop_order_cancel(order_id):
     data = request.get_json(silent=True) or {}
-    order = shop_store.public_order(order_id, data.get("key", ""))
+    key = data.get("key", "")
+    order = shop_store.public_order(order_id, key)
     if not order:
         return jsonify(error="注文が見つかりません。"), 404
+    if shop_store.uses_firestore():
+        if shop_store.cancel_queued_execution(order_id, key):
+            return jsonify(ok=True, status="cancelled")
+        return jsonify(error="処理がすでに起動中、またはキャンセルできない状態です。"), 409
     job_id = order.get("job_id")
     if not job_id or job_id == "starting":
         return jsonify(error="待機中の処理が見つかりません。"), 404
@@ -1446,6 +1494,41 @@ def shop_paypay_submit(order_id):
     if _too_many_fails("paypay:" + order_id):
         return jsonify(error="決済確認の試行回数が上限に達しました。管理者へお問い合わせください。"), 429
     _fail.setdefault("paypay:" + order_id, []).append(time.time())
+    if shop_store.uses_firestore():
+        try:
+            digest = paypay_gateway.payment_link_digest(data.get("link", ""))
+        except paypay_gateway.PayPayError as exc:
+            return jsonify(error=exc.message), 400
+        if not shop_store.claim_payment_attempt(order_id, digest):
+            return jsonify(error="このPayPayリンクまたは注文は既に処理されています。"), 409
+        try:
+            received_digest = asyncio.run(paypay_gateway.receive_payment(
+                data.get("link", ""), order["amount"], order_id, external_ledger=True
+            ))
+            if received_digest != digest:
+                shop_store.transition_payment_attempt(
+                    order_id, digest, "outcome_unknown", "payment_digest_mismatch"
+                )
+                return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 409
+            shop_store.transition_payment_attempt(order_id, digest, "paid")
+            return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。引継ぎ情報を入力できます。")
+        except paypay_gateway.PayPayError as exc:
+            state = paypay_gateway.payment_failure_state(exc.code)
+            try:
+                shop_store.transition_payment_attempt(order_id, digest, state, exc.code)
+            except shop_store.ShopError:
+                app.logger.error("Could not persist PayPay state for order %s", order_id)
+                return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 409
+            return jsonify(error=exc.message), 400
+        except Exception:
+            try:
+                shop_store.transition_payment_attempt(
+                    order_id, digest, "outcome_unknown", "unexpected_payment_error"
+                )
+            except shop_store.ShopError:
+                pass
+            app.logger.exception("Unexpected Firestore-backed payment error for order %s", order_id)
+            return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 500
     if not shop_store.claim_payment(order_id):
         return jsonify(error="別の決済リクエストを処理中です。画面を更新してください。"), 409
     try:
@@ -1470,7 +1553,7 @@ def admin_paypay_page():
     try: pp_status = paypay_gateway.status()
     except paypay_gateway.PayPayError as exc: pp_status = {"connected":False,"ready":False,"error":exc.message}
     csrf = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
-    otp_waiting = bool(paypay_gateway._pending_otp)
+    otp_waiting = paypay_gateway.otp_pending()
     body = """<div class="card"><h2>PayPay接続</h2><p>接続状態：<b>"""+("受取可能" if pp_status.get("ready") else "未接続・再認証が必要")+"""</b></p>
 <p class="muted">SMS認証はPayPayが要求した場合のみです。認証情報は暗号化して保存されます。</p>
 <form method="post" action="/admin/paypay/connect"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -1510,7 +1593,15 @@ def admin_orders_page():
 {% if o.credentials_submitted %}<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>{% else %}<p>引継ぎ情報：購入者の入力待ち</p>{% endif %}
 <form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
 <select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
-        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed","review"],"completed":[],"cancelled":[]})
+        transitions=(
+            {"awaiting_payment":["review","cancelled"],"payment_processing":["review"],
+             "paid":["review","cancelled"],"review":["paid","cancelled"],
+             "fulfilling":[],"completed":[],"cancelled":[]}
+            if shop_store.uses_firestore() else
+            {"awaiting_payment":["review","cancelled"],"payment_processing":["review"],
+             "paid":["fulfilling","cancelled"],"review":["paid","cancelled"],
+             "fulfilling":["completed","review"],"completed":[],"cancelled":[]}
+        ))
     return _shop_page("注文管理", '<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>'+order_body+'</div>')
 
 @app.post("/admin/orders/<order_id>/status")

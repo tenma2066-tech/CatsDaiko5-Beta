@@ -63,3 +63,30 @@ jobs:
 
       - name: Shop store tests
         run: python -m unittest -v test_shop_store.py
+
+      - name: Cloud Run dispatcher tests
+        run: python -m unittest -v test_cloud_run_dispatcher.py
+
+      - name: Cloud Run worker tests
+        run: python -m unittest -v test_cloud_run_worker.py
+
+      - name: Cloud Run recovery inspection tests
+        run: python -m unittest -v test_cloud_run_recovery.py
+
+      - name: Runtime migration parser tests
+        run: python -m unittest -v test_migrate_runtime_data.py
+
+      - name: Set up Java for Firestore Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Firestore Emulator integration tests
+        run: firebase emulators:exec --only firestore --project demo-catsdaiko5 "python -m unittest -v test_firestore_repository.py"
+
+      - name: Build Cloud Run container image
+        run: docker build --tag catsdaiko5-beta:test .

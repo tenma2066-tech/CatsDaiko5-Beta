@@ -26,6 +26,8 @@ import aiohttp
 from cryptography.fernet import Fernet
 
 import github_runtime_store
+import shop_storage
+from shop_firestore_workflow import FirestoreWorkflowRepository
 
 TOKEN_ENDPOINT = "https://www.paypay.ne.jp/app/v1/oauth/token"
 LINK_CHECK_ENDPOINT = "https://www.paypay.ne.jp/app/v2/p2p-api/getP2PLinkInfo"
@@ -43,7 +45,91 @@ _ACCOUNT_FILE = _ROOT / "account.enc"
 _LEDGER_FILE = Path(os.environ.get("PAYPAY_LEDGER_PATH", str(_ROOT / "payments.sqlite3")))
 _LOCK = threading.Lock()
 _pending_otp: dict = {}
+_otp_workflow = None
+_otp_workflow_lock = threading.Lock()
+_OTP_SESSION_ID = "paypay-admin-session"
 _logger = logging.getLogger(__name__)
+
+
+def _otp_repository():
+    global _otp_workflow
+    if shop_storage.selected_backend() != "firestore":
+        return None
+    with _otp_workflow_lock:
+        if _otp_workflow is None:
+            _otp_workflow = FirestoreWorkflowRepository(shop_storage.firestore_client())
+        return _otp_workflow
+
+
+def _pending_otp_save(data: dict):
+    repository = _otp_repository()
+    if repository is None:
+        _pending_otp.clear()
+        _pending_otp.update(data)
+        return
+    encrypted = _cipher().encrypt(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    try:
+        repository.save_otp_session(_OTP_SESSION_ID, encrypted, time.time() + 600)
+    except Exception as exc:
+        raise PayPayError("otp_store", "SMS認証状態を安全に保存できません。") from exc
+
+
+def _pending_otp_load():
+    repository = _otp_repository()
+    if repository is None:
+        return dict(_pending_otp)
+    encrypted = repository.get_otp_session(_OTP_SESSION_ID)
+    if not encrypted:
+        return {}
+    try:
+        value = json.loads(_cipher().decrypt(encrypted.encode("ascii")))
+    except Exception as exc:
+        raise PayPayError("otp_store", "保存済みSMS認証状態を読み取れません。") from exc
+    if not isinstance(value, dict):
+        raise PayPayError("otp_store", "保存済みSMS認証状態が不正です。")
+    return value
+
+
+def _pending_otp_consume():
+    """Atomically take the pending OTP state so concurrent submissions cannot replay it."""
+    repository = _otp_repository()
+    if repository is None:
+        with _LOCK:
+            if not _pending_otp:
+                return {}
+            value = dict(_pending_otp)
+            _pending_otp.clear()
+            return value
+    try:
+        encrypted = repository.consume_otp_session(_OTP_SESSION_ID)
+    except Exception as exc:
+        raise PayPayError("otp_store", "SMS認証状態を安全に取得できません。") from exc
+    if not encrypted:
+        return {}
+    try:
+        value = json.loads(_cipher().decrypt(encrypted.encode("ascii")))
+    except Exception as exc:
+        raise PayPayError("otp_store", "保存済みSMS認証状態を読み取れません。") from exc
+    if not isinstance(value, dict):
+        raise PayPayError("otp_store", "保存済みSMS認証状態が不正です。")
+    return value
+
+
+def _pending_otp_clear():
+    repository = _otp_repository()
+    if repository is None:
+        _pending_otp.clear()
+        return
+    try:
+        repository.clear_otp_session(_OTP_SESSION_ID)
+    except Exception as exc:
+        raise PayPayError("otp_store", "SMS認証状態を安全に消去できません。") from exc
+
+
+def otp_pending() -> bool:
+    return bool(_pending_otp_load())
 
 class PayPayError(Exception):
     def __init__(self, code: str, message: str):
@@ -192,26 +278,28 @@ async def begin_login(phone: str, password: str):
                            "username":phone,"password":password,"add_otp_prefix":True,"language":"ja"},
                           "https://www.paypay.ne.jp/app/account/sign-in")
     if result["kind"] == "otp":
-        _pending_otp.clear()
-        _pending_otp.update(phone=phone, password=password, uuid=uuid,
-                            otp_reference_id=result["otp_reference_id"], otp_prefix=result["otp_prefix"],
-                            cookies=result.get("cookies", {}))
+        _pending_otp_save({
+            "phone": phone, "password": password, "uuid": uuid,
+            "otp_reference_id": result["otp_reference_id"],
+            "otp_prefix": result["otp_prefix"],
+            "cookies": result.get("cookies", {}),
+        })
         return {"otp_required": True, "prefix": result["otp_prefix"]}
     if not result["session_cookie"]:
         raise PayPayError("cookie_missing", "PayPayログインは応答しましたが、受取セッションを確認できません。")
     _save_account({"phone":phone,"password":password,"uuid":uuid,
                    "access_token":result["access_token"],"session_cookie":result["session_cookie"],
                    "expires_at":time.time()+result["expires_in"]})
-    _pending_otp.clear()
+    _pending_otp_clear()
     return {"otp_required": False}
 
 async def finish_login(otp: str):
     _cipher()
-    p = dict(_pending_otp)
-    if not p:
-        raise PayPayError("otp_expired", "SMS認証の有効期限が切れました。最初からログインしてください。")
     if not OTP_RE.fullmatch(otp or ""):
         raise PayPayError("otp_format", "SMS認証コードは4桁で入力してください。")
+    p = _pending_otp_consume()
+    if not p:
+        raise PayPayError("otp_expired", "SMS認証の有効期限が切れました。最初からログインしてください。")
     result = await _oauth({"scope":"SIGN_IN","grant_type":"otp","client_uuid":p["uuid"],
                            "otp":otp,"otp_prefix":p["otp_prefix"],
                            "otp_reference_id":p["otp_reference_id"],
@@ -222,7 +310,7 @@ async def finish_login(otp: str):
     _save_account({"phone":p["phone"],"password":p["password"],"uuid":p["uuid"],
                    "access_token":result["access_token"],"session_cookie":result["session_cookie"],
                    "expires_at":time.time()+result["expires_in"]})
-    _pending_otp.clear()
+    _pending_otp_clear()
     return {"connected": True}
 
 def _normalize_link(raw: str):
@@ -244,6 +332,14 @@ def _normalize_link(raw: str):
         except ValueError:
             return None
     return urls[0]
+
+def payment_link_digest(raw_link: str) -> str:
+    """Return the stable SHA-256 digest used to prevent PayPay link reuse."""
+    code = _normalize_link(raw_link)
+    if not code:
+        raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
+    return hashlib.sha256(code.encode()).hexdigest()
+
 
 def _parse_time(value):
     if not isinstance(value, str): return None
@@ -314,7 +410,85 @@ def _ledger():
     except github_runtime_store.RuntimeStoreError as exc:
         raise PayPayError("runtime_store", str(exc)) from exc
 
-async def receive_payment(raw_link: str, amount: int, purchase_id: str):
+def payment_failure_state(error_code: str) -> str:
+    """Choose a conservative Firestore attempt state for a PayPay failure."""
+    if error_code == "temporary_hold":
+        return "pending"
+    if error_code == "accept_uncertain":
+        return "outcome_unknown"
+    if error_code in {"accept_unconfirmed", "duplicate", "runtime_store"}:
+        return "review"
+    return "rejected"
+
+
+def _legacy_ledger_contains_digest(digest: str) -> bool:
+    """Check the pre-Firestore ledger without creating or uploading a database."""
+    if github_runtime_store.enabled():
+        encrypted = github_runtime_store.read_blob_readonly(
+            "paypay-ledger.sqlite3"
+        )
+        if encrypted is None:
+            raise PayPayError(
+                "runtime_store",
+                "移行前のPayPay決済台帳が見つからないため、重複確認を実行できません。",
+            )
+        try:
+            raw = _cipher().decrypt(encrypted)
+        except Exception as exc:
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳を復号できません。"
+            ) from exc
+        connection = sqlite3.connect(":memory:")
+        try:
+            connection.deserialize(raw)
+        except sqlite3.DatabaseError as exc:
+            connection.close()
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳が壊れています。"
+            ) from exc
+    else:
+        if not os.path.isfile(_LEDGER_FILE):
+            raise PayPayError(
+                "runtime_store",
+                "移行前のPayPay決済台帳が見つからないため、重複確認を実行できません。",
+            )
+        try:
+            connection = sqlite3.connect(
+                "file:" + os.path.abspath(_LEDGER_FILE) + "?mode=ro", uri=True
+            )
+        except sqlite3.Error as exc:
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳を読み取れません。"
+            ) from exc
+    try:
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "links" not in tables:
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳にlinksテーブルがありません。"
+            )
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(links)")
+        }
+        if not {"digest", "order_id", "state", "created"}.issubset(columns):
+            raise PayPayError(
+                "runtime_store", "移行前のPayPay決済台帳の形式が正しくありません。"
+            )
+        return connection.execute(
+            "SELECT 1 FROM links WHERE digest=? LIMIT 1", (digest,)
+        ).fetchone() is not None
+    except sqlite3.Error as exc:
+        raise PayPayError(
+            "runtime_store", "移行前のPayPay決済台帳を確認できません。"
+        ) from exc
+    finally:
+        connection.close()
+
+
+async def receive_payment(raw_link: str, amount: int, purchase_id: str, *, external_ledger=False):
     code = _normalize_link(raw_link)
     if not code: raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
     with _LOCK:
@@ -327,10 +501,13 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
                                     "add_otp_prefix":True,"language":"ja"},
                                    "https://www.paypay.ne.jp/app/account/sign-in")
             if renewed["kind"] == "otp":
-                _pending_otp.clear()
-                _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
-                                    otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"],
-                                    cookies=renewed.get("cookies", {}))
+                _pending_otp_save({
+                    "phone": account["phone"], "password": account["password"],
+                    "uuid": account["uuid"],
+                    "otp_reference_id": renewed["otp_reference_id"],
+                    "otp_prefix": renewed["otp_prefix"],
+                    "cookies": renewed.get("cookies", {}),
+                })
                 raise PayPayError("otp_required", "PayPayがSMS認証を要求しました。管理者画面で認証コードを入力してください。")
             if not renewed.get("session_cookie"):
                 raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
@@ -349,10 +526,16 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
                 raise PayPayError("link_network", "PayPayリンク確認で通信エラーが発生しました。") from None
             verified=_verify_link(body,amount)
             digest=hashlib.sha256(code.encode()).hexdigest()
-            with _ledger() as db:
-                try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
-                except sqlite3.IntegrityError:
-                    raise PayPayError("duplicate","このPayPayリンクまたは注文は既に処理されています。") from None
+            if external_ledger:
+                # Read the pre-migration ledger without opening the normal
+                # read/write SQLite context. Missing/corrupt history fails closed.
+                if _legacy_ledger_contains_digest(digest):
+                    raise PayPayError("duplicate", "このPayPayリンクは移行前に使用されています。")
+            else:
+                with _ledger() as db:
+                    try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
+                    except sqlite3.IntegrityError:
+                        raise PayPayError("duplicate","このPayPayリンクまたは注文は既に処理されています。") from None
             payload={"requestAt":verified["request_at"],"orderId":verified["order_id"],"requestId":str(uuid4()),
                      "senderChannelUrl":verified["chat_id"],"senderMessageId":verified["message_id"],
                      "verificationCode":code,"client_uuid":account["uuid"],
@@ -363,17 +546,20 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
                     try: reply=await r.json(content_type=None)
                     except Exception: reply=None
             except (aiohttp.ClientError,asyncio.TimeoutError):
-                with _ledger() as db: db.execute("UPDATE links SET state='review' WHERE digest=?",(digest,))
+                if not external_ledger:
+                    with _ledger() as db: db.execute("UPDATE links SET state='review' WHERE digest=?",(digest,))
                 raise PayPayError("accept_uncertain","受取結果が不明です。同じリンクを再送せず、管理者へお問い合わせください。") from None
             ok=(status_code==200 and isinstance(reply,dict) and isinstance(reply.get("header"),dict)
                 and reply["header"].get("resultCode")=="S0000" and isinstance(reply.get("payload"),dict)
                 and reply["payload"].get("orderStatus")=="COMPLETED" and reply.get("error") is None)
             if ok:
-                with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
+                if not external_ledger:
+                    with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
                 return digest
             hold_code = _provider_hold_code(reply)
             state="pending" if hold_code else "review"
-            with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
+            if not external_ledger:
+                with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
             raise PayPayError("temporary_hold" if state=="pending" else "accept_unconfirmed",
                               "PayPay側で一時保留です。状態を確認するまで再送金しないでください。" if state=="pending"
                               else "受取結果を確定できません。再購入せず管理者へお問い合わせください。")

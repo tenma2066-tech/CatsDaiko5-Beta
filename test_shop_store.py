@@ -13,6 +13,7 @@ class ShopStoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         os.environ["SHOP_DB_PATH"] = str(Path(self.tmp.name) / "orders.sqlite3")
+        os.environ["SHOP_STORAGE_BACKEND"] = "legacy"
         os.environ["PAYPAY_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
         os.environ["SHOP_CATALOG_JSON"] = json.dumps([
             {"id": "svc-a", "title": "テスト商品", "price_yen": 1234, "description": "説明"}
@@ -22,8 +23,34 @@ class ShopStoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
-        for key in ("SHOP_DB_PATH", "PAYPAY_ENCRYPTION_KEY", "SHOP_CATALOG_JSON"):
+        for key in ("SHOP_DB_PATH", "PAYPAY_ENCRYPTION_KEY", "SHOP_CATALOG_JSON", "SHOP_STORAGE_BACKEND"):
             os.environ.pop(key, None)
+
+    def test_firestore_selection_fails_closed_without_falling_back(self):
+        os.environ["SHOP_STORAGE_BACKEND"] = "firestore"
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_order("svc-a")
+        self.assertFalse((Path(self.tmp.name) / "orders.sqlite3").exists())
+
+    def test_unknown_storage_backend_is_rejected(self):
+        os.environ["SHOP_STORAGE_BACKEND"] = "typo"
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_order("svc-a")
+
+    def test_catalog_order_preserves_other_service_type(self):
+        order = self.store.create_order("svc-a")
+        self.assertEqual(self.store._row(order["id"])["service_type"], "other-service")
+
+    def test_wrong_access_token_cannot_save_credentials_or_claim_execution(self):
+        order = self.store.create_order("svc-a")
+        self.store.claim_payment(order["id"])
+        self.store.complete_payment(order["id"], "auth-check-digest")
+        with self.assertRaises(self.store.ShopError):
+            self.store.save_credentials(order["id"], "wrong-token", "transfer", "1234")
+        self.store.save_credentials(order["id"], order["access_token"], "transfer", "1234")
+        with self.assertRaises(self.store.ShopError):
+            self.store.claim_execution(order["id"], "wrong-token")
+        self.assertTrue(self.store.claim_execution(order["id"], order["access_token"]))
 
     def test_order_uses_server_catalog_and_hides_credentials_from_public_view(self):
         order = self.store.create_order("svc-a")

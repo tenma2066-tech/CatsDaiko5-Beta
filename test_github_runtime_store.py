@@ -74,6 +74,21 @@ class GitHubRuntimeStoreTests(unittest.TestCase):
             self.assertNotIn(b"legacy-private-value", encrypted)
             self.assertTrue(store._cipher().decrypt(encrypted).startswith(b"SQLite format 3\x00"))
 
+    def test_read_blob_readonly_never_migrates_local_file_to_github(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / "legacy.enc"
+            local.write_bytes(b"local-encrypted-snapshot")
+            result = store.read_blob_readonly("legacy.enc", local)
+            self.assertEqual(result, b"local-encrypted-snapshot")
+            self.assertNotIn("legacy.enc", self.remote)
+
+    def test_read_blob_readonly_returns_none_without_creating_missing_blob(self):
+        self.assertIsNone(store.read_blob_readonly("missing.enc"))
+        self.assertNotIn("missing.enc", self.remote)
+
     def test_blob_round_trip(self):
         store.write_blob("paypay/account.enc", b"already-encrypted-account")
         self.assertEqual(store.read_blob("paypay/account.enc"), b"already-encrypted-account")

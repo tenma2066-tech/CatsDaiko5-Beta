@@ -1,6 +1,12 @@
+import os
+import sqlite3
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
+from cryptography.fernet import Fernet
+
+import github_runtime_store
 import paypay_gateway
 
 
@@ -65,6 +71,89 @@ class PayPayGatewayValidationTests(unittest.TestCase):
         with self.assertRaises(paypay_gateway.PayPayError) as error:
             paypay_gateway._verify_link(body, 1200)
         self.assertEqual(error.exception.code, "expired")
+
+    def test_payment_link_digest_is_stable_for_code_and_url(self):
+        code_digest = paypay_gateway.payment_link_digest("AbCd123456")
+        url_digest = paypay_gateway.payment_link_digest("https://pay.paypay.ne.jp/AbCd123456")
+        self.assertEqual(code_digest, url_digest)
+        self.assertEqual(len(code_digest), 64)
+        with self.assertRaises(paypay_gateway.PayPayError):
+            paypay_gateway.payment_link_digest("https://evil.example/AbCd123456")
+
+    def test_payment_failure_states_fail_closed_for_uncertain_ledger(self):
+        self.assertEqual(paypay_gateway.payment_failure_state("temporary_hold"), "pending")
+        self.assertEqual(paypay_gateway.payment_failure_state("accept_uncertain"), "outcome_unknown")
+        self.assertEqual(paypay_gateway.payment_failure_state("duplicate"), "review")
+        self.assertEqual(paypay_gateway.payment_failure_state("runtime_store"), "review")
+        self.assertEqual(paypay_gateway.payment_failure_state("link_network"), "rejected")
+
+    def test_legacy_ledger_duplicate_check_uses_readonly_encrypted_snapshot(self):
+        key = Fernet.generate_key()
+        db = sqlite3.connect(":memory:")
+        db.execute(
+            "CREATE TABLE links (digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, state TEXT NOT NULL, created REAL NOT NULL)"
+        )
+        digest = "a" * 64
+        db.execute(
+            "INSERT INTO links VALUES (?, ?, ?, ?)",
+            (digest, "0123456789", "paid", 1800000000),
+        )
+        encrypted = Fernet(key).encrypt(db.serialize())
+        db.close()
+        with patch.dict(os.environ, {"PAYPAY_ENCRYPTION_KEY": key.decode("ascii")}):
+            with patch.object(github_runtime_store, "enabled", return_value=True):
+                with patch.object(github_runtime_store, "read_blob_readonly", return_value=encrypted) as read:
+                    self.assertTrue(paypay_gateway._legacy_ledger_contains_digest(digest))
+                    self.assertFalse(paypay_gateway._legacy_ledger_contains_digest("b" * 64))
+                    self.assertEqual(read.call_count, 2)
+
+    def test_legacy_ledger_duplicate_check_fails_closed_when_snapshot_missing(self):
+        with patch.object(github_runtime_store, "enabled", return_value=True):
+            with patch.object(github_runtime_store, "read_blob_readonly", return_value=None):
+                with self.assertRaises(paypay_gateway.PayPayError) as error:
+                    paypay_gateway._legacy_ledger_contains_digest("a" * 64)
+        self.assertEqual(error.exception.code, "runtime_store")
+
+    def test_legacy_ledger_duplicate_check_fails_closed_when_schema_missing(self):
+        key = Fernet.generate_key()
+        db = sqlite3.connect(":memory:")
+        db.execute("CREATE TABLE unrelated (value TEXT)")
+        encrypted = Fernet(key).encrypt(db.serialize())
+        db.close()
+        with patch.dict(os.environ, {"PAYPAY_ENCRYPTION_KEY": key.decode("ascii")}):
+            with patch.object(github_runtime_store, "enabled", return_value=True):
+                with patch.object(github_runtime_store, "read_blob_readonly", return_value=encrypted):
+                    with self.assertRaises(paypay_gateway.PayPayError) as error:
+                        paypay_gateway._legacy_ledger_contains_digest("a" * 64)
+        self.assertEqual(error.exception.code, "runtime_store")
+
+    def test_legacy_otp_state_consume_is_single_use(self):
+        original = dict(paypay_gateway._pending_otp)
+        try:
+            paypay_gateway._pending_otp_clear()
+            paypay_gateway._pending_otp_save({"otp_reference_id": "single-use"})
+            first = paypay_gateway._pending_otp_consume()
+            second = paypay_gateway._pending_otp_consume()
+            self.assertEqual(first["otp_reference_id"], "single-use")
+            self.assertEqual(second, {})
+            self.assertFalse(paypay_gateway.otp_pending())
+        finally:
+            paypay_gateway._pending_otp.clear()
+            paypay_gateway._pending_otp.update(original)
+
+    def test_legacy_otp_state_helpers_keep_existing_in_memory_behavior(self):
+        original = dict(paypay_gateway._pending_otp)
+        try:
+            paypay_gateway._pending_otp_clear()
+            self.assertFalse(paypay_gateway.otp_pending())
+            paypay_gateway._pending_otp_save({"otp_reference_id": "test-ref"})
+            self.assertTrue(paypay_gateway.otp_pending())
+            self.assertEqual(paypay_gateway._pending_otp_load()["otp_reference_id"], "test-ref")
+            paypay_gateway._pending_otp_clear()
+            self.assertFalse(paypay_gateway.otp_pending())
+        finally:
+            paypay_gateway._pending_otp.clear()
+            paypay_gateway._pending_otp.update(original)
 
 
 if __name__ == "__main__":
