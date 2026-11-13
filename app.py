@@ -1340,7 +1340,7 @@ def shop_paypay_submit(order_id):
         shop_store.complete_payment(order_id, digest)
         return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。管理者が注文を確認します。")
     except paypay_gateway.PayPayError as exc:
-        uncertain = exc.code in {"accept_uncertain", "accept_unconfirmed", "temporary_hold", "duplicate"}
+        uncertain = exc.code in {"accept_uncertain", "accept_unconfirmed", "temporary_hold", "duplicate", "runtime_store"}
         shop_store.release_payment(order_id, review=uncertain, note=exc.code)
         return jsonify(error=exc.message), 400
     except shop_store.ShopError as exc:
