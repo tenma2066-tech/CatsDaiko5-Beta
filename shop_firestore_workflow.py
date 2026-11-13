@@ -103,6 +103,12 @@ class FirestoreWorkflowRepository:
         snapshot = self._outbox.document(execution_id).get()
         return snapshot.to_dict() if snapshot.exists else None
 
+    def list_pending_outbox(self, limit: int = 100) -> list[dict[str, Any]]:
+        if type(limit) is not int or not 1 <= limit <= 500:
+            raise ValueError("outbox limit must be between 1 and 500")
+        query = self._outbox.where("state", "==", "pending").limit(limit)
+        return [snapshot.to_dict() for snapshot in query.stream()]
+
     def mark_task_enqueued(self, execution_id: str) -> None:
         reference = self._outbox.document(execution_id)
         transaction = self._client.transaction(max_attempts=5)
@@ -186,17 +192,28 @@ class FirestoreWorkflowRepository:
             execution = execution_ref.get(transaction=tx)
             if not outbox.exists or not execution.exists:
                 raise WorkflowStateError("execution outbox state is incomplete")
+            order_ref = self._orders.document(outbox.to_dict()["order_id"])
+            order = order_ref.get(transaction=tx)
+            if not order.exists:
+                raise WorkflowStateError("order not found")
             if outbox.to_dict().get("state") != "launching":
                 return
+            now = self._clock()
             tx.update(outbox_ref, {
                 "state": "outcome_unknown",
                 "error_code": (safe_error_code or "launch_unknown")[:80],
-                "updated": self._clock(),
+                "updated": now,
             })
             tx.update(execution_ref, {
                 "state": "review",
                 "outcome_unknown": True,
-                "updated": self._clock(),
+                "updated": now,
+            })
+            tx.update(order_ref, {
+                "status": "review",
+                "job_id": execution_id,
+                "payment_note": "cloud_run_launch_unknown",
+                "updated": now,
             })
 
         mark(transaction)
@@ -312,11 +329,16 @@ class FirestoreWorkflowRepository:
             tx.update(order_ref, {
                 "status": target,
                 "job_id": None if success else execution_id,
+                "active_execution_id": None if success else execution_id,
                 "updated": now,
             })
             if slot_ref and slot and slot.exists and slot.to_dict().get("owner") == owner:
                 tx.update(slot_ref, {"state": "released", "released": now, "updated": now})
-            if lock_ref and transfer_lock and transfer_lock.exists and transfer_lock.to_dict().get("owner") == owner:
+            # Keep the account lock on an unknown game-side outcome. Only a
+            # confirmed success or known-safe failure can release it.
+            if (lock_ref and transfer_lock and transfer_lock.exists
+                    and transfer_lock.to_dict().get("owner") == owner
+                    and not outcome_unknown):
                 tx.update(lock_ref, {"state": "released", "released": now, "updated": now})
 
         finish(transaction)
