@@ -1227,7 +1227,7 @@ def shop_create_operation_order():
     data = request.get_json(silent=True) or {}
     try:
         order = shop_store.create_operation_order(
-            data.get("operation"), data.get("service_type"), data.get("quantity")
+            data.get("operation"), data.get("quantity")
         )
         return jsonify(order), 201
     except shop_store.ShopError as exc:
