@@ -68,7 +68,9 @@ class CloudRunDispatcherTests(unittest.TestCase):
         self.assertEqual(second["state"], "duplicate_or_already_claimed")
         self.assertEqual(len(launcher.calls), 1)
         self.assertEqual(launcher.calls[0][2], "slot-0")
-        self.assertEqual(repository.started, "operations/abc")
+        self.assertEqual(repository.started, {
+            "operation_name": "operations/abc", "execution_name": None,
+        })
 
     def test_ambiguous_job_start_is_not_automatically_retried(self):
         repository = FakeRepository()
@@ -95,7 +97,9 @@ class CloudRunDispatcherTests(unittest.TestCase):
         )
         operation = launcher.launch("0123456789", "exec_12345678", "slot-0")
         args = client.request["overrides"]["container_overrides"][0]["args"]
-        self.assertEqual(operation, "operations/123")
+        self.assertEqual(operation, {
+            "operation_name": "operations/123", "execution_name": None,
+        })
         self.assertEqual(args, [
             "--order-id", "0123456789",
             "--execution-id", "exec_12345678",
