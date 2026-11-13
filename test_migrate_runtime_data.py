@@ -74,14 +74,25 @@ class RuntimeMigrationParserTests(unittest.TestCase):
             {"missing": 0, "invalid": 0},
         )
 
-    def test_apply_refuses_to_run_without_global_paypay_ledger_snapshot(self):
+    def test_apply_requires_complete_global_paypay_ledger_snapshot(self):
         from migrate_runtime_data_to_firestore import require_ledger_snapshot_for_apply
 
         with self.assertRaisesRegex(RuntimeError, "ledger snapshot is missing"):
             require_ledger_snapshot_for_apply(None)
         connection = sqlite3.connect(":memory:")
         try:
+            with self.assertRaisesRegex(RuntimeError, "links table is missing"):
+                require_ledger_snapshot_for_apply(connection)
+            connection.execute(
+                "CREATE TABLE links (digest TEXT, order_id TEXT, state TEXT, created REAL)"
+            )
             require_ledger_snapshot_for_apply(connection)
+            connection.execute("DROP TABLE links")
+            connection.execute(
+                "CREATE TABLE links (digest TEXT, order_id TEXT, state TEXT)"
+            )
+            with self.assertRaisesRegex(RuntimeError, "schema is incomplete"):
+                require_ledger_snapshot_for_apply(connection)
         finally:
             connection.close()
 
