@@ -1323,3 +1323,32 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。注文受付 `SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次はRunbookのGunicorn bindが8080固定になったことを再fetchして確認する。実Cloud Run deploy時は `--port=8080` を明示する。
+
+
+## 50. 2026-11-13 作業終了チェックポイント
+
+### 本日の到達点
+- Cloud Run / Firestore移行の実装作業は `feature/cloud-run-firestore-foundation` とDraft PR #9に限定。PR #9はopen / draft / 未merge。
+- コードHEAD `740a0b0f9af717c022271a923ada29b8cb43d26d` で通常CIとparallel regressionの両方がsuccess。CIにはCloud Tasks publisher / dispatcher / worker / recovery tests、Firestore Emulator integration tests、Docker image buildを含む。
+- その後のRunbook/docs修正を含むPR headは `ebe2212f1071f7f757b594a011b73f3778f370e2`。このdocs-only headに対するCI結果は未確認。コードCI成功とdocs最新HEAD CIを混同しない。
+- RunbookのDispatcher Gunicorn bindはCloud Run command/argsでshell展開されない `$PORT` を使わず `0.0.0.0:8080` に固定。Schedulerのoutbox sweep / execution reconcile 2 job、Cloud Tasks max-attempts=10、Task Invoker / Scheduler SAのInvoker role記述を確認。
+- Cloud Tasks outbox recovery: `pending` と `task_enqueued` をsweep対象にし、既存Taskをget_taskで確認。削除済みTaskはgenerationを更新して再登録。最大generation 0～3、retry exhaustionではqueued / 未claimのexecutionとorderをreviewへ移して無限再試行を停止。
+- Firestore/Cloud Tasks/Cloud Runの設計、注文/決済トランザクション、OTP single-use、migration guards、Cloud Run execution identity、早期Task delivery race対応を継続実装。
+- 追加のRunbook/IAM/Plan文書はGitHubで再fetchし、Dispatcher port・Scheduler 2 jobs・retry上限・Invoker roleの記述を確認。
+
+### 現在の安全状態
+- Stable `CatsDaiko5` 未変更。Beta `main` 未変更。Render service / settings / deploy / runtime-data 未変更。
+- GCP Project / Billing / IAM / Firestore / Cloud Tasks / Cloud Run / Secret Manager resourcesは未作成。
+- `SHOP_LIVE_ORDERS_ENABLED=0` 維持。PayPay実ログイン・実決済・実注文テスト未実施。
+- `PAYPAY_ENCRYPTION_KEY` 未変更。既存暗号化データの復号可能性を損なう変更はしていない。
+- ユーザーによるGoogle Cloud側の操作はまだ不要。Firebase pluginは今回ユーザーが導入しない選択をしたため、以後もGitHub CIのFirebase CLI + Firestore Emulatorで検証を続ける。
+
+### 次回の再開手順
+1. このファイル、Runbook、IAM matrixを再fetchし、PR #9 headと最新Actions runsを確認。
+2. docs-only commits後のCIが必要なら実行/確認。最新コード変更が入る場合は通常CI + parallel regressionを両方通す。
+3. Firestore workflow / worker / dispatcherの最終監査を続ける。特に実行ログchunk上限、Job launch timeout reconciliation、worker slot/transfer lock回収、OTP expiry/concurrent consume、ログredactionを実コードとEmulator testsで確認。未検証の機能を完了扱いしない。
+4. 移行データの件数・payment digest coverage・PayPay ledger snapshot・account.enc復号チェックの手順を再確認。
+5. PR #9をmergeする前にレビューと全CIを確認し、ユーザーの明示承認を得る。Beta main / Stable main / Render / GCP resourcesを勝手に変更しない。
+6. GCP Project/Billing/credentialsが必要になる段階でユーザーへ具体的に案内する。実PayPay login/payment/orderは必ず事前承認を得る。
+
+次回はこのチェックポイントから再開する。
