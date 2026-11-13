@@ -72,7 +72,7 @@ class GitHubRuntimeStoreTests(unittest.TestCase):
                                  "legacy-private-value")
             encrypted = self.remote["legacy.sqlite3"]
             self.assertNotIn(b"legacy-private-value", encrypted)
-            self.assertTrue(store._cipher().decrypt(encrypted).startswith(b"SQLite format 3\\x00"))
+            self.assertTrue(store._cipher().decrypt(encrypted).startswith(b"SQLite format 3\x00"))
 
     def test_blob_round_trip(self):
         store.write_blob("paypay/account.enc", b"already-encrypted-account")
