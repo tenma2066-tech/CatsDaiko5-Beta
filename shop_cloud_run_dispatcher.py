@@ -55,9 +55,7 @@ class CloudTasksOutboxPublisher:
             item = self._repository.get_outbox_item(execution_id)
             if not item:
                 raise ValueError("outbox item not found")
-            if item.get("state") == "task_enqueued":
-                return False
-            if item.get("state") != "pending":
+            if item.get("state") not in {"pending", "task_enqueued"}:
                 return False
             task_id = item["task_id"]
             if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", task_id):
@@ -67,6 +65,15 @@ class CloudTasksOutboxPublisher:
                 self._project, self._location, self._queue,
                 f"exec-{task_id}-g{generation}",
             )
+            if item.get("state") == "task_enqueued":
+                # Reconcile a task that may have exhausted retries and been
+                # deleted while its outbox record still says task_enqueued.
+                try:
+                    self._client.get_task(request={"name": task_name})
+                except NotFound:
+                    pass
+                else:
+                    return False
             task = tasks_v2.Task(
                 name=task_name,
                 http_request=tasks_v2.HttpRequest(
