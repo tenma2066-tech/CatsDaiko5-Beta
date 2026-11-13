@@ -1010,3 +1010,42 @@ F. execution完了:
 - 今回のコードcommit: e40e0cb190e1c51893c6c98051662f2d63840ab4 / 6ff279294f9679ce787bd68c936c1e0d521c67be / ca40a9013b0fb819a976a156984219ec7e12cf9c。
 - 次は最新CIでFirestore Emulator testを含む成功を確認する。次の大きな課題はworker snapshotのbounded chunk化とoutbox retry/reaperの回復ロジック。
 
+
+
+## 27. Firestore文書サイズ保護・OTP並行試験・Dispatcher孤立起動の検出（2026-11-13）
+
+### 27.1 Firestore execution snapshotのサイズ上限
+
+- Worker progress / log / report / audit / 暗号化resultは現在execution documentへ保存する構造。Firestoreの1MiB document上限に対し、report・audit・resultは要素数だけではサイズを制限できない問題を確認。
+- `shop_firestore_workflow.py` にFirestore payloadサイズの保守的な見積もりを追加。snapshotの推定サイズが700KiBを超える場合は `execution_snapshot_too_large` でtransactionを拒否し、Firestore書き込み前に停止する。
+- ログ・警告・report・audit・暗号化resultを黙って切り捨てない。Worker側ではprogress保存失敗として扱われ、処理結果を成功扱いせずreview / outcome_unknown側へ倒す。
+- これはdocument上限超過を防ぐ暫定ガードであり、ログ・reportをsubcollectionのbounded chunksへ分割する最終方式ではない。chunk化は引き続き実装課題。
+
+### 27.2 OTPの期限切れ・同時consume試験
+
+- Firestore Emulator testに期限切れ後のconsume拒否を追加。
+- 2つの並行consumerが同じOTP sessionを取得しようとしても、片方だけが暗号化stateを受け取り、もう片方はNoneになることを追加検証。
+- OTP stateは暗号化状態でのみ保存。OTP値そのものをFirestoreやログに保存しない。
+
+### 27.3 Dispatcher停止時の孤立launch検出
+
+- Dispatcherがslotを予約し、Cloud Run JobのExecution名をFirestoreへ保存する前に終了すると、従来のreconcilerではExecution名がなく、starting / reservedのまま残り続ける経路を発見。
+- `/reconcile` にstale launch監視を追加。Execution名が記録されないstarting状態が既定600秒（環境変数 `CLOUD_RUN_STALE_LAUNCH_SECONDS` で調整）を超えた場合、outboxをoutcome_unknown、注文・executionをreviewへ変更する。
+- これはJobが起動していない証拠ではないため、slotは自動解放しない。重複起動・ゲーム側二重操作を防ぐ安全側の動作。管理者がCloud Run Job Executionsと注文状態を照合してから手動復旧する必要がある。
+- Emulator testでunknown launch後に注文/execution/outboxがreview/outcome_unknownになり、reserved slotが維持されることを追加検証。
+
+### 27.4 最新検証状況
+
+- commit `10be1090aab930c407376fe973ae4ff3e50b3e37` のCI run `43438124320` と並列回帰run `43438124302` は両方success。snapshot guardの構文・Application self-testを含む全ステップ成功。
+- その後、stale launch検出とEmulator testを追加。最新HEAD commit `3793bc05f83f3c7849e588b908f9ee7bd9a16f3d` のCI run `43438423147` と並列回帰run `43438423301` は確認時点で実行中。Firestore Emulator統合テストの最終結果は未確認。
+- 途中commit `994a5ea622957c4cd914e8c99921b7337cb06160` は補助関数の改行エスケープ不備によりApplication self-testが失敗した。修正commit `10be1090aab930c407376fe973ae4ff3e50b3e37` で同テストは成功し、その後のrunも全ステップ成功。
+
+### 27.5 未完了ゲート・安全状態
+
+- Worker log / warn / report / audit / resultのbounded chunk subcollection化と管理画面・購入者進捗APIの読み出し統合。
+- Stale launchでreserved slotを保持した場合の管理者向け照合・解除手順と安全な復旧操作。
+- PayPay旧ledger全状態・重複リンク履歴の実データdry-run照合、旧account.encの移行方針、OTP再ログインの実機確認。
+- Firestore Emulator最新HEADのCI成功、Security Rules / IAM最小権限、GCP実環境でのCloud Run/Tasks/Firestore検証、費用実測。
+- 専用branch `feature/cloud-run-firestore-foundation` / Draft PR #9のみ変更。Beta main・安定版CatsDaiko5・Render・runtime-dataは未変更。GCPリソース未作成。実PayPayログイン・決済・実注文なし。 `SHOP_LIVE_ORDERS_ENABLED=0` を維持。`PAYPAY_ENCRYPTION_KEY` は変更なし。
+
+次は最新CIのFirestore Emulator結果を確認し、失敗を修正する。続けてbounded log chunksと管理者向けunknown launch復旧手順を完成させ、PayPay ledger移行の実データdry-run照合へ進む。ユーザーのGCP project/billing設定が必要になるまでは、Render・GCP・実注文に触れない。
