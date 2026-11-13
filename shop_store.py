@@ -14,6 +14,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
 import shop_storage
+from shop_payment_repository import PaymentRepositoryError, SQLitePaymentRepository
 
 DB_PATH = Path(os.environ.get("SHOP_DB_PATH", "instance/shop.sqlite3"))
 ORDER_ID_RE = re.compile(r"^[A-Z0-9]{10}$")
@@ -66,6 +67,9 @@ def _db():
             yield con
     except shop_storage.ShopStorageError as exc:
         raise ShopError(str(exc)) from exc
+
+_payment_repository = SQLitePaymentRepository(_db)
+
 
 def catalog():
     raw = os.environ.get("SHOP_CATALOG_JSON", "").strip()
@@ -261,28 +265,24 @@ def release_execution(order_id: str):
 
 
 def claim_payment(order_id: str):
-    with _db() as db:
-        db.execute("BEGIN IMMEDIATE")
-        changed = db.execute("""UPDATE orders SET status='payment_processing',updated=?
-                                WHERE id=? AND status='awaiting_payment'""",
-                             (time.time(), order_id))
-        return changed.rowcount == 1
+    try:
+        return _payment_repository.claim_payment(order_id)
+    except PaymentRepositoryError as exc:
+        raise ShopError(str(exc)) from exc
+
 
 def release_payment(order_id: str, *, review=False, note=""):
-    target = "review" if review else "awaiting_payment"
-    with _db() as db:
-        changed = db.execute("""UPDATE orders SET status=?,payment_note=?,updated=?
-                                WHERE id=? AND status='payment_processing'""",
-                             (target, (note or "")[:300], time.time(), order_id))
-        return changed.rowcount == 1
+    try:
+        return _payment_repository.release_payment(order_id, review=review, note=note)
+    except PaymentRepositoryError as exc:
+        raise ShopError(str(exc)) from exc
+
 
 def complete_payment(order_id: str, payment_digest: str):
-    with _db() as db:
-        changed = db.execute("""UPDATE orders SET status='paid',payment_digest=?,payment_note='',
-                                updated=? WHERE id=? AND status='payment_processing'""",
-                             (payment_digest, time.time(), order_id))
-        if changed.rowcount != 1:
-            raise ShopError("決済後の注文状態を確定できません。管理者による確認が必要です。")
+    try:
+        return _payment_repository.complete_payment(order_id, payment_digest)
+    except PaymentRepositoryError as exc:
+        raise ShopError(str(exc)) from exc
 
 def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: str):
     transfer_code, pin = (transfer_code or "").strip(), (pin or "").strip()
