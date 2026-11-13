@@ -390,8 +390,9 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.client.collection("worker_slots").document("slot-0").delete()
 
     def test_legacy_import_is_create_only_and_marks_old_active_job_for_review(self):
+        legacy_order_id = secrets.token_hex(5).upper()
         values = {
-            "id": self.order_id,
+            "id": legacy_order_id,
             "access_hash": self.access_hash,
             "sku": "legacy",
             "title": "legacy order",
@@ -410,11 +411,12 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         }
         self.assertTrue(self.orders.import_legacy_order(values))
         self.assertFalse(self.orders.import_legacy_order(values))
-        imported = self.orders.get_order(self.order_id)
+        imported = self.orders.get_order(legacy_order_id)
         self.assertEqual(imported["status"], "review")
         self.assertIsNone(imported["job_id"])
         self.assertIsNone(imported["active_execution_id"])
         self.assertTrue(imported["legacy_imported"])
+        self.client.collection("orders").document(legacy_order_id).delete()
 
     def test_legacy_paypay_attempt_import_maps_attempted_to_unknown(self):
         digest = secrets.token_hex(32)
