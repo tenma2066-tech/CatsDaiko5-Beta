@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.8"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: BCSFE API compatibility
+        run: python smoke_bcsfe.py
+
+      - name: Application self-test
+        run: python selftest.py
+
+      - name: Unit tests
+        run: |
+          python -m unittest -v test_save_audit.py
+          python -m unittest -v test_save_repair.py
+          python -m unittest -v test_parallel.py
+          python -m unittest -v test_improvements.py
+          python -m unittest -v test_cat_customization.py
+          python -m unittest -v test_github_auth_store.py
