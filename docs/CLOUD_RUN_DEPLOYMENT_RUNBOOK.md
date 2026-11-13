@@ -152,7 +152,7 @@ WorkerはCloud Run標準環境変数 `CLOUD_RUN_EXECUTION` を実行ownerとし�
 - `CLOUD_RUN_DISPATCHER_AUDIENCE`（Dispatcher Service URLと同じaudience）
 - `CLOUD_RUN_STALE_LAUNCH_SECONDS=600`
 
-Dispatcherは**unauthenticated accessを無効**にする。Cloud Tasksは `/dispatch`、Cloud Schedulerは `/sweep` を呼ぶ。QueueからのOIDCとCloud Run IAMで認証し、アプリ側で公開エンドポイントとして扱わない。
+Dispatcherは**unauthenticated accessを無効**にする。Cloud Tasksは `/dispatch`、Cloud Schedulerは `/sweep` と `/reconcile` を呼ぶ。Queue / SchedulerのOIDCとCloud Run IAMで認証し、アプリ側で公開エンドポイントとして扱わない。
 
 `/dispatch` はFirestore transactionで4枠のうち1枠を予約してからJobを起動する。空きslotがない場合はHTTP 503でCloud Tasksに再試行させる。起動APIの応答が不明な場合は自動再起動せず、注文をreviewにしてslotを保留する。
 
