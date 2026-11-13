@@ -200,7 +200,7 @@ class FirestorePaymentRepository:
         self, order_id: str, payment_digest: str, state: str, note: str = "",
     ) -> None:
         allowed = {
-            "attempted": {"pending", "paid", "review", "outcome_unknown"},
+            "attempted": {"pending", "paid", "review", "outcome_unknown", "rejected"},
             "pending": {"paid", "review", "outcome_unknown"},
             "outcome_unknown": {"paid", "review"},
             "review": {"paid"},
@@ -208,6 +208,8 @@ class FirestorePaymentRepository:
         }
         if state not in allowed:
             raise ValueError("invalid payment attempt state")
+        if not re.fullmatch(r"[0-9a-f]{64}", payment_digest or ""):
+            raise ValueError("payment digest must be a SHA-256 hex digest")
         order_ref = self._orders.document(order_id)
         attempt_ref = self._attempts.document(payment_digest)
         transaction = self._client.transaction(max_attempts=5)
@@ -234,6 +236,7 @@ class FirestorePaymentRepository:
             })
             order_state = (
                 "paid" if state == "paid"
+                else "awaiting_payment" if state == "rejected"
                 else "review" if state in {"review", "outcome_unknown"}
                 else "payment_processing"
             )
@@ -261,8 +264,12 @@ class FirestorePaymentRepository:
         return claim(transaction)
 
     def release_payment(self, order_id: str, *, review=False, note="") -> bool:
+        if not review:
+            raise PaymentRepositoryError(
+                "Firestore決済はリンク単位の状態遷移が必要です。自動的に再受付へ戻しません。"
+            )
         reference = self._orders.document(order_id)
-        target = "review" if review else "awaiting_payment"
+        target = "review"
         transaction = self._client.transaction(max_attempts=5)
 
         @firestore.transactional
