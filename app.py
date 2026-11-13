@@ -1330,12 +1330,12 @@ def admin_orders_page():
     if not session.get("admin"): return redirect("/admin")
     rows=shop_store.admin_orders()
     csrf=session.setdefault("admin_csrf",secrets.token_urlsafe(32))
-    return render_template_string("""<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>
-{% for o in rows %}<div class="card"><b>{{ o.id }} / {{ o.title }} / {{ o.amount }}円</b><p>状態：{{ o.status }}</p>
+    order_body=render_template_string("""{% for o in rows %}<div class="card"><b>{{ o.id }} / {{ o.title }} / {{ o.amount }}円</b><p>状態：{{ o.status }}</p>
 <p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>
 <form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
-<select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}</div>""", rows=rows, csrf=csrf,
+<select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
         transitions={"awaiting_payment":["review","cancelled"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed"],"completed":[],"cancelled":[]})
+    return _shop_page("注文管理", '<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>'+order_body+'</div>')
 
 @app.post("/admin/orders/<order_id>/status")
 def admin_order_status(order_id):
