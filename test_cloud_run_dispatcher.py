@@ -19,6 +19,10 @@ class FakeRepository:
         self.launch_claims = 0
         self.unknown = None
         self.started = None
+        self.outbox_order_id = "0123456789"
+
+    def get_outbox_item(self, execution_id):
+        return {"order_id": self.outbox_order_id, "execution_id": execution_id}
 
     def begin_dispatch(self, execution_id):
         if self.state != "task_enqueued":
@@ -74,6 +78,16 @@ class CloudRunDispatcherTests(unittest.TestCase):
         self.assertEqual(repository.started, {
             "operation_name": "operations/abc", "execution_name": None,
         })
+
+    def test_dispatch_rejects_payload_order_mismatch_before_reserving_slot(self):
+        repository = FakeRepository()
+        launcher = FakeLauncher()
+        repository.outbox_order_id = "9999999999"
+        payload = {"order_id": "0123456789", "execution_id": "exec_12345678"}
+        with self.assertRaisesRegex(ValueError, "binding mismatch"):
+            handle_dispatch_payload(payload, repository, launcher)
+        self.assertEqual(repository.launch_claims, 0)
+        self.assertEqual(launcher.calls, [])
 
     def test_ambiguous_job_start_is_not_automatically_retried(self):
         repository = FakeRepository()
