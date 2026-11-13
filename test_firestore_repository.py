@@ -692,6 +692,26 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.client.collection("transfer_locks").document(lock_digest).delete()
         self.client.collection("orders").document(self.order_id).delete()
 
+    def test_expired_otp_sessions_are_deleted_in_bounded_batches(self):
+        workflow = FirestoreWorkflowRepository(self.client, clock=lambda: 1000.0)
+        otp = self.client.collection("admin_otp_sessions")
+        otp.document("expired_pending_000001").set({
+            "state": "pending", "expires_at": 900.0, "encrypted_state": "cipher-a",
+        })
+        otp.document("expired_consumed_0002").set({
+            "state": "consumed", "expires_at": 950.0, "encrypted_state": "cipher-b",
+        })
+        otp.document("still_valid_00000003").set({
+            "state": "pending", "expires_at": 1100.0, "encrypted_state": "cipher-c",
+        })
+        self.assertEqual(workflow.cleanup_expired_otp_sessions(limit=1), 1)
+        self.assertEqual(workflow.cleanup_expired_otp_sessions(limit=100), 1)
+        self.assertEqual(workflow.cleanup_expired_otp_sessions(limit=100), 0)
+        self.assertFalse(otp.document("expired_pending_000001").get().exists)
+        self.assertFalse(otp.document("expired_consumed_0002").get().exists)
+        self.assertTrue(otp.document("still_valid_00000003").get().exists)
+        otp.document("still_valid_00000003").delete()
+
     def test_otp_session_consume_is_atomic_and_single_use(self):
         workflow = FirestoreWorkflowRepository(self.client)
         session_id = "otp_" + secrets.token_hex(12)
