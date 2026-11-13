@@ -32,12 +32,15 @@
 - 管理者ログイン後、`/admin` で管理者モードを解除し、`/admin/paypay` でPayPay接続、`/admin/orders` で注文を確認する。
 - PayPayのSMS認証はPayPay側が要求した場合だけ行う。SMSコードは管理画面から入力する。
 - `SHOP_LIVE_ORDERS_ENABLED` は初期値 `0`。ベータ専用永続ディスク・暗号化キー・商品カタログ・PayPay接続の確認が完了するまで `1` にしない。無効中は公開ページを閲覧できるが、注文・決済・PayPay接続を受け付けない。
-- 商品はRender環境変数 `SHOP_CATALOG_JSON` にJSON配列で設定する。例：
-  `[{"id":"sample-service","title":"サンプル商品","price_yen":1000,"description":"説明"}]`
-  実際の販売商品名・価格に置き換えること。金額はサーバー側カタログを正とし、ブラウザーから送られた金額は使用しない。
+- 初期商品は「キャラ特定選択」50円/体、「その他の代行」25円/体。数量を指定するとサーバー側で単価×数量を計算する（1〜100体、合計100万円以下）。
+- 商品を変更する場合だけRender環境変数 `SHOP_CATALOG_JSON` にJSON配列を設定する。例：
+  `[{"id":"character-specific","title":"キャラ特定選択","unit_price_yen":50},{"id":"other-service","title":"その他の代行","unit_price_yen":25}]`
+- 金額はサーバー側カタログを正とし、ブラウザーから送られた金額は使用しない。
 - `PAYPAY_ENCRYPTION_KEY` は `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` で一度生成し、RenderのSecretとして設定して以後変更しない。変更すると保存済みのPayPay認証情報と注文内の引継ぎ情報を復号できなくなる。
-- `PAYPAY_DATA_DIR`、`PAYPAY_LEDGER_PATH`、`SHOP_DB_PATH` は同一のベータ専用永続ディスク上に置く。**永続ディスクを接続するまでは実決済を受け付けないこと**。Render Freeの一時ファイル領域では再起動・再デプロイ時に注文や認証情報が失われる可能性がある。
+- `PAYPAY_DATA_DIR`、`PAYPAY_LEDGER_PATH`、`SHOP_DB_PATH` は同一のベータ専用永続ディスク上に置く。現行 `render.yaml` はFreeプランでdisk定義もないため、このままでは永続化されない。Render Free Web Serviceは永続ディスクを利用できない。管理者が所有・管理するRender Workspaceで有料Web Serviceへ変更し、`/var/data` にdiskを接続してから実決済を有効化すること。課金が発生する変更は管理者がRender Dashboardで確認して実行する。
 - 安定版のディスク、PayPayアカウント情報、暗号化キー、DBは共有しない。
 - 注文の引継ぎコード・暗証番号は暗号化して保存し、公開注文照会APIには返さない。管理者の注文画面だけで確認できる。
+- 決済開始時にDBの条件付き更新で注文を `payment_processing` に確保し、同一注文への同時リクエストは1件だけ通す。PayPay受取台帳にも送金リンクdigestと注文IDのUNIQUE制約を設ける。
+- SQLiteを使うためRenderは1サービスインスタンス・gunicorn 1 workerを維持する。永続ディスクは複数インスタンス間で共有できない。
 - PayPayリンク受取の結果が不明・一時保留・重複の場合は注文を確認待ちにし、同じリンクを自動再試行しない。PayPayアプリ側の状態を確認してから管理者が手動で判断する。
 - このゲートウェイはアップロードされたDiscord版の非公式WebプロトコルをWeb向けに移植したもの。PayPay公式SDK/APIではなく、仕様変更・利用制限・アカウント制限のリスクがある。実決済前に少額のテストを行い、決済結果をPayPayアプリでも確認すること。
