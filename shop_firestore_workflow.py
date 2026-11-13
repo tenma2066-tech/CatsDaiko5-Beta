@@ -195,7 +195,8 @@ class FirestoreWorkflowRepository:
             if not snapshot.exists:
                 raise WorkflowStateError("outbox item not found")
             state = snapshot.to_dict().get("state")
-            if state == "task_enqueued":
+            if state in {"task_enqueued", "launching", "dispatched",
+                         "outcome_unknown", "cancelled"}:
                 return
             if state != "pending":
                 raise WorkflowStateError("outbox is not pending")
@@ -217,7 +218,10 @@ class FirestoreWorkflowRepository:
             if not outbox.exists or not execution.exists:
                 raise WorkflowStateError("execution outbox state is incomplete")
             outbox_data = outbox.to_dict()
-            if outbox_data.get("state") != "task_enqueued":
+            # Cloud Tasks may deliver immediately after create_task and
+            # before the publisher can persist task_enqueued. Accept pending
+            # here so that a delivered task is never acknowledged and lost.
+            if outbox_data.get("state") not in {"pending", "task_enqueued"}:
                 return None
             order_ref = self._orders.document(outbox_data["order_id"])
             order = order_ref.get(transaction=tx)
