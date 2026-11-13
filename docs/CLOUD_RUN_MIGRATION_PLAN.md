@@ -376,3 +376,71 @@ GitHub runtime-dataの扱い:
 - Secret Manager pricing: https://cloud.google.com/secret-manager/pricing
 - Cloud Logging pricing: https://cloud.google.com/logging/pricing
 
+
+
+## 13. Phase 1 追加調査：現行コードのDB・Worker境界（2026-11-13）
+
+### 13.1 注文DBの現状
+
+`shop_store.py` を確認。ショップDBは現在SQLiteの `orders` テーブル1つを中心に構成され、主な列は次のとおり。
+
+- 識別・権限: `id`, `access_hash`
+- 商品・金額: `sku`, `title`, `amount`, `unit_price_yen`, `quantity`, `service_type`
+- 暗号化データ: `credential_enc`, `operation_enc`
+- 決済: `status`, `payment_digest`（UNIQUE）, `payment_note`
+- 処理管理: `credentials_submitted`, `job_id`
+- 時刻: `created`, `updated`
+
+注文状態の遷移はコードで制限されている。主な状態は `awaiting_payment` → `payment_processing` → `paid` → `fulfilling` → `completed`。異常時の `review`、キャンセル `cancelled` もある。決済digestの一意性と条件付き更新は移行後も維持が必要。
+
+`credential_enc` には引継ぎコード・暗証番号、`operation_enc` には選択内容がFernet暗号化されて保存される。Firestore移行時も暗号文をそのまま保存し、既存のFernet鍵を変更しない。アクセス用tokenそのものではなくSHA-256 hash（`access_hash`）を保存する設計も維持する。
+
+### 13.2 現行Workerのプロセス内状態
+
+`app.py` では次の状態がメモリ・ローカルファイルに依存している。
+
+- `_jobs`: Jobの進捗・ログ・警告・結果・所有者等。
+- `_pending_jobs`: 待機キュー。注文資格情報を含む引数tupleもメモリに置かれる。
+- `_slots`: 同時実行枠とwarmup枠。
+- `_active_transfers`: 引継ぎコード重複実行防止用のプロセス内set。
+- `_jobs_lock`, `_run_lock`, `_init_lock`: Pythonプロセス内のロック。
+- `fcntl.flock`: コンテナのローカルファイルシステム上のロック。
+- Jobの進捗はPipeで親プロセスへ送られ、Web側の `_jobs` に反映される。結果保持は30分、待機期限は15分。
+- BCSFEの準備済みデータ、キャッシュ、名前カタログ、ゲームバージョンの一部は `/tmp` とプロセスメモリにある。
+
+Cloud Runの別Service・別Job・別コンテナ間でこれらのメモリ・ローカルロックを共有することはできない。Cloud Runへ単純に載せ替えると、進捗消失、重複実行、同時実行上限の破綻、コンテナ終了による状態消失が起こり得る。
+
+### 13.3 必要なFirestoreデータモデル（設計案）
+
+SQLiteの1注文レコードをそのまま1ドキュメントへ移すだけでは不十分。最低限、次の論理データを分離する。
+
+1. `orders/{order_id}`: 注文情報、金額、商品、状態、暗号化済み資格情報・操作内容、access hash、決済digest、時刻。
+2. `executions/{execution_id}`: 注文との関連、Job状態、step、進捗、短いログ・警告・結果、開始・終了時刻、outcome_unknown。
+3. `transfer_locks/{hmac_digest}`: 引継ぎコードの重複実行ロック。平文コードはキー・ログ・ドキュメントIDに使わず、鍵付きHMAC digestを使う。lease owner・期限・実行IDを保存し、トランザクションで取得・更新・解放する。
+4. `worker_slots/{slot_id}`: 全Jobを横断する同時実行枠の予約。最初は4枠を上限候補とし、実機測定で決める。取得・解放・期限管理をFirestoreトランザクションで行う。
+5. 必要に応じて `task_outbox/{task_id}`: DB状態更新とCloud Tasks投入の間で片方だけ成功する問題を防ぐOutbox。再送可能な状態を保存し、dispatcherが冪等に送信する。
+
+実際のコレクション分割・サブコレクション・インデックスは、Firestoreのトランザクション制約とアクセスパターンを整理してから確定する。Jobのログはサイズ・件数上限を設け、1ドキュメントのサイズ上限に達しないよう分割・要約する。決済・注文状態の監査に必要な履歴は、単一の可変フィールドで上書きせず、追記型イベントとして保存する案を検討する。
+
+### 13.4 Cloud Tasks / Jobの同時実行制御に関する重要点
+
+Cloud Tasksの `maxConcurrentDispatches` はDispatcherへの同時HTTP dispatchを制限する設定であり、DispatcherがJob起動後すぐに成功応答を返す設計では、実行中Cloud Run Jobsの総数を直接制限できない。
+
+そのため、既存の `MAX_CONCURRENT_JOBS=4` 相当の制限を守るには、DispatcherとJobの間でFirestore上の共有slot leaseを取得する必要がある。slotが取れない場合のCloud Tasks再試行、Job終了時のslot解放、Job異常終了時のlease回収・状態照合を設計する。lease期限切れだけを理由に処理中Jobのslotを即時再利用すると、元Jobがまだ動いている場合に重複処理となるため、Cloud Run Job execution状態と照合する回復処理が必須。
+
+### 13.5 実装時に守るべき境界
+
+- 注文受付Webは引継ぎコード・暗証番号をTask payload、Job引数、URL、ログへ載せない。
+- Jobは `order_id` と `execution_id` のみを起点にDBから対象注文を取得し、実行権限・支払済み・資格情報提出済み・execution所有者を再検証してから復号する。
+- 既存の `claim_payment` / `complete_payment` / `claim_execution` / `set_status` の状態遷移をFirestoreトランザクションまたは条件付き更新で再現する。
+- 決済処理とゲーム処理は同じ再試行ポリシーにしない。決済状態不明やゲーム側のコード発行結果不明は、自動再実行せず `review` / `outcome_unknown` へ移す。
+- Webの `/status/<job_id>` はメモリ上のJob辞書ではなく永続DBのexecution状態から返す。セッションのowner照合も永続データと合わせて行う。
+- Jobは注文単位で実行するが、ユーザー操作のキャンセル・進捗確認は永続状態とCloud Run Job execution制御の両方を扱う。
+- `/tmp` のBCSFEキャッシュはJob間で共有できない。コンテナイメージへ含める方法、Cloud Storage等の共有キャッシュ、毎回取得する方法を、イメージサイズ・起動時間・転送費用・ゲームデータ更新頻度で比較する。
+
+### 13.6 現時点の評価
+
+Firestoreを主DBにする場合、ショップのSQLite利用箇所だけでなく、Workerの進捗・キュー・同時実行枠・重複防止をまとめて移行する必要がある。特に決済とゲーム実行の結果不明状態を安全に表現することが最重要。単純なDBアダプター差し替えだけでは完成しない。
+
+この調査はコード読解のみ。アプリコード、Render、runtime-data、注文受付設定、PayPay設定は変更していない。
+
