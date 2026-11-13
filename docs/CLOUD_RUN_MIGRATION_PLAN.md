@@ -620,3 +620,41 @@ F. execution完了:
 - Cloud Run Jobs create / retries / parallelism: https://docs.cloud.google.com/run/docs/create-jobs
 - USD/JPY reference rate (2026-11-13): https://www.boj.or.jp/en/statistics/market/forex/fxdaily/fxlist/fx261113.pdf
 
+
+
+## 16. Phase 1 設計レビュー：Firestore / Cloud Tasksの制約反映（2026-11-13）
+
+### 16.1 Firestoreサイズ・TTL
+
+- Firestore documentは最大1MiB - 4 bytes。注文ドキュメントにログ配列やゲームデータ、巨大なAPI応答を入れない。
+- transactionの最大request sizeは10MiB。更新対象ドキュメントとindex entryもサイズに含まれるため、暗号文・イベント・ログを無制限に同一transactionへ詰めない。
+- Firestore TTL deleteは無料枠に含まれず課金対象。初期実装ではTTL policyを有効にしない。期限切れOTP、lease、ログchunkはアプリ側でexpiryを判定し、低頻度のcleanup処理で件数を制限して削除する。cleanupの実行頻度と削除量も費用試算へ含める。
+- Firestore transactionでは全readをwriteより前に実行し、transaction callbackの再実行を前提に副作用を置かない。
+
+### 16.2 Cloud Tasksの重複配信
+
+- Cloud Tasksはat-least-once delivery。非常に稀でも同じtaskが複数回配送されるため、Task名の重複排除だけを安全性の根拠にしない。
+- 同じtask名は削除後最大24時間記憶されるが、これも永続的な業務idempotencyではない。Firestoreのexecution claimと状態遷移を最終的な重複防止境界にする。
+- Cloud Tasks HTTP targetはDispatcherが2xxを返すまでタスクを再試行し得る。HTTP targetの通常deadlineは10分、最大30分。DispatcherはJob起動要求と起動結果の記録だけを行い、BCSFE処理を待たずに短時間で応答する。
+- Job起動APIの応答が不明な場合、Dispatcherが盲目的に別executionを作らない。Cloud Run Job executionの状態照合とexecution_id claimを行い、重複起動しても未claimのJobだけが安全に終了する設計にする。
+
+### 16.3 追加した実装受入条件
+
+1. Firestoreのorders documentに平文のtransfer code、PIN、PayPay password、access token、session cookieが一切存在しない。
+2. PayPay受取前にpayment_attempts/{digest}をattemptedで確保し、同じdigestは2回目以降claim不可。
+3. PayPay acceptのタイムアウト、アプリ停止、DB確定失敗の各ケースでreview/outcome_unknownへ進み、自動再受取が起きない。
+4. Cloud Tasks同一taskを2回配送しても、実行権限を取得できるJobは1つだけ。
+5. Jobが処理中に強制終了された場合、再起動したJobが同じ注文を自動再実行しない。execution状態をreview/outcome_unknownへ送る。
+6. 4枠を超えるJobはBCSFE処理を開始しない。Job実行状態を照合せずに期限切れslotを再利用しない。
+7. progress/log更新が毎ログ行のFirestore writeにならない。一定時間・step変更・terminal stateでまとめる。
+8. Firestore TTLを初期段階で有効にせず、cleanupは明示的に予算計上する。
+9. Firestore transaction callback内から外部APIやCloud Run Jobs APIを呼ばない。
+10. 1MiB document limitと10MiB transaction request limitを超える入力・ログをテストで拒否する。
+
+### 16.4 追加参照資料
+
+- Firestore document REST resource / size: https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents
+- Firestore quotas (document size / TTL / transactions): https://firebase.google.com/docs/firestore/quotas
+- Cloud Tasks delivery and idempotency: https://docs.cloud.google.com/tasks/docs/dual-overview
+- Cloud Tasks duplicate execution pitfalls: https://docs.cloud.google.com/tasks/docs/common-pitfalls
+
