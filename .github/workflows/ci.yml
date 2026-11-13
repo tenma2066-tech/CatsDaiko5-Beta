@@ -64,5 +64,17 @@ jobs:
       - name: Shop store tests
         run: python -m unittest -v test_shop_store.py
 
-      - name: Firestore repository tests
-        run: python -m unittest -v test_firestore_repository.py
+      - name: Cloud Run dispatcher tests
+        run: python -m unittest -v test_cloud_run_dispatcher.py
+
+      - name: Set up Java for Firestore Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Firestore Emulator integration tests
+        run: firebase emulators:exec --only firestore --project demo-catsdaiko5 "python -m unittest -v test_firestore_repository.py"
