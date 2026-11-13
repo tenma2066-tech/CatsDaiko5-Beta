@@ -796,3 +796,39 @@ F. execution完了:
 - SHOP_LIVE_ORDERS_ENABLED=0 は維持。CatsDaiko5安定版とBeta mainは変更していない。
 
 次の作業は、注文作成・資格情報保存・実行claimを順番にRepositoryへ抽出し、Firestore transaction adapterに必要な原子操作を明確化する。SQLite互換テストを継続し、Cloud Run用バックエンドが未完成の間はlegacy以外を拒否する。
+
+## 20. Phase 2実装チェックポイント：注文Repositoryの抽出（2026-11-13）
+
+### 20.1 今回の実装
+
+- shop_order_repository.py を追加し、OrderRepository契約とSQLiteOrderRepositoryを実装した。
+- 注文作成（通常商品・代行操作注文）、注文読み出し、管理者一覧取得をRepositoryへ移した。
+- 引継ぎ情報の保存をRepositoryへ移した。アクセスtokenのSHA-256 hash照合と、paid / credentials_submitted=0 / job_id IS NULL の条件付き更新を一つのDB更新で実施する。
+- 実行claimをRepositoryへ移した。access hash、paid、credentials_submitted=1、job_id IS NULLを一つの条件付きUPDATEで検査し、重複実行を拒否する。
+- Job IDのbindとstarting状態のreleaseをRepositoryへ移した。
+- 注文状態遷移（awaiting_payment / payment_processing / paid / review / fulfilling / completed / cancelled）の検証と条件付き更新をSQLiteOrderRepository内のトランザクションへ移した。
+- shop_store.py は入力検証、暗号化、公開APIの返却形式を維持しつつ、注文データのDB操作をRepository経由へ変更した。
+- 通常商品注文の service_type は既存仕様どおり other-service を維持する。既存の価格計算・暗号化・注文ID/アクセスtoken生成は変更していない。
+
+### 20.2 変更ファイル
+
+- shop_order_repository.py（新規）
+- shop_store.py（注文作成・読み書き・資格情報保存・実行claim・状態遷移のRepository委譲）
+- docs/CLOUD_RUN_MIGRATION_PLAN.md（本チェックポイント）
+
+### 20.3 検証状況
+
+- PR #9 の最新コミットはGitHub Actions CIで検証中。最新run ID: 43430730247。
+- 直前の決済Repository抽出時点のCI run 43430175204 は success。
+- 注文Repository抽出後のCI結果はまだ未確定。成功を確認するまでは統合済み・動作確認済みとは扱わない。
+- Firestore Emulator/Cloud Run統合テストは未実施。
+
+### 20.4 安全状態と残作業
+
+- 専用ブランチ feature/cloud-run-firestore-foundation のみを変更。PR #9 はDraftのまま、mainへ未マージ。
+- Firestore adapter、Cloud Tasks outbox、Firestore上の実行claim/slot lease/transfer lock、Job entrypointは未実装。
+- GCP project/billing/IAM/Secret Manager/Firestore/Cloud Tasks/Cloud Runは未作成。
+- Render、runtime-data、PayPay認証・決済データは変更していない。PayPay実ログイン・実決済・実注文も未実施。
+- SHOP_LIVE_ORDERS_ENABLED=0 を維持。安定版 CatsDaiko5 と Beta main は変更していない。
+
+次の作業はCI結果を確認し、失敗があれば修正する。その後、管理者注文読み出し・注文状態の完全なRepository境界を確認し、Firestore側のtransaction contractとEmulatorテスト設計へ進む。
