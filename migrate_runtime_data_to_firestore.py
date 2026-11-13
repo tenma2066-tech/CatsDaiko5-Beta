@@ -78,10 +78,26 @@ def load_payment_attempts(connection):
 
 
 def require_ledger_snapshot_for_apply(ledger_db):
-    """Refuse a live import when the global PayPay link history is unavailable."""
+    """Require the complete legacy PayPay ledger schema before a live import."""
     if ledger_db is None:
         raise RuntimeError(
             "encrypted PayPay ledger snapshot is missing; refusing Firestore import"
+        )
+    tables = {
+        row[0] for row in ledger_db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "links" not in tables:
+        raise RuntimeError(
+            "PayPay ledger links table is missing; refusing Firestore import"
+        )
+    columns = {
+        row[1] for row in ledger_db.execute("PRAGMA table_info(links)")
+    }
+    if not {"digest", "order_id", "state", "created"}.issubset(columns):
+        raise RuntimeError(
+            "PayPay ledger links schema is incomplete; refusing Firestore import"
         )
 
 
