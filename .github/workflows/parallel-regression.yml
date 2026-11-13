@@ -1,0 +1,55 @@
+name: parallel regression
+
+on:
+  pull_request:
+    paths:
+      - "app.py"
+      - "test_parallel.py"
+      - "test_improvements.py"
+      - "test_save_audit.py"
+      - "test_save_repair.py"
+      - "save_repair.py"
+      - "test_github_auth_store.py"
+      - "engine.py"
+      - "requirements.txt"
+      - ".github/workflows/parallel-regression.yml"
+  push:
+    branches:
+      - "main"
+      - "fix/parallel-slot-accounting"
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout tested revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.8"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: BCSFE API compatibility
+        run: python smoke_bcsfe.py
+      - name: Application self-test
+        run: python selftest.py
+      - name: Save audit tests
+        run: python -m unittest -v test_save_audit.py
+      - name: Save repair tests
+        run: python -m unittest -v test_save_repair.py
+      - name: Parallel execution tests
+        run: python -m unittest -v test_parallel.py
+      - name: Improvement regression tests
+        run: python -m unittest -v test_improvements.py
+      - name: GitHub auth store tests
+        run: python -m unittest -v test_github_auth_store.py
