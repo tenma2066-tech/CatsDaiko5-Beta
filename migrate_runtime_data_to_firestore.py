@@ -88,6 +88,8 @@ def main():
         raise RuntimeError("GitHub runtime-data configuration is required")
     shop_db = _snapshot_database(args.shop_snapshot)
     ledger_db = _snapshot_database(args.ledger_snapshot)
+    if shop_db is None:
+        raise RuntimeError("encrypted shop runtime snapshot was not found")
     try:
         orders = load_orders(shop_db)
         attempts = load_payment_attempts(ledger_db)
@@ -132,8 +134,10 @@ def main():
         print("Dry-run summary" if not args.apply else "Import summary")
         print(f"Shop order rows found: {len(orders)}")
         print(f"Valid order rows: {len(valid_orders)}")
+        print(f"Invalid order rows skipped: {len(orders) - len(valid_orders)}")
         print(f"PayPay ledger rows found: {len(attempts)}")
         print(f"Valid payment attempts: {len(valid_attempts)}")
+        print(f"Invalid payment rows skipped: {len(attempts) - len(valid_attempts)}")
         if not args.apply:
             print("No Firestore writes performed. Re-run with --apply only after reviewing backups.")
             return 0
