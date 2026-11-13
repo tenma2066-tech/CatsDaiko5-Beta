@@ -832,3 +832,16 @@ F. execution完了:
 - SHOP_LIVE_ORDERS_ENABLED=0 を維持。安定版 CatsDaiko5 と Beta main は変更していない。
 
 次の作業はCI結果を確認し、失敗があれば修正する。その後、管理者注文読み出し・注文状態の完全なRepository境界を確認し、Firestore側のtransaction contractとEmulatorテスト設計へ進む。
+
+## 21. OrderRepository契約の仕上げ・検証状況（2026-11-13）
+
+- OrderRepository Protocolに、注文作成、注文取得、一覧、資格情報保存、実行claim、Job bind/release、注文状態遷移の全操作を明記した。
+- SQLiteOrderRepositoryは上記契約を実装し、shop_store.pyの注文DBアクセス（スキーマ初期化を除く）をRepository経由へ集約した。
+- 通常注文の service_type が従来どおり other-service になる回帰テストを追加。
+- 誤ったアクセスtokenでは引継ぎ情報保存・実行claimができず、正しいtokenなら成功するテストを追加。
+- 注文Repository抽出時点のGitHub Actions run 43430778059（commit b6afa9be86fe70ed15e77cb6f9f118b632337ead）は全ジョブ・全ステップ成功。Shop store testsも成功。
+- その成功run以降にOrderRepository Protocolと認証/互換性テストを追加したため、最新HEAD（7b453685a7c2e427f32c983f4d2d30a5e6bf6832）でのCIは別途確認が必要。最新CIが成功するまで最終検証済みとはしない。
+- 変更は引き続き feature/cloud-run-firestore-foundation とDraft PR #9のみ。mainへ未マージ。
+- Firestore adapter/Emulator、Cloud Tasks outbox、Job dispatcher/entrypoint、slot lease/transfer lockは未実装。GCP/Render/PayPay/実注文は未変更。SHOP_LIVE_ORDERS_ENABLED=0を維持。
+
+次の作業は最新CIを確認し、必要な修正を行う。次段階ではFirestore adapterに必要なトランザクション契約を定義し、Firestore Emulatorを用いた並行claim・重複Task・不確定決済結果の試験を追加する。
