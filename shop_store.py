@@ -13,7 +13,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-import github_runtime_store
+import shop_storage
 
 DB_PATH = Path(os.environ.get("SHOP_DB_PATH", "instance/shop.sqlite3"))
 ORDER_ID_RE = re.compile(r"^[A-Z0-9]{10}$")
@@ -38,7 +38,7 @@ def _cipher():
 @contextmanager
 def _db():
     try:
-        with github_runtime_store.sqlite_database("shop.sqlite3", DB_PATH) as con:
+        with shop_storage.database("shop.sqlite3", DB_PATH) as con:
             con.execute("""CREATE TABLE IF NOT EXISTS orders (
                 id TEXT PRIMARY KEY, access_hash TEXT NOT NULL, sku TEXT NOT NULL,
                 title TEXT NOT NULL, amount INTEGER NOT NULL, credential_enc BLOB NOT NULL,
@@ -64,8 +64,14 @@ def _db():
             if not github_runtime_store.enabled():
                 os.chmod(DB_PATH, 0o600)
             yield con
-    except github_runtime_store.RuntimeStoreError as exc:
+    except shop_storage.ShopStorageError as exc:
         raise ShopError(str(exc)) from exc
+    except Exception as exc:
+        # Preserve the existing GitHub runtime store's safe failure behavior.
+        import github_runtime_store
+        if isinstance(exc, github_runtime_store.RuntimeStoreError):
+            raise ShopError(str(exc)) from exc
+        raise
 
 def catalog():
     raw = os.environ.get("SHOP_CATALOG_JSON", "").strip()
