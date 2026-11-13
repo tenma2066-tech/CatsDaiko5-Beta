@@ -145,6 +145,34 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertEqual(self.orders.get_order(self.order_id)["status"], "paid")
         self.client.collection("payment_attempts").document(digest).delete()
 
+    def test_dispatch_accepts_task_delivery_before_publish_state_commit(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        self.assertTrue(self.orders.save_credentials(
+            self.order_id, self.access_hash, b"encrypted-transfer"
+        ))
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.enqueue_execution(self.order_id, execution_id)
+        # Simulate Cloud Tasks delivering immediately while outbox is still pending.
+        claim = workflow.begin_dispatch(execution_id)
+        self.assertEqual(claim["state"], "launch")
+        self.assertEqual(workflow.get_outbox_item(execution_id)["state"], "launching")
+        # Publisher's post-create update must not overwrite the dispatch transition.
+        workflow.mark_task_enqueued(execution_id)
+        self.assertEqual(workflow.get_outbox_item(execution_id)["state"], "launching")
+        workflow.mark_dispatch_started(execution_id, {
+            "operation_name": "operations/early-delivery",
+            "execution_name": "early-delivery",
+        })
+        self.assertEqual(workflow.get_outbox_item(execution_id)["state"], "dispatched")
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("worker_slots").document(claim["slot_id"]).delete()
+        self.client.collection("orders").document(self.order_id).update({
+            "status": "paid", "job_id": None, "active_execution_id": None,
+        })
+
     def test_outbox_single_launch_and_unknown_game_result_keeps_transfer_lock(self):
         workflow = FirestoreWorkflowRepository(self.client)
         self.assertTrue(self.payments.claim_payment(self.order_id))
