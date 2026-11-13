@@ -195,6 +195,8 @@ class FirestoreWorkflowRepository:
                 "execution_id": execution_id,
                 "order_id": order_id,
                 "state": "pending",
+                "task_generation": 0,
+                "task_generation": 0,
                 "created": now,
                 "updated": now,
             })
@@ -206,6 +208,37 @@ class FirestoreWorkflowRepository:
             return {"execution_id": execution_id, "task_id": execution_id}
 
         return enqueue(transaction)
+
+    def advance_outbox_task_generation(
+        self, execution_id: str, expected_generation: int,
+    ) -> int | None:
+        """Atomically rotate a Cloud Tasks name after an expired dedupe reservation."""
+        if type(expected_generation) is not int or expected_generation < 0:
+            raise ValueError("invalid task generation")
+        reference = self._outbox.document(execution_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def advance(tx):
+            snapshot = reference.get(transaction=tx)
+            if not snapshot.exists:
+                return None
+            data = snapshot.to_dict()
+            if data.get("state") != "pending":
+                return None
+            current = int(data.get("task_generation") or 0)
+            if current != expected_generation:
+                return current
+            if current >= 10000:
+                raise WorkflowStateError("outbox task generation limit reached")
+            updated = current + 1
+            tx.update(reference, {
+                "task_generation": updated,
+                "updated": self._clock(),
+            })
+            return updated
+
+        return advance(transaction)
 
     def get_outbox_item(self, execution_id: str) -> dict[str, Any] | None:
         snapshot = self._outbox.document(execution_id).get()
