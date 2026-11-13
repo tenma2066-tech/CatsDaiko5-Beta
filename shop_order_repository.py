@@ -102,3 +102,15 @@ class SQLiteOrderRepository:
             )
             if changed.rowcount != 1:
                 raise ValueError("注文状態が同時に更新されました。再読み込みしてください。")
+
+    def get_order(self, order_id: str):
+        with self._database() as db:
+            row = db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_orders(self, limit: int = 100):
+        with self._database() as db:
+            rows = db.execute(
+                "SELECT * FROM orders ORDER BY created DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
