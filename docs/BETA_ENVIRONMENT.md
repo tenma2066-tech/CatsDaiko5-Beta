@@ -34,7 +34,7 @@
 - 商品はRender環境変数 `SHOP_CATALOG_JSON` にJSON配列で設定する。例：
   `[{"id":"sample-service","title":"サンプル商品","price_yen":1000,"description":"説明"}]`
   実際の販売商品名・価格に置き換えること。金額はサーバー側カタログを正とし、ブラウザーから送られた金額は使用しない。
-- `PAYPAY_ENCRYPTION_KEY` はFernet形式のキーを一度生成してRenderのSecretとして設定し、以後変更しない。変更すると保存済みのPayPay認証情報と注文内の引継ぎ情報を復号できなくなる。
+- `PAYPAY_ENCRYPTION_KEY` は `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` で一度生成し、RenderのSecretとして設定して以後変更しない。変更すると保存済みのPayPay認証情報と注文内の引継ぎ情報を復号できなくなる。
 - `PAYPAY_DATA_DIR`、`PAYPAY_LEDGER_PATH`、`SHOP_DB_PATH` は同一のベータ専用永続ディスク上に置く。**永続ディスクを接続するまでは実決済を受け付けないこと**。Render Freeの一時ファイル領域では再起動・再デプロイ時に注文や認証情報が失われる可能性がある。
 - 安定版のディスク、PayPayアカウント情報、暗号化キー、DBは共有しない。
 - 注文の引継ぎコード・暗証番号は暗号化して保存し、公開注文照会APIには返さない。管理者の注文画面だけで確認できる。
