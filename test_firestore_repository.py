@@ -784,6 +784,43 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertTrue(imported["legacy_imported"])
         self.client.collection("orders").document(legacy_order_id).delete()
 
+    def test_legacy_order_import_rejects_unrelated_existing_document(self):
+        legacy_order_id = secrets.token_hex(5).upper()
+        values = {
+            "id": legacy_order_id,
+            "access_hash": self.access_hash,
+            "sku": "legacy",
+            "title": "legacy order",
+            "amount": 25,
+            "credential_enc": b"encrypted-legacy-credentials",
+            "status": "paid",
+            "payment_digest": None,
+            "created": 1_800_000_000,
+        }
+        reference = self.client.collection("orders").document(legacy_order_id)
+        reference.create({"id": legacy_order_id, "legacy_imported": False})
+        try:
+            with self.assertRaisesRegex(RuntimeError, "conflicts with create-only"):
+                self.orders.import_legacy_order(values)
+        finally:
+            reference.delete()
+
+    def test_legacy_payment_attempt_import_rejects_wrong_existing_owner(self):
+        digest = secrets.token_hex(32)
+        reference = self.client.collection("payment_attempts").document(digest)
+        reference.create({
+            "order_id": "9999999999",
+            "state": "paid",
+            "legacy_imported": False,
+        })
+        try:
+            with self.assertRaisesRegex(RuntimeError, "conflicts with create-only"):
+                self.payments.import_legacy_attempt(
+                    digest, self.order_id, "paid", 1_800_000_000
+                )
+        finally:
+            reference.delete()
+
     def test_legacy_paypay_attempt_import_maps_attempted_to_unknown(self):
         digest = secrets.token_hex(32)
         self.assertTrue(self.payments.import_legacy_attempt(
