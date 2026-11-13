@@ -126,8 +126,8 @@ def _selected_character_count(raw: str) -> int:
     value = unicodedata.normalize("NFKC", raw)
     value = re.sub(r"[~〜～ー−―‐–—]", "-", value)
     numbers = set()
-    for token in (part for part in re.split(r"[\\s,、，;；・]+", value) if part):
-        match = re.fullmatch(r"(\\d+)(?:-(\\d+))?", token)
+    for token in (part for part in re.split(r"[\s,、，;；・]+", value) if part):
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", token)
         if not match:
             raise ShopError(f"キャラ番号「{token}」を読み取れません。")
         first = int(match.group(1))
