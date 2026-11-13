@@ -25,7 +25,7 @@ from shop_firestore_repository import (
 def _snapshot_database(name: str):
     # Read only the encrypted remote snapshot. Never auto-upload an unencrypted
     # local SQLite file as a side effect of migration inspection.
-    encrypted = github_runtime_store.read_blob(name)
+    encrypted = github_runtime_store.read_blob_readonly(name)
     if encrypted is None:
         return None
     try:
