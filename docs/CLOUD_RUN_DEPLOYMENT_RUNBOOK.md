@@ -88,7 +88,7 @@ IAMは必要なリソース単位で付与する。
 | Principal | Role / Scope |
 |---|---|
 | Web SA | `roles/datastore.user`（Project）、`roles/cloudtasks.enqueuer`（Project）、Secret accessor（必要なSecretのみ） |
-| Dispatcher SA | `roles/datastore.user`、`roles/run.jobsExecutorWithOverrides`（catsdaiko-worker Job）、`roles/cloudtasks.enqueuer`（Project） |
+| Dispatcher SA | `roles/datastore.user`、`roles/run.jobsExecutorWithOverrides`（catsdaiko-worker Job）、`roles/run.viewer`（catsdaiko-worker JobのExecution参照）、`roles/cloudtasks.enqueuer`（Project） |
 | Worker SA | `roles/datastore.user`、Secret accessor（暗号化鍵・Pepperのみ） |
 | Task Invoker SA | `roles/run.invoker`（catsdaiko-dispatcher Service） |
 | Scheduler Invoker SA | `roles/run.invoker`（catsdaiko-dispatcher Service） |
@@ -178,9 +178,12 @@ Webはmin instances 0、max instances 1で開始する。max 1はGitHub runtime-
 
 ## 11. Outbox回復
 
-Cloud Schedulerから1分ごとに非公開Dispatcherの `POST /sweep` を呼ぶ。これにより、Firestoreのtransactionでoutboxを作成した直後にWebプロセスが終了しても、未publishのTaskを再作成できる。タスク名はexecution IDから決定的に生成し、Cloud Tasks側のAlreadyExistsは成功扱いにする。
+Cloud Schedulerから1分ごとに非公開Dispatcherの `POST /sweep` と `POST /reconcile` を呼ぶ。
 
-Scheduler用サービスアカウントにはDispatcher ServiceへのInvokerだけを付与する。
+- `/sweep`: Firestore transactionでoutboxを作成した直後にWebプロセスが終了しても、未publishのTaskを再作成する。タスク名はexecution IDから決定的に生成し、Cloud Tasks側のAlreadyExistsは成功扱いにする。
+- `/reconcile`: Cloud Run Job Executionの完了状態を確認し、Firestoreに最終結果が残らなかった実行をreviewへ移す。worker claim前の終了ならslotのみ解放し、claim後の終了ならslotを解放してtransfer lockは保持する。
+
+Scheduler用サービスアカウントにはDispatcher ServiceへのInvokerだけを付与する。Cloud Schedulerには `catsdaiko-outbox-sweep` と `catsdaiko-execution-reconcile` の2ジョブを作成し、どちらも1分ごとに実行する。
 
 ## 12. デプロイ後の検証（注文受付は停止したまま）
 
@@ -230,3 +233,11 @@ gcloud scheduler jobs create http catsdaiko-execution-reconcile \\
 ```
 
 Cloud Run JobのExecution APIを読むため、Dispatcher Service Accountには対象Job/Projectの実行状態を取得できる最小権限を追加する。roles/run.viewerをProject全体へ付与する前に、可能なら対象リソース単位の権限境界を確認する。
+
+## 15. 公式仕様リンク
+
+- [Cloud Run Job execution / overrides](https://cloud.google.com/run/docs/execute/jobs)
+- [Cloud Run IAM roles](https://cloud.google.com/run/docs/reference/iam/roles)
+- [Cloud Run container runtime contract（CLOUD_RUN_EXECUTION）](https://cloud.google.com/run/docs/container-contract)
+- [Cloud Tasks HTTP target tasks / OIDC](https://cloud.google.com/tasks/docs/create-http-task)
+- [Firestore locations](https://cloud.google.com/firestore/docs/locations)
