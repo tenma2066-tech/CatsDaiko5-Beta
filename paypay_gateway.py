@@ -188,7 +188,7 @@ def _normalize_link(raw: str):
     for url in re.findall(r"https?://[^\s<>\[\]()\"']+", raw, re.I):
         try:
             u = urlsplit(url.rstrip(".,;。"))
-            if u.scheme != "https" or u.hostname != "pay.paypay.ne.jp" or u.path.rstrip("/") != "/" + urls[0]:
+            if u.scheme != "https" or u.hostname != "pay.paypay.ne.jp" or not re.fullmatch("/" + re.escape(urls[0]) + "/?", u.path):
                 return None
             if u.username or u.password or u.port or u.fragment or u.query:
                 return None
@@ -229,6 +229,27 @@ def _verify_link(body, amount):
         raise PayPayError("link_incomplete", "送金リンクの取引情報が不足しています。")
     return {"order_id":info["orderId"],"message_id":msg["messageId"],"chat_id":msg["chatRoomId"],
             "request_at":data["transactionAt"]}
+
+def _provider_hold_code(body):
+    if not isinstance(body, dict):
+        return None
+    candidates = []
+    def collect(obj):
+        if not isinstance(obj, dict):
+            return
+        for field in ("resultCode", "result_code", "errorCode", "error_code", "code"):
+            value = obj.get(field)
+            if type(value) in (str, int):
+                candidates.append(str(value))
+    collect(body)
+    for key in ("header", "error", "result_info", "resultInfo", "payload"):
+        collect(body.get(key))
+    errors = body.get("errors")
+    if isinstance(errors, list):
+        for item in errors[:10]:
+            collect(item)
+    return next((code for code in candidates if code in HOLD_CODES), None)
+
 
 @contextmanager
 def _ledger():
@@ -300,12 +321,8 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
             if ok:
                 with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
                 return digest
-            codes=set()
-            if isinstance(reply,dict):
-                h=reply.get("header") or {}; p=reply.get("payload") or {}
-                for v in (h.get("resultCode"),p.get("resultCode")):
-                    if isinstance(v,str): codes.add(v)
-            state="pending" if codes & HOLD_CODES else "review"
+            hold_code = _provider_hold_code(reply)
+            state="pending" if hold_code else "review"
             with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
             raise PayPayError("temporary_hold" if state=="pending" else "accept_unconfirmed",
                               "PayPay側で一時保留です。状態を確認するまで再送金しないでください。" if state=="pending"
