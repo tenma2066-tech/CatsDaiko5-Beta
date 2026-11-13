@@ -205,8 +205,13 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertEqual(workflow.get_otp_session(session_id), "renewed-encrypted-state")
         workflow.clear_otp_session(session_id)
         self.assertIsNone(workflow.get_otp_session(session_id))
-        workflow.save_otp_session(session_id, "expired-state", time.time() - 1)
-        self.assertIsNone(workflow.consume_otp_session(session_id))
+        fixed_now = time.time()
+        writer = FirestoreWorkflowRepository(self.client, clock=lambda: fixed_now)
+        reader_after_expiry = FirestoreWorkflowRepository(
+            self.client, clock=lambda: fixed_now + 2
+        )
+        writer.save_otp_session(session_id, "expired-state", fixed_now + 1)
+        self.assertIsNone(reader_after_expiry.consume_otp_session(session_id))
         self.client.collection("admin_otp_sessions").document(session_id).delete()
 
     def test_otp_session_concurrent_consume_is_single_use(self):
