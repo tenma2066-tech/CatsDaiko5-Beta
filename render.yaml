@@ -25,6 +25,12 @@ services:
         value: tenma2066-tech/CatsDaiko5-Beta
       - key: AUTH_GITHUB_TOKEN
         sync: false
+      - key: RUNTIME_GITHUB_REPO
+        value: tenma2066-tech/CatsDaiko5-Beta
+      - key: RUNTIME_GITHUB_BRANCH
+        value: runtime-data
+      - key: RUNTIME_GITHUB_PREFIX
+        value: runtime
       - key: PAYPAY_ENCRYPTION_KEY
         sync: false
       - key: SHOP_CATALOG_JSON
