@@ -1213,7 +1213,8 @@ def shop_home():
 <button id="place">PayPay決済へ進む</button><p id="error" class="error"></p></div>
 <script>
 const products=__PRODUCTS__;let selected=null;
-const ordersEnabled=__ORDERS_ENABLED__;\nif(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
+const ordersEnabled=__ORDERS_ENABLED__;
+if(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
 const yen=n=>new Intl.NumberFormat('ja-JP').format(n)+'円';
 const list=document.getElementById('products');
 if(!products.length){document.getElementById('catalog-error').textContent='現在、販売商品が設定されていません。管理者にお問い合わせください。';}
