@@ -478,6 +478,14 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
         if status in {"fulfilling", "completed"}:
             raise ShopError("Firestore環境では処理状態はCloud Run Workerが確定します。")
         row = _row(order_id)
+        if status == "paid" and row and row.get("active_execution_id"):
+            raise ShopError("実行結果の確認待ちです。決済状態を手動変更できません。")
+        if status == "cancelled" and row and row.get("active_execution_id"):
+            execution = _workflow_repository.get_execution(row["active_execution_id"])
+            if execution and (
+                execution.get("state") == "running" or execution.get("outcome_unknown")
+            ):
+                raise ShopError("処理結果が不確定なため、アカウント保護ロックを解除せず確認が必要です。")
         digest = payment_digest or (row.get("payment_digest") if row else None)
         if status == "paid" and digest:
             try:
