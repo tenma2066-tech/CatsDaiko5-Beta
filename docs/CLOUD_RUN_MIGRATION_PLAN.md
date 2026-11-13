@@ -1087,3 +1087,16 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
 
 次は最新CI全工程とFirestore Emulator testを確認する。Cloud Run実環境では `CLOUD_RUN_EXECUTION` は自動注入値なので、Job設定で手動追加しない。引き続きbounded log chunks、unknown launchの手動解除手順、Security Rules/IAM、実データdry-run照合を進める。
+
+
+## 31. Cloud Tasksの早期配送とoutbox状態更新の競合を修正（2026-11-13）
+
+- Cloud Tasks publisherは従来、create_task成功後にFirestore outboxをpending→task_enqueuedへ更新していた。Cloud Tasksは作成直後に配送されるため、Dispatcherが先に到着するとbegin_dispatchがpendingを拒否し、HTTP 200でTaskだけ消費される競合を確認。
+- さらにpublisherがTask作成直後に停止した場合、決定的Task名のAlreadyExists（削除後24時間の名前保持を含む）だけではTaskが現存するか配送済みか判別できず、pending outboxがtask_enqueuedに進んでTaskが残らない可能性があった。
+- `begin_dispatch()` は `pending` と `task_enqueued` の両方を受け付けるよう変更。Taskがoutbox更新より先に配送されても、Dispatcherがtransactionでlaunchingへ進める。
+- `mark_task_enqueued()` はoutboxが既にlaunching / dispatched / outcome_unknown / cancelledへ進んでいる場合、後から状態を巻き戻さずno-opにする。
+- Firestore Emulator test `test_dispatch_accepts_task_delivery_before_publish_state_commit` を追加。pending状態で配送されたTaskがlaunchingへ進み、その後のpublisher更新が状態を上書きしないことを検証する。
+- 最新コードcommit `1bc517e6433a7d24ef1e36d6486e64b7803301ba`。この変更を含むCI / parallel regressionの最終結果は確認待ち。直前のHEAD `546b4bbc` のCI run `43439705092` は進行中で、今回の変更により再実行対象。
+- 変更は専用branch / Draft PR #9のみ。main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは未変更。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新CIのFirestore Emulatorで早期配送race testを確認する。その後、outbox / slot / transfer lockの管理者復旧手順とbounded log chunk化を進める。Cloud Tasksのat-least-once配送を前提に、Firestoreの業務状態を唯一のclaim gateとして維持する。
