@@ -24,6 +24,10 @@ class RuntimeStoreError(RuntimeError):
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 _GITHUB_WRITE_LOCK = threading.RLock()
+_CACHE_LOCK = threading.Lock()
+_REMOTE_CACHE: dict[str, tuple[bytes | None, str | None, float]] = {}
+_REPO_VERIFIED: dict[str, float] = {}
+_REMOTE_CACHE_SECONDS = 2.0
 
 
 def _config():
@@ -98,33 +102,50 @@ def _request(method: str, url: str, token: str, payload=None):
         raise RuntimeStoreError("GitHubランタイム保存に接続できません。") from exc
 
 
-def _read_remote(name: str):
+def _read_remote(name: str, *, use_cache: bool = True):
     cfg = _config()
     if cfg is None:
         return None, None
     repo, token, branch, prefix = cfg
     path = prefix + "/" + name.lstrip("/")
+    cache_key = repo + ":" + branch + ":" + path
+    now = __import__("time").monotonic()
+    if use_cache:
+        with _CACHE_LOCK:
+            cached = _REMOTE_CACHE.get(cache_key)
+            if cached and now - cached[2] < _REMOTE_CACHE_SECONDS:
+                return cached[0], cached[1]
+
+    # Repository privacy is stable; avoid spending an API request on every poll.
+    with _CACHE_LOCK:
+        verified_at = _REPO_VERIFIED.get(repo, 0.0)
+    if now - verified_at >= 300:
+        base = "https://api.github.com/repos/" + repo
+        metadata = _request("GET", base, token)
+        if not isinstance(metadata, dict) or metadata.get("private") is not True:
+            raise RuntimeStoreError("保存先は非公開GitHubリポジトリである必要があります。")
+        with _CACHE_LOCK:
+            _REPO_VERIFIED[repo] = now
+
     url, _ = _url(path)
-    # Verify that this is still a private repository before reading customer data.
-    base = "https://api.github.com/repos/" + repo
-    metadata = _request("GET", base, token)
-    if not isinstance(metadata, dict) or metadata.get("private") is not True:
-        raise RuntimeStoreError("保存先は非公開GitHubリポジトリである必要があります。")
     response = _request("GET", url + "?" + parse.urlencode({"ref": branch}), token)
     if response is None:
-        return None, None
-    try:
-        encoded = response.get("content", "").replace("\n", "")
-        raw = base64.b64decode(encoded, validate=True)
-        if len(raw) > 900_000:
-            raise ValueError("oversized")
-        sha = response.get("sha")
-        if not isinstance(sha, str) or not sha:
-            raise ValueError("missing sha")
-        return raw, sha
-    except (ValueError, TypeError) as exc:
-        raise RuntimeStoreError("GitHubの保存ファイルを読み取れません。") from exc
-
+        result = (None, None)
+    else:
+        try:
+            encoded = response.get("content", "").replace("\\n", "")
+            raw = base64.b64decode(encoded, validate=True)
+            if len(raw) > 900_000:
+                raise ValueError("oversized")
+            sha = response.get("sha")
+            if not isinstance(sha, str) or not sha:
+                raise ValueError("missing sha")
+            result = (raw, sha)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeStoreError("GitHubの保存ファイルを読み取れません。") from exc
+    with _CACHE_LOCK:
+        _REMOTE_CACHE[cache_key] = (result[0], result[1], now)
+    return result
 
 def read_blob(name: str, local_path=None):
     """Read a blob from GitHub, migrating a pre-existing local file on first use."""
@@ -149,7 +170,7 @@ def read_blob(name: str, local_path=None):
             # Another writer may have initialized the remote file between our
             # first read and create attempt. Prefer that remote copy; never
             # replace it with the older local snapshot.
-            current, _ = _read_remote(name)
+            current, _ = _read_remote(name, use_cache=False)
             if current is not None:
                 return current
             raise
@@ -166,7 +187,7 @@ def write_blob(name: str, raw: bytes, *, create_only: bool = False):
     path = prefix + "/" + name.lstrip("/")
     url, _ = _url(path)
     with _GITHUB_WRITE_LOCK, _lock("blob:" + name):
-        _, sha = _read_remote(name)
+        _, sha = _read_remote(name, use_cache=False)
         if create_only and sha is not None:
             raise RuntimeStoreError("GitHub側に既存データがあるため、ローカルデータの移行を中止しました。")
         payload = {
@@ -179,6 +200,10 @@ def write_blob(name: str, raw: bytes, *, create_only: bool = False):
         result = _request("PUT", url, token, payload)
         if not isinstance(result, dict) or not isinstance(result.get("content"), dict):
             raise RuntimeStoreError("GitHubへの保存結果を確認できません。")
+        new_sha = result["content"].get("sha")
+        cache_key = repo + ":" + branch + ":" + path
+        with _CACHE_LOCK:
+            _REMOTE_CACHE[cache_key] = (raw, new_sha, __import__("time").monotonic())
         return result
 
 
