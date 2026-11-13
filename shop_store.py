@@ -485,7 +485,7 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
             if status == "review" and execution and execution.get("state") in {"starting", "running"}:
                 raise ShopError("Cloud Run Workerが実行中のため、状態を手動変更できません。")
             if status == "cancelled" and execution and (
-                execution.get("state") == "running" or execution.get("outcome_unknown")
+                execution.get("state") in {"starting", "running"} or execution.get("outcome_unknown")
             ):
                 raise ShopError("処理結果が不確定なため、アカウント保護ロックを解除せず確認が必要です。")
         digest = payment_digest or (row.get("payment_digest") if row else None)
