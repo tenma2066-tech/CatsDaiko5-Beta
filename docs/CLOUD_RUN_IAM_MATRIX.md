@@ -10,6 +10,7 @@
 | Web Service SA | `roles/secretmanager.secretAccessor` | 必要な個別Secretのみ | Project全体のSecret Accessor |
 | Dispatcher Service SA | `roles/datastore.user` | Project | Secret Managerアクセス（不要なら付与しない） |
 | Dispatcher Service SA | `roles/cloudtasks.enqueuer` | 対象Cloud Tasks Queue | Queue Admin / Tasks Admin |
+| Dispatcher Service SA | `roles/cloudtasks.viewer` | 対象Cloud Tasks Queue | Project-wide Cloud Tasks Viewer |
 | Dispatcher Service SA | `roles/run.jobsExecutorWithOverrides` | 対象Worker Jobのみ | Project全体のCloud Run Developer |
 | Dispatcher Service SA | `roles/run.viewer` | 対象Worker Jobのみ | Project全体のCloud Run Viewer |
 | Worker Job SA | `roles/datastore.user` | Project | Cloud Tasks作成、Cloud Run Job起動 |
@@ -23,6 +24,7 @@
 
 - `roles/datastore.user` はFirestore/Datastoreのデータ読み書き用。Firestore IAMのこのroleはProject scopeで付与する。Firestore Security RulesはクライアントSDK向けのdeny-allを維持し、Cloud Run server SDKはIAMで制御する。
 - `roles/cloudtasks.enqueuer` はTask作成用role（Beta）。対象Queueに限定して付与する。Queue作成・pause・purgeなどの管理権限はruntimeに与えない。
+- Publisherは `AlreadyExists` の後に `get_task` を呼ぶため、Dispatcherには `cloudtasks.tasks.get` が必要。Enqueuer roleにはこのpermissionが含まれないため、対象Queueに `roles/cloudtasks.viewer` を追加する（または `cloudtasks.tasks.get` のみを含むcustom roleを検討）。Project-wide Viewerは付与しない。
 - `roles/run.jobsExecutorWithOverrides` はWorker Jobに対してだけ付与する。公式roleには実行キャンセル権限も含まれるため、将来さらに絞る場合は `run.jobs.run` / `run.jobs.runWithOverrides` の必要性を検証してcustom roleを検討する。
 - `roles/run.viewer` はCloud Run Executionのget/list用。Inspector/Dispatcherには対象Worker Job resourceに限定して付与する。
 - `roles/run.servicesInvoker` はPrivate Dispatcher ServiceへのHTTP invoke専用。Cloud TasksとSchedulerで別々のOIDC service accountを使う。
