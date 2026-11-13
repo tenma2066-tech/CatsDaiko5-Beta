@@ -282,25 +282,6 @@ class CloudRunDispatcherTests(unittest.TestCase):
             def mark_task_enqueued(self, execution_id):
                 self.marked = True
 
-        class Client:
-            def __init__(self):
-                self.names = []
-
-            def queue_path(self, project, location, queue):
-                return f"projects/{project}/locations/{location}/queues/{queue}"
-
-            def task_path(self, project, location, queue, task):
-                return f"projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"
-
-            def get_task(self, request):
-                if request["name"].endswith("-g0"):
-                    raise NotFound("task exhausted and deleted")
-                return {"name": request["name"]}
-
-            def create_task(self, request):
-                self.names.append(request["task"].name)
-                raise AlreadyExists("deleted task name is still reserved")
-
         class RotatingClient(Client):
             def create_task(self, request):
                 self.names.append(request["task"].name)
