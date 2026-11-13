@@ -442,6 +442,7 @@ class FirestoreWorkflowRepository:
             })
             tx.update(execution_ref, {
                 "state": "running", "owner": owner,
+                "cloud_run_execution_name": owner,
                 "slot_id": slot_id, "transfer_lock_id": transfer_digest,
                 "started": now, "updated": now,
             })
