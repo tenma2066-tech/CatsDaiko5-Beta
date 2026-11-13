@@ -52,6 +52,41 @@ def create_app():
             application.logger.exception("Cloud Tasks outbox sweep failed")
             return jsonify(error="outbox sweep temporarily unavailable"), 503
 
+    @application.post("/reconcile")
+    def reconcile():
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("FIRESTORE_PROJECT_ID")
+        job_resource = os.environ.get("CLOUD_RUN_JOB_RESOURCE", "").strip()
+        if not job_resource:
+            return jsonify(error="worker Job resource is not configured"), 503
+        try:
+            client = firestore.Client(project=project) if project else firestore.Client()
+            repository = FirestoreWorkflowRepository(client)
+            from google.cloud import run_v2
+            executions_client = run_v2.ExecutionsClient()
+            checked = reconciled = 0
+            for item in repository.list_running_executions(limit=100):
+                owner = item.get("owner")
+                order_id = item.get("order_id")
+                execution_id = item.get("execution_id")
+                if not owner or not order_id or not execution_id or owner.startswith("worker-"):
+                    continue
+                resource_name = job_resource + "/executions/" + owner
+                try:
+                    execution = executions_client.get_execution(request={"name": resource_name})
+                except Exception as exc:
+                    # Not found or transient API errors are not proof of completion.
+                    if type(exc).__name__ in {"NotFound", "PermissionDenied"}:
+                        continue
+                    raise
+                checked += 1
+                if getattr(execution, "completion_time", None):
+                    if repository.reconcile_terminal_execution(order_id, execution_id, owner):
+                        reconciled += 1
+            return jsonify(checked=checked, reconciled=reconciled), 200
+        except Exception:
+            application.logger.exception("Cloud Run execution reconciliation failed")
+            return jsonify(error="reconciliation temporarily unavailable"), 503
+
     @application.post("/dispatch")
     def dispatch():
         payload = request.get_json(silent=True)
