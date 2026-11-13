@@ -165,7 +165,7 @@ async def _oauth(payload: dict, referer: str, cookies: dict | None = None):
                             if len(path) <= 120:
                                 response_shape.append(f"{path}:{type(value).__name__}")
                             if provider_code is None and key in code_fields and isinstance(value, (str, int)):
-                                if re.fullmatch(r"[0-9]{4,12}", str(value)):
+                                if re.fullmatch(r"(?:[A-Z][0-9]{4}|[0-9]{4,12})", str(value)):
                                     provider_code = str(value)
                             if depth < 3 and isinstance(value, (dict, list)):
                                 stack.append((value, path, depth + 1))
