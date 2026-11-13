@@ -1599,7 +1599,15 @@ def admin_orders_page():
 {% if o.credentials_submitted %}<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>{% else %}<p>引継ぎ情報：購入者の入力待ち</p>{% endif %}
 <form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
 <select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
-        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed","review"],"completed":[],"cancelled":[]})
+        transitions=(
+            {"awaiting_payment":["review","cancelled"],"payment_processing":["review"],
+             "paid":["review","cancelled"],"review":["paid","cancelled"],
+             "fulfilling":[],"completed":[],"cancelled":[]}
+            if shop_store.uses_firestore() else
+            {"awaiting_payment":["review","cancelled"],"payment_processing":["review"],
+             "paid":["fulfilling","cancelled"],"review":["paid","cancelled"],
+             "fulfilling":["completed","review"],"completed":[],"cancelled":[]}
+        ))
     return _shop_page("注文管理", '<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>'+order_body+'</div>')
 
 @app.post("/admin/orders/<order_id>/status")
