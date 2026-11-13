@@ -9,6 +9,7 @@ import base64
 import os
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from urllib import error, parse, request
@@ -109,7 +110,7 @@ def _read_remote(name: str, *, use_cache: bool = True):
     repo, token, branch, prefix = cfg
     path = prefix + "/" + name.lstrip("/")
     cache_key = repo + ":" + branch + ":" + path
-    now = __import__("time").monotonic()
+    now = time.monotonic()
     if use_cache:
         with _CACHE_LOCK:
             cached = _REMOTE_CACHE.get(cache_key)
