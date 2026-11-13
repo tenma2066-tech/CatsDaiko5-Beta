@@ -66,6 +66,28 @@ class PayPayGatewayValidationTests(unittest.TestCase):
             paypay_gateway._verify_link(body, 1200)
         self.assertEqual(error.exception.code, "expired")
 
+    def test_payment_link_digest_is_stable_for_code_and_url(self):
+        code_digest = paypay_gateway.payment_link_digest("AbCd123456")
+        url_digest = paypay_gateway.payment_link_digest("https://pay.paypay.ne.jp/AbCd123456")
+        self.assertEqual(code_digest, url_digest)
+        self.assertEqual(len(code_digest), 64)
+        with self.assertRaises(paypay_gateway.PayPayError):
+            paypay_gateway.payment_link_digest("https://evil.example/AbCd123456")
+
+    def test_legacy_otp_state_helpers_keep_existing_in_memory_behavior(self):
+        original = dict(paypay_gateway._pending_otp)
+        try:
+            paypay_gateway._pending_otp_clear()
+            self.assertFalse(paypay_gateway.otp_pending())
+            paypay_gateway._pending_otp_save({"otp_reference_id": "test-ref"})
+            self.assertTrue(paypay_gateway.otp_pending())
+            self.assertEqual(paypay_gateway._pending_otp_load()["otp_reference_id"], "test-ref")
+            paypay_gateway._pending_otp_clear()
+            self.assertFalse(paypay_gateway.otp_pending())
+        finally:
+            paypay_gateway._pending_otp.clear()
+            paypay_gateway._pending_otp.update(original)
+
 
 if __name__ == "__main__":
     unittest.main()
