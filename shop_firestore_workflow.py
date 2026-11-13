@@ -232,9 +232,13 @@ class FirestoreWorkflowRepository:
                 return current
             if current >= MAX_OUTBOX_TASK_GENERATION:
                 execution_ref = self._executions.document(execution_id)
-                order_ref = self._orders.document(data.get("order_id") or "")
+                order_id = data.get("order_id")
+                order_ref = (
+                    self._orders.document(order_id)
+                    if isinstance(order_id, str) and order_id else None
+                )
                 execution = execution_ref.get(transaction=tx)
-                order = order_ref.get(transaction=tx)
+                order = order_ref.get(transaction=tx) if order_ref else None
                 now = self._clock()
                 # Only a queued execution with no owner/slot can be safely
                 # closed here. A launched/running execution is never reset.
@@ -249,7 +253,7 @@ class FirestoreWorkflowRepository:
                             "error_code": "cloud_tasks_retry_exhausted",
                             "updated": now,
                         })
-                if order.exists:
+                if order and order.exists:
                     order_data = order.to_dict()
                     if order_data.get("active_execution_id") == execution_id:
                         tx.update(order_ref, {
