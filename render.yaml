@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: nyanko-web
+    name: nyanko-web-beta
     runtime: python
     plan: free
     region: singapore
@@ -22,6 +22,6 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
       - key: AUTH_GITHUB_REPO
-        value: tenma2066-tech/CatsDaiko5
+        value: tenma2066-tech/CatsDaiko5-Beta
       - key: AUTH_GITHUB_TOKEN
         sync: false
