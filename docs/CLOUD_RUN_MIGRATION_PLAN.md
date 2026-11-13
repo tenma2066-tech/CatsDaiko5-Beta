@@ -1062,3 +1062,15 @@ F. execution完了:
 - 変更は専用branch / Draft PR #9のみ。main・Render・GCP・runtime-data・PayPay実アカウントは変更なし。注文受付停止 `SHOP_LIVE_ORDERS_ENABLED=0` を維持。
 
 次は最新CIのmigration parser / Firestore Emulator結果を確認する。coverageが0でない場合は実データimportを行わず、旧DBとledgerの不整合を調査する。引き続きbounded log chunks、unknown launchの手動復旧、Security Rules/IAM、実データdry-run照合を完了させる。
+
+
+## 29. PayPay ledger snapshot欠損時のimport禁止（2026-11-13）
+
+- 注文側payment_digestのcoverage照合に加え、旧PayPay ledger snapshot自体が存在しない場合も、`--apply` を禁止するよう変更。
+- ledgerが存在しない状態で注文DBだけをimportすると、過去に使われたPayPayリンクのattempt履歴が欠落し、リンク再利用防止が弱まる可能性があるため。
+- `require_ledger_snapshot_for_apply()` を追加。dry-runは不足状況の確認を許可するが、applyは暗号化PayPay ledger snapshotが存在することを必須とする。snapshot欠損時はFirestoreへの書き込み前に停止。
+- test_migrate_runtime_data.pyにledger snapshot欠損の拒否テストを追加。
+- 最新コードcommit `1f81e588d0363936df2114eff1dae5da98514335`。CIはこの変更を含む最新HEADの完了待ち。直近の並列回帰run `43438904808`（commit `4ff6c395`）はsuccess。CI run `43438904901` は次のcommit更新でcancelledとなり、最新CI成功とは扱わない。
+- 専用branch / Draft PR #9のみ。Beta main・安定版CatsDaiko5・Render・GCP・runtime-data・PayPay実アカウントは変更なし。実注文なし、`SHOP_LIVE_ORDERS_ENABLED=0` 維持。
+
+次は最新HEADのCI全工程・Firestore Emulator・Docker build結果を確認する。その後、管理者向けのunknown launch復旧手順とbounded log chunksを進め、実データdry-runで注文DB/ledgerの件数・digest coverageが整合することを確認する。旧ledger snapshotがない場合は、ユーザーによる安全なデータ確認が必要になるまでimportを行わない。
