@@ -493,6 +493,72 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.client.collection("executions").document(execution_id).delete()
         self.client.collection("worker_slots").document("slot-0").delete()
 
+    def test_worker_snapshot_arrays_are_chunked_and_replaced_atomically(self):
+        workflow = FirestoreWorkflowRepository(self.client)
+        self.assertTrue(self.payments.claim_payment(self.order_id))
+        self.payments.complete_payment(self.order_id, self.digest)
+        execution_id = "exec_" + secrets.token_hex(8)
+        workflow.submit_credentials_and_enqueue(
+            self.order_id, self.access_hash, b"encrypted-transfer", execution_id
+        )
+        workflow.mark_task_enqueued(execution_id)
+        workflow.begin_dispatch(execution_id)
+        workflow.mark_dispatch_started(execution_id, {
+            "operation_name": "operations/chunk-test",
+            "execution_name": "job-chunk-test",
+        })
+        owner = "projects/demo/locations/asia-northeast1/jobs/test/executions/job-chunk-test"
+        lock_digest = transfer_lock_id("chunk-test-transfer", b"x" * 32)
+        self.assertTrue(workflow.claim_execution(
+            self.order_id, execution_id, owner, lock_digest, "slot-0"
+        ))
+
+        large_log = [f"entry-{index}-" + ("x" * 18000) for index in range(60)]
+        workflow.persist_worker_snapshot(
+            execution_id, owner,
+            {"status": "running", "step": 2, "log": large_log,
+             "warn": ["warning"], "report": [{"item": index} for index in range(5)],
+             "skipped": ["unknown"], "dry": False, "clone": False,
+             "integrity_only": False},
+        )
+        chunks_ref = (
+            self.client.collection("execution_logs").document(execution_id)
+            .collection("chunks")
+        )
+        first_chunks = list(chunks_ref.stream())
+        self.assertGreater(len(first_chunks), 1)
+        self.assertLessEqual(len(first_chunks), 32)
+        restored = workflow.get_execution(execution_id)
+        self.assertEqual(restored["log"], large_log)
+        self.assertEqual(restored["warn"], ["warning"])
+        self.assertEqual(restored["report"], [{"item": index} for index in range(5)])
+        self.assertEqual(restored["skipped"], ["unknown"])
+        first_revision = restored["worker_snapshot_revision"]
+
+        workflow.persist_worker_snapshot(
+            execution_id, owner,
+            {"status": "running", "step": 3, "log": ["latest"],
+             "warn": [], "report": [], "skipped": [],
+             "dry": False, "clone": False, "integrity_only": False},
+        )
+        second_chunks = list(chunks_ref.stream())
+        restored = workflow.get_execution(execution_id)
+        self.assertEqual(len(second_chunks), 1)
+        self.assertEqual(restored["worker_snapshot_revision"], first_revision + 1)
+        self.assertEqual(restored["log"], ["latest"])
+        self.assertEqual(restored["warn"], [])
+        self.assertEqual(restored["report"], [])
+        self.assertEqual(restored["skipped"], [])
+
+        for chunk in second_chunks:
+            chunk.reference.delete()
+        self.client.collection("execution_logs").document(execution_id).delete()
+        self.client.collection("task_outbox").document(execution_id).delete()
+        self.client.collection("executions").document(execution_id).delete()
+        self.client.collection("worker_slots").document("slot-0").delete()
+        self.client.collection("transfer_locks").document(lock_digest).delete()
+        self.client.collection("orders").document(self.order_id).delete()
+
     def test_otp_session_consume_is_atomic_and_single_use(self):
         workflow = FirestoreWorkflowRepository(self.client)
         session_id = "otp_" + secrets.token_hex(12)
