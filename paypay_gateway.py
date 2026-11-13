@@ -136,6 +136,7 @@ async def _oauth(payload: dict, referer: str, cookies: dict | None = None):
         raise PayPayError("oauth_network", "PayPay認証中に通信エラーが発生しました。") from None
 
 async def begin_login(phone: str, password: str):
+    _cipher()
     if not re.fullmatch(r"\+?[0-9]{10,15}", phone or "") or not isinstance(password, str) or not 1 <= len(password) <= 256:
         raise PayPayError("invalid_credentials", "電話番号またはパスワードの形式を確認してください。")
     existing = _load_account()
@@ -158,6 +159,7 @@ async def begin_login(phone: str, password: str):
     return {"otp_required": False}
 
 async def finish_login(otp: str):
+    _cipher()
     p = dict(_pending_otp)
     if not p:
         raise PayPayError("otp_expired", "SMS認証の有効期限が切れました。最初からログインしてください。")
