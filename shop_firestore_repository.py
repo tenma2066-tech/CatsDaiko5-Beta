@@ -152,7 +152,7 @@ class FirestoreOrderRepository:
                 raise ValueError("購入者の引継ぎ情報が未入力です。")
             tx.update(reference, {
                 "status": status,
-                "payment_digest": payment_digest or data.get("payment_digest"),
+                "payment_digest": payment_digest if payment_digest is not None else data.get("payment_digest"),
                 "payment_note": (note or "")[:300],
                 "updated": self._clock(),
             })
