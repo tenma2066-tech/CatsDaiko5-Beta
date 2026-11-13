@@ -2731,16 +2731,9 @@ async function start(){
     const bad=document.querySelector('.qrow.over');
     if(bad){ show('qty'); toast('「'+bad.dataset.item+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
   }
-  const characterSpecific=parsed.nums.length>0;
-  let quantity=characterSpecific?parsed.nums.length:1;
-  if(!characterSpecific){
-    const entered=window.prompt('代行する体数を入力してください（1〜100体）。料金は1体25円です。','1');
-    if(entered===null)return;
-    if(!/^[0-9]+$/.test(entered.trim()) || Number(entered)<1 || Number(entered)>100){
-      toast('代行体数は1〜100の整数で入力してください'); return;
-    }
-    quantity=Number(entered);
-  }
+  // 個別キャラ指定がある場合は選択されたキャラ数を使用する。
+  // キャラ指定がないサービス注文は1件として扱い、追加の体数入力は求めない。
+  const quantity=parsed.nums.length>0?parsed.nums.length:1;
   if(quantity>100){toast('一度に注文できるのは100体までです');return;}
   if($('#integrity').checked && !window.confirm('決済確認後、入力した引継ぎ情報を使って既存セーブの保全チェックを実行します。続行しますか？'))return;
   if($('#clone').checked && !window.confirm('決済確認後、入力した引継ぎ情報を使ってアカウント複製を実行します。続行しますか？'))return;
