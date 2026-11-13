@@ -257,6 +257,10 @@ gcloud scheduler jobs create http catsdaiko-execution-reconcile \\
 
 Cloud Run JobのExecution APIを読むため、Dispatcher Service Accountには対象Job/Projectの実行状態を取得できる最小権限を追加する。roles/run.viewerをProject全体へ付与する前に、可能なら対象リソース単位の権限境界を確認する。
 
+Dispatcherがslot予約後、Cloud Run JobのExecution名をFirestoreへ保存する前に停止した場合も、starting状態が永久に残らないようにする。Dispatcher Serviceには環境変数 `CLOUD_RUN_STALE_LAUNCH_SECONDS=600` を設定する（未設定時の既定値も600秒）。Execution名がないstarting状態がこの時間を超えると、/reconcileは注文・executionをreview、outboxをoutcome_unknownに変更する。
+
+**このケースではslotを自動解放しない。** Job起動APIが受理済みか否かを確認できないため、slotを解放して再起動すると同じ注文が二重処理される危険がある。管理者はCloud Run JobのExecutions一覧・該当注文・Firestore execution/outboxを照合し、起動していないことを確認できた場合だけ、専用の安全な復旧手順でslotを解除する。現時点で自動解除機能は未実装。
+
 ## 15. 公式仕様リンク
 
 - [Cloud Run Job execution / overrides](https://cloud.google.com/run/docs/execute/jobs)
