@@ -163,6 +163,12 @@ class ShopStoreTests(unittest.TestCase):
             self.store.operation_for_execution(order["id"], "wrong-token")
         )
 
+    def test_public_operation_flags_must_be_real_booleans(self):
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({"clone": "false"}, 1)
+        with self.assertRaises(self.store.ShopError):
+            self.store.create_operation_order({"clone": True, "integrity_only": True}, 1)
+
     def test_new_account_order_accepts_both_credentials_blank(self):
         order = self.store.create_operation_order(
             {"items": ["XP"], "clone": False, "integrity_only": False}, 1
