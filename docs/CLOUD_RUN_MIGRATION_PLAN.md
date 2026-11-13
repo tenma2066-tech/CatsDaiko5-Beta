@@ -444,3 +444,46 @@ Firestoreを主DBにする場合、ショップのSQLite利用箇所だけでな
 
 この調査はコード読解のみ。アプリコード、Render、runtime-data、注文受付設定、PayPay設定は変更していない。
 
+
+
+## 14. Phase 1 追加調査：PayPay・管理者認証の永続データ（2026-11-13）
+
+### 14.1 PayPayデータの現状
+
+paypay_gateway.py を確認。PayPay連携にはショップ注文DBとは別に次の状態がある。
+
+- paypay/account.enc: PayPayアカウント情報（電話番号、パスワード、UUID、access token、session cookie、有効期限等）をJSON化し、Fernet暗号化したBlob。GitHub runtime storeが有効なRender環境ではGitHub runtime-dataに保存。
+- paypay-ledger.sqlite3: linksテーブル。送金リンクdigest（PRIMARY KEY）、order_id（UNIQUE）、state、createdを保持し、attempted / paid / pending / review等で重複受取・不確定結果を管理。GitHub runtime store経由の暗号化SQLiteスナップショットとして保存。
+- _pending_otp: SMS認証中の電話番号・パスワード・UUID・OTP reference・prefix・Cookieをプロセスメモリに保持。プロセス再起動やCloud Runのスケールダウンで失われる。
+- _LOCK: PayPayログイン・受取処理を保護するPythonプロセス内threading.Lock。別コンテナ間では共有されない。
+
+### 14.2 Cloud Run移行で追加必須となる対応
+
+- PayPayアカウントの暗号化データを移行する場合、PAYPAY_ENCRYPTION_KEYを現行と同じ値でSecret Managerへ安全に登録する。鍵の再生成は禁止。保存済みaccount.encを読み戻せることをテストする。
+- PayPay受取台帳は注文DBと別の整合性境界として移行し、リンクdigestとorder_idの両方の一意性をFirestore transactionで保証する。
+- PayPayの受取要求は外部API呼び出しとDB書き込みの間に分散トランザクションが存在しない。送信前にdigestをattemptedとして確保し、応答不明・タイムアウト・プロセス終了時はreview/pendingへfail-closedで移す。移行後も同一リンクの自動再送は禁止。
+- _pending_otpを単なるプロセスメモリに残さない。SMS認証フローを継続する必要がある場合、必要最小限の情報を暗号化して永続化し、短いTTL・一回限りの状態遷移・管理者セッション所有確認を実装する。OTPそのものは保存・ログ出力しない。認証フローの有効期限切れ時は再開せず最初からやり直す。
+- _LOCKは分散ロックに置き換える。PayPayアカウントのrefresh token/session更新と受取処理の競合を避けるため、アカウント単位のlease/transactionを設計する。期限切れleaseの回収は、外部API操作の結果が不明な状態を誤って再実行しないよう慎重に行う。
+- PayPayアカウント情報にはパスワード・Cookie・token等の強い秘密情報が含まれるため、Firestoreへ保存する場合はFernet暗号文のみを格納し、IAM最小権限・ログ除外・バックアップ暗号化を徹底する。Secret Managerを動的セッション台帳として使うのではなく、長期暗号化キーや固定シークレットの保管に用いる。
+- PayPayログイン・SMS認証の失敗をCloud Runのリージョン変更で回避できるとは断定しない。利用条件と公式サポートの範囲内で検証する。
+
+### 14.3 管理者認証の現状
+
+- render.yamlはAUTH_GITHUB_REPO / AUTH_GITHUB_TOKENを設定する構成で、アプリはGitHubPasswordStoreを利用する。
+- github_auth_store.pyはパスワードhashをGitHubリポジトリ内のファイルへ保存する。これはruntime-dataの注文DBとは別の保存経路。
+- auth_store.pyはローカルSQLiteを使うfallback実装。Cloud Runのローカルディスクは永続ではないため、fallbackへ意図せず切り替わらないよう起動時設定検証を行う。
+- 管理者パスワードhashをFirestoreへ移す必要があるかは、現行GitHubPasswordStoreをCloud Runから継続利用する場合と比較して決める。GitHubファイル保存を残す場合も、同時更新競合とGitHub API障害時のfail-closed動作を確認する。
+
+### 14.4 移行対象データ一覧の更新
+
+Firestore移行対象候補は、少なくとも次の4領域となる。
+
+1. ショップ注文 orders（shop.sqlite3）
+2. PayPay受取リンク台帳 links（paypay-ledger.sqlite3）
+3. PayPayアカウント暗号化Blob（paypay/account.enc）
+4. Worker execution / progress / queue / transfer lock / slot lease（現状は主にプロセスメモリ）
+
+管理者パスワードhashは現行GitHubPasswordStoreを維持するか、別途移行を決定する。既存runtime-dataの全ファイル一覧・blob SHA・暗号化状態をPhase 0で取得してから、対象と件数を確定する。
+
+この調査はコード読解のみ。PayPayログイン・受取は実行していない。秘密値、token、Cookie、OTPは取得・記録・表示していない。アプリコード、Render、runtime-data、注文受付設定は変更していない。
+
