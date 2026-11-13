@@ -18,6 +18,27 @@ from google.cloud import firestore
 
 class WorkflowStateError(RuntimeError):
     pass
+\n\ndef _estimate_firestore_payload_size(value: Any) -> int:
+    """Conservatively estimate serialized payload bytes before a document write."""
+    if value is None:
+        return 1
+    if isinstance(value, bytes):
+        return len(value) + 16
+    if isinstance(value, str):
+        return len(value.encode("utf-8")) + 8
+    if isinstance(value, bool):
+        return 1
+    if isinstance(value, (int, float)):
+        return 16
+    if isinstance(value, dict):
+        return 16 + sum(
+            _estimate_firestore_payload_size(str(key))
+            + _estimate_firestore_payload_size(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return 8 + sum(_estimate_firestore_payload_size(item) for item in value)
+    return _estimate_firestore_payload_size(str(value))
 
 
 def transfer_lock_id(transfer_code: str, pepper: bytes) -> str:
@@ -639,6 +660,12 @@ class FirestoreWorkflowRepository:
                 data["worker_finished"] = snapshot.get("finished")
             if snapshot.get("audit") is not None:
                 data["audit"] = snapshot["audit"]
+            # Firestore documents are limited to 1 MiB. Keep a substantial
+            # safety margin for document metadata and future schema fields;
+            # never silently truncate audit/result payloads.
+            payload_size = _estimate_firestore_payload_size(data)
+            if payload_size > 700 * 1024:
+                raise WorkflowStateError("execution_snapshot_too_large")
             tx.update(reference, data)
 
         persist(transaction)
