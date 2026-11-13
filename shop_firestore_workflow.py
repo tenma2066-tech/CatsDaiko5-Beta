@@ -129,26 +129,57 @@ class FirestoreWorkflowRepository:
         mark(transaction)
 
     def begin_dispatch(self, execution_id: str) -> dict[str, str] | None:
-        """Single-use launch gate; ambiguous launches are never auto-replayed."""
-        reference = self._outbox.document(execution_id)
+        """Atomically reserve one of the four global slots before launching a Job."""
+        outbox_ref = self._outbox.document(execution_id)
+        execution_ref = self._executions.document(execution_id)
         transaction = self._client.transaction(max_attempts=5)
 
         @firestore.transactional
         def begin(tx):
-            snapshot = reference.get(transaction=tx)
-            if not snapshot.exists:
-                raise WorkflowStateError("outbox item not found")
-            data = snapshot.to_dict()
-            if data.get("state") != "task_enqueued":
+            outbox = outbox_ref.get(transaction=tx)
+            execution = execution_ref.get(transaction=tx)
+            if not outbox.exists or not execution.exists:
+                raise WorkflowStateError("execution outbox state is incomplete")
+            outbox_data = outbox.to_dict()
+            if outbox_data.get("state") != "task_enqueued":
                 return None
-            tx.update(reference, {
-                "state": "launching",
-                "launch_started": self._clock(),
-                "updated": self._clock(),
+            order_ref = self._orders.document(outbox_data["order_id"])
+            order = order_ref.get(transaction=tx)
+            if not order.exists:
+                raise WorkflowStateError("order not found")
+            # All slot reads happen before the first write in this transaction.
+            candidates = []
+            for index in range(self._max_slots):
+                reference = self._slots.document(f"slot-{index}")
+                snapshot = reference.get(transaction=tx)
+                if not snapshot.exists or snapshot.to_dict().get("state") == "released":
+                    candidates.append(reference)
+            if not candidates:
+                return {"state": "no_slot"}
+            slot_ref = candidates[0]
+            slot_id = slot_ref.id
+            now = self._clock()
+            tx.update(outbox_ref, {
+                "state": "launching", "launch_started": now, "slot_id": slot_id,
+                "updated": now,
+            })
+            tx.update(execution_ref, {
+                "state": "starting", "slot_id": slot_id, "updated": now,
+            })
+            tx.update(order_ref, {
+                "status": "fulfilling", "job_id": execution_id,
+                "updated": now,
+            })
+            tx.set(slot_ref, {
+                "slot_id": slot_id, "state": "reserved",
+                "owner": "dispatch:" + execution_id,
+                "execution_id": execution_id, "claimed": now, "updated": now,
             })
             return {
-                "execution_id": data["execution_id"],
-                "order_id": data["order_id"],
+                "state": "launch",
+                "execution_id": outbox_data["execution_id"],
+                "order_id": outbox_data["order_id"],
+                "slot_id": slot_id,
             }
 
         return begin(transaction)
