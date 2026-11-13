@@ -134,14 +134,11 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         workflow.enqueue_execution(self.order_id, execution_id)
         self.assertEqual(len(workflow.list_pending_outbox()), 1)
         workflow.mark_task_enqueued(execution_id)
-        self.assertIsNone(workflow.begin_dispatch(execution_id))
         # A second enqueue with the same order is rejected by the order guard.
         with self.assertRaises(WorkflowStateError):
             workflow.enqueue_execution(self.order_id, "exec_" + secrets.token_hex(8))
 
         # First task delivery wins the launch gate; duplicate deliveries are no-ops.
-        outbox_ref = self.client.collection("task_outbox").document(execution_id)
-        self.client.collection("task_outbox").document(execution_id).update({"state": "task_enqueued"})
         claim = workflow.begin_dispatch(execution_id)
         self.assertEqual(claim["order_id"], self.order_id)
         self.assertIsNone(workflow.begin_dispatch(execution_id))
