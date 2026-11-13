@@ -167,6 +167,84 @@ class FirestorePaymentRepository:
         self._orders = client.collection("orders")
         self._attempts = client.collection("payment_attempts")
 
+    def claim_payment_attempt(self, order_id: str, payment_digest: str) -> bool:
+        """Atomically reserve one payment link digest for one awaiting order."""
+        if not re.fullmatch(r"[0-9a-f]{64}", payment_digest or ""):
+            raise ValueError("payment digest must be a SHA-256 hex digest")
+        order_ref = self._orders.document(order_id)
+        attempt_ref = self._attempts.document(payment_digest)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def claim(tx):
+            order = order_ref.get(transaction=tx)
+            attempt = attempt_ref.get(transaction=tx)
+            if (not order.exists or order.to_dict().get("status") != "awaiting_payment"
+                    or attempt.exists):
+                return False
+            now = self._clock()
+            tx.create(attempt_ref, {
+                "order_id": order_id, "state": "attempted",
+                "created": now, "updated": now,
+            })
+            tx.update(order_ref, {
+                "status": "payment_processing", "payment_digest": payment_digest,
+                "payment_note": "", "updated": now,
+            })
+            return True
+
+        return claim(transaction)
+
+    def transition_payment_attempt(
+        self, order_id: str, payment_digest: str, state: str, note: str = "",
+    ) -> None:
+        allowed = {
+            "attempted": {"pending", "paid", "review", "outcome_unknown"},
+            "pending": {"paid", "review", "outcome_unknown"},
+            "outcome_unknown": {"paid", "review"},
+            "review": {"paid"},
+            "paid": set(),
+        }
+        if state not in allowed:
+            raise ValueError("invalid payment attempt state")
+        order_ref = self._orders.document(order_id)
+        attempt_ref = self._attempts.document(payment_digest)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def transition(tx):
+            order = order_ref.get(transaction=tx)
+            attempt = attempt_ref.get(transaction=tx)
+            if not order.exists or not attempt.exists:
+                raise PaymentRepositoryError("決済試行が見つかりません。")
+            attempt_data = attempt.to_dict()
+            if attempt_data.get("order_id") != order_id:
+                raise PaymentRepositoryError("決済リンクは別の注文で使用されています。")
+            current = attempt_data.get("state")
+            if state not in allowed.get(current, set()):
+                raise PaymentRepositoryError("決済状態を安全に更新できません。")
+            order_data = order.to_dict()
+            if state == "paid" and order_data.get("status") not in {"payment_processing", "review"}:
+                raise PaymentRepositoryError("注文状態が決済完了と一致しません。")
+            now = self._clock()
+            tx.update(attempt_ref, {
+                "state": state, "note": (note or "")[:120],
+                "updated": now,
+            })
+            order_state = (
+                "paid" if state == "paid"
+                else "review" if state in {"review", "outcome_unknown"}
+                else "payment_processing"
+            )
+            tx.update(order_ref, {
+                "status": order_state,
+                "payment_digest": payment_digest,
+                "payment_note": (note or "")[:300],
+                "updated": now,
+            })
+
+        transition(transaction)
+
     def claim_payment(self, order_id: str) -> bool:
         reference = self._orders.document(order_id)
         transaction = self._client.transaction(max_attempts=5)
@@ -208,16 +286,23 @@ class FirestorePaymentRepository:
         def complete(tx):
             order_snapshot = order_ref.get(transaction=tx)
             attempt_snapshot = attempt_ref.get(transaction=tx)
-            if (not order_snapshot.exists
-                    or order_snapshot.to_dict().get("status") != "payment_processing"
-                    or attempt_snapshot.exists):
+            if not order_snapshot.exists or order_snapshot.to_dict().get("status") != "payment_processing":
                 raise PaymentRepositoryError(
                     "決済後の注文状態を確定できません。管理者による確認が必要です。"
                 )
-            tx.create(attempt_ref, {
-                "order_id": order_id, "state": "paid",
-                "created": self._clock(),
-            })
+            if attempt_snapshot.exists:
+                existing = attempt_snapshot.to_dict()
+                if (existing.get("order_id") != order_id
+                        or existing.get("state") not in {"attempted", "pending"}):
+                    raise PaymentRepositoryError(
+                        "決済リンクは既に使用済み、または確認が必要です。"
+                    )
+                tx.update(attempt_ref, {"state": "paid", "updated": self._clock()})
+            else:
+                tx.create(attempt_ref, {
+                    "order_id": order_id, "state": "paid",
+                    "created": self._clock(), "updated": self._clock(),
+                })
             tx.update(order_ref, {
                 "status": "paid", "payment_digest": payment_digest,
                 "payment_note": "", "updated": self._clock(),
