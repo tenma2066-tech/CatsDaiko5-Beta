@@ -142,7 +142,7 @@ class CloudRunDispatcherTests(unittest.TestCase):
         client = Client()
         publisher = CloudTasksOutboxPublisher(
             client, repo, project="demo", location="asia-northeast1",
-            queue="orders", dispatcher_url="https://dispatcher.example/dispatch",
+            queue="orders", dispatcher_url="https://dispatcher.example",
             oidc_service_account="tasks@example.iam.gserviceaccount.com",
         )
         self.assertTrue(publisher.publish("exec_12345678"))
@@ -152,8 +152,10 @@ class CloudRunDispatcherTests(unittest.TestCase):
             "order_id": "0123456789",
             "execution_id": "exec_12345678",
         })
-        self.assertEqual(task.http_request.oidc_token.audience,
+        self.assertEqual(task.http_request.url,
                          "https://dispatcher.example/dispatch")
+        self.assertEqual(task.http_request.oidc_token.audience,
+                         "https://dispatcher.example")
         self.assertTrue(repo.marked)
         self.assertFalse(publisher.publish("exec_12345678"))
 
