@@ -1205,15 +1205,16 @@ def shop_home():
     except shop_store.ShopError:
         products = []
     product_json = json.dumps(products, ensure_ascii=False).replace("</", "<\\/")
+    orders_enabled = os.environ.get("SHOP_LIVE_ORDERS_ENABLED") == "1"
     body = r"""<div class="card"><h2>商品を選択</h2><p class="muted">ログイン不要でご注文いただけます。商品を選び、引継ぎ情報を入力してください。</p>
-<div id="products"></div><p id="catalog-error" class="error"></p></div>
+<div id="products"></div><p id="catalog-error" class="error"></p><p class="muted" id="shop-disabled">__SHOP_DISABLED__</p></div>
 <div class="card" id="checkout" hidden><h2 id="selected-title">注文内容</h2><p class="price" id="selected-price"></p>
 <label>引継ぎコード<input id="transfer" maxlength="128" autocomplete="off" autocapitalize="off"></label>
 <label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
 <p class="muted">入力情報は暗号化して保存し、注文処理にのみ使用します。</p>
 <button id="place">注文を確定する</button><p id="error" class="error"></p></div>
 <script>
-const products=__PRODUCTS__;let selected=null;
+const products=__PRODUCTS__;let selected=null;\nconst ordersEnabled=__ORDERS_ENABLED__;\nif(!ordersEnabled){document.getElementById("shop-disabled").textContent="現在はベータ準備中のため注文受付を停止しています。";}
 const yen=n=>new Intl.NumberFormat('ja-JP').format(n)+'円';
 const list=document.getElementById('products');
 if(!products.length){document.getElementById('catalog-error').textContent='現在、販売商品が設定されていません。管理者にお問い合わせください。';}
@@ -1230,11 +1231,13 @@ document.getElementById('place').addEventListener('click',async()=>{
   location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
  }catch(e){error.textContent=e.message;}finally{button.disabled=false;button.textContent='注文を確定する';}
 });
-</script>""".replace("__PRODUCTS__", product_json)
+</script>""".replace("__PRODUCTS__", product_json).replace("__ORDERS_ENABLED__", "true" if orders_enabled else "false").replace("__SHOP_DISABLED__", "")
     return _shop_page("商品一覧", body)
 
 @app.post("/api/shop/orders")
 def shop_create_order():
+    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
+        return jsonify(error="現在は注文受付を停止しています。"), 503
     data = request.get_json(silent=True) or {}
     try:
         order = shop_store.create_order(data.get("sku", ""), data.get("transfer_code", ""), data.get("pin", ""))
@@ -1269,6 +1272,8 @@ def shop_order_status(order_id):
 
 @app.post("/api/shop/order/<order_id>/paypay")
 def shop_paypay_submit(order_id):
+    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
+        return jsonify(error="現在は決済受付を停止しています。"), 503
     data = request.get_json(silent=True) or {}
     order = shop_store.public_order(order_id, data.get("key", ""))
     if not order:
@@ -1305,6 +1310,7 @@ def admin_paypay_page():
 @app.post("/admin/paypay/connect")
 def admin_paypay_connect():
     if not _logged_in() or not session.get("admin"): return "管理者モードが必要です。", 403
+    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1": return "永続ストレージと商品設定を確認してから注文受付を有効にしてください。", 503
     token=session.get("admin_csrf","")
     if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
     try:
