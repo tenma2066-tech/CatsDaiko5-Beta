@@ -270,3 +270,76 @@ GitHub runtime-dataの扱い:
 ---
 
 **運用上の原則:** 安さよりも注文・決済・セーブデータの整合性を優先する。無料枠に収まらない設計を無理に採用せず、1,000円以内を満たせない場合は実装前に代替案と費用を提示する。
+
+
+## 11. Phase 1 調査結果（2026-11-13）
+
+### 11.1 公式仕様で確認できたこと
+
+- Cloud Runは東京 `asia-northeast1` に対応しており、東京はTier 1料金リージョン。Singapore（`asia-southeast1`）はTier 2。東京へ配置すること自体は可能。
+- Cloud Run Serviceのリクエストベース課金は、リクエスト処理中・起動・シャットダウン時が主な課金対象。最小インスタンス数0なら、通常のアイドル時間にインスタンスを維持する料金を避けられる。
+- Cloud Runの無料枠（リクエストベースService）は、月あたりCPU 180,000 vCPU秒、メモリ360,000 GiB秒、リクエスト200万回。Jobは別区分でCPU 240,000 vCPU秒、メモリ450,000 GiB秒の無料枠が表示されている。無料枠は請求先アカウント単位でプロジェクト横断集計されるため、他プロジェクトでの利用分も影響し得る。
+- Cloud Run Jobsは実行中のインスタンス時間に対して課金され、最低課金時間は1分。Jobが終了すれば処理インスタンスは常時稼働しない。
+- Cloud Tasksは月間最初の100万billable operationsが無料。操作数にはAPI呼び出しとpush delivery attemptが含まれ、32KB単位で計算される。リトライやタスク操作が増えると無料枠を消費する。
+- Firestore Standardには、1プロジェクトにつき1データベースのみ適用される無料枠がある。保存1GiB、読み取り50,000/日、書き込み20,000/日、削除20,000/日、外向き転送10GiB/月。無料枠は日次リセット。TTL削除、PITR、バックアップ、復元、クローン等は無料枠対象外。
+- Firestore Native modeとCloud Runの双方で東京 `asia-northeast1` が利用可能。
+
+### 11.2 暫定費用判断
+
+**現時点の判断: 月額1,000円以内を狙える構成ではあるが、まだ保証できない。**
+
+理由:
+- Web Serviceをmin instances 0、request-based billingで運用し、アクセスが少なければServiceの課金を無料枠内に抑えられる可能性がある。
+- Cloud Tasksは100万操作/月まで無料枠がある。
+- Firestoreは小規模な注文・進捗データなら、無料枠内に収まる可能性が高い。
+- Cloud Run Jobsも月間実行時間が少なければ無料枠内に収まる可能性がある。
+- ただし、Cloud Runの無料枠はリージョンTier・請求先アカウント内の他利用量・ServiceとJobの課金区分に左右される。Artifact Registry、Cloud Build、Secret Manager、Cloud Logging、外向き通信なども別途確認が必要。無料枠超過やログ大量出力、Jobの長時間実行・再試行で課金が発生する。
+
+現段階で月額を確定できない理由:
+- 1件あたりBCSFE処理時間、CPU・メモリ使用量、月間注文件数が未計測。
+- コンテナイメージのサイズ・保持数、ビルド頻度、ログ量が未計測。
+- Firestoreへ移すデータ量・1注文あたりのread/write回数が未設計。
+- Google Cloud請求先アカウントの無料枠消費状況が不明。
+
+### 11.3 Phase 1の暫定アーキテクチャ決定
+
+次の構成を第一候補として進める。
+
+`Cloud Run Web Service (Tokyo, min=0, request-based)`
+→ `Cloud Tasks`
+→ `Private authenticated dispatcher Service`
+→ `Cloud Run Jobs (per order/execution)`
+→ `Firestore Standard (Tokyo)`
+
+- Firestoreを注文・実行状態のトランザクションDB候補とする。SQLiteからのデータモデル移行が必要なため、単純なファイル置換ではなくRepository層を設ける。
+- GitHub `runtime-data` はバックアップ・移行元として維持し、Cloud Runの複数Writerから直接更新する主DBにはしない。
+- Cloud Tasks payloadは注文ID・実行ID等の非秘密メタデータに限定する。
+- DispatcherはJob起動要求だけを行い、BCSFE処理をHTTPリクエスト内で実行しない。
+- Jobは注文単位で起動し、DB上の一意な実行ID・条件付き状態遷移で重複配送と二重実行を防ぐ。
+- Cloud Run Serviceはmin instances 0、最大インスタンス数を制限。Jobの並列数・再試行数も小さく制限する。
+- 予算アラートを設定するが、アラートは自動停止機能ではないため、別途利用上限・インスタンス数・Job並列数・ログ量を制限する。
+
+### 11.4 まだ決めていないこと・次の調査
+
+1. FirestoreへのSQLiteデータモデル移行方法。特に注文、決済台帳、暗号化済み資格情報、実行ロック、進捗、結果の整合性設計。
+2. Firestoreのインデックス・トランザクション設計と、実データ量に基づくread/write見積もり。
+3. Artifact Registry、Cloud Build、Secret Manager、Cloud Logging、ネットワーク転送の東京リージョン適用料金。
+4. Cloud Run JobのCPU・メモリ・一時ディスク・実行時間の実測。既存Render環境のログや処理記録から安全に推定できるか確認する。
+5. Google Cloud Pricing Calculatorで通常月・注文集中月・異常再試行月の3ケースを算出する。
+6. 予算上限を超えた場合の安全策。課金アラートだけに頼らず、注文受付停止・Job起動停止の運用スイッチを設計する。
+
+### 11.5 今回の変更範囲
+
+この追記は公式料金・リージョン・無料枠の調査結果と暫定設計を記録したもの。GCPリソース作成、課金有効化、アプリコード変更、Render設定変更、注文受付の有効化、PayPay実機テストは行っていない。Renderと安定版 `CatsDaiko5` は変更していない。
+
+### 11.6 Phase 1で参照した公式資料
+
+- Cloud Run pricing: https://cloud.google.com/run/pricing
+- Cloud Run locations: https://cloud.google.com/run/docs/locations
+- Cloud Run billing settings: https://cloud.google.com/run/docs/configuring/billing-settings
+- Cloud Run Job task timeout: https://docs.cloud.google.com/run/docs/configuring/task-timeout
+- Cloud Tasks pricing: https://cloud.google.com/tasks/pricing
+- Firestore pricing: https://cloud.google.com/firestore/pricing
+- Firestore quotas and free tier: https://docs.cloud.google.com/firestore/quotas
+- Firestore Native mode locations: https://docs.cloud.google.com/firestore/native/docs/locations
+
