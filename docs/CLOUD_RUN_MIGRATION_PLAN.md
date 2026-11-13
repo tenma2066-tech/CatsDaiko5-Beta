@@ -590,7 +590,7 @@ F. execution完了:
 | 100 | 10分 | 60,000 | 60,000 | $0（無料枠内） |
 | 500 | 5分 | 150,000 | 150,000 | $0（無料枠内） |
 | 1,000 | 5分 | 300,000 | 300,000 | 約$1.08（約¥173） |
-| 1,000 | 10分 | 600,000 | 600,000 | 約$6.78（約¥1,082） |
+| 1,000 | 10分 | 600,000 | 600,000 | 約$6.78（約¥1,084） |
 
 換算は2026-11-13のUSD/JPY約159.9円で単純換算した参考値であり、カード/銀行換算、Google請求通貨、税・その他サービス料金は含まない。実処理が2 vCPUを必要とする場合、CPU費用は増える。Cloud Run Jobsは実行中のinstance-based料金で、1分未満の実行にも最低1分が適用される。
 
@@ -657,4 +657,41 @@ F. execution完了:
 - Firestore quotas (document size / TTL / transactions): https://firebase.google.com/docs/firestore/quotas
 - Cloud Tasks delivery and idempotency: https://docs.cloud.google.com/tasks/docs/dual-overview
 - Cloud Tasks duplicate execution pitfalls: https://docs.cloud.google.com/tasks/docs/common-pitfalls
+
+
+
+## 17. 移行進捗チェックポイント（2026-11-13）
+
+### 完了
+- [x] Phase 0: 現行Betaの構成・データ保存・PayPay/Worker状態のコード調査
+- [x] Phase 1: 東京リージョン、Cloud Run/Jobs、Cloud Tasks、Firestore、Artifact Registry、Cloud Build、Secret Manager、Loggingの公式仕様・無料枠確認
+- [x] Phase 1: Firestoreコレクション案と注文・決済・Jobのtransaction境界を設計
+- [x] Phase 1: Cloud Tasks at-least-once配信、Firestore document/transaction制限、TTL料金を設計へ反映
+- [x] Phase 1: 1 vCPU / 1 GiBを仮定したJob実行量の参考シナリオを計算
+- [x] 各調査・設計結果を本ファイルへ記録し、mainで取得し直して内容を検証
+
+### Phase 1終了時の判断
+- アーキテクチャ第一候補はCloud Run Service + Cloud Tasks + Dispatcher + Cloud Run Jobs + Firestore Standard。
+- Cloud Run Serviceは東京、request-based billing、min instances 0。
+- Firestore Standardは東京、暗号文と業務状態のみ。大きなファイル・ログは保存しない。
+- Jobは1 task / execution、parallelism 1、initial max retries 0、全体同時実行4枠をtransactional slotで制御。
+- 決済・ゲーム処理は結果不明時に自動再試行せず、review/outcome_unknownへ。
+- 小規模利用なら無料枠内に収まる可能性はあるが、1,000件/月・10分/件のJob computeだけで約¥1,084の参考値となり、総額1,000円以内は保証できない。実測値に基づく再試算が必要。
+
+### Phase 2の作業順
+1. GitHubの別ブランチに作業用ブランチを作り、Render稼働中のmainへ直接不完全な変更を入れない。
+2. 現行SQLite/Runtime Storeの呼び出し境界を一覧化し、Shop / Payment / Execution / Auth のRepository interfaceを設計する。
+3. Firestore clientを遅延初期化するadapterを作成し、ローカル単体テストではfake repositoryを使えるようにする。
+4. 注文状態遷移とpayment attemptのtransactionを先に実装し、重複・競合・DB障害のテストを追加する。
+5. outbox / execution claim / slot lease / transfer lockを順に実装する。外部APIはfakeで検証し、PayPay実リクエストは送らない。
+6. 既存のRender向けSQLite backendを残し、環境変数でbackendを明示選択。Cloud Run設定が未完成の間はRender動作を変えない。
+7. Firestore Emulator等を利用できるテスト環境を整え、transaction retry・重複配送・worker crash・outcome_unknownを検証する。
+8. 移行コードが一通り揃った後に、コードレビュー・テスト・Cloud Run専用のisolated staging準備へ進む。
+
+### Phase 2開始前の安全条件
+- 現在のCloud Run/GCP project、billing account、IAM、サービスアカウント、Secret Managerは未作成・未確認。
+- Cloud Runデプロイ・Firestore作成・課金有効化・PayPay実機テスト・Render切替は、Google Cloud側の準備と別途検証が終わるまで実施しない。
+- Phase 2のコード変更は専用ブランチで行い、main/Renderへ自動反映させない。
+- SHOP_LIVE_ORDERS_ENABLED=0を維持し、注文受付を有効化しない。
+- CatsDaiko5安定版は引き続き変更しない。
 
