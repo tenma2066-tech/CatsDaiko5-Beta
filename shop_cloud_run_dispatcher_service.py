@@ -90,8 +90,6 @@ def create_app():
                         )
                         unknown_launches += 1
                     continue
-                if str(execution_name).startswith("worker-"):
-                    continue
                 resource_name = (
                     str(execution_name) if "/" in str(execution_name)
                     else job_resource + "/executions/" + str(execution_name)
