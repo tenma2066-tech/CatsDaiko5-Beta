@@ -287,6 +287,19 @@ PayPay ledger snapshot自体が見つからない場合も `--apply` は拒否�
 
 Cloud Billing予算アラートは通知であり、サービスの自動停止を保証しない。Cloud Run max instances、Job並列数、Cloud Tasks queue rate、Firestore読み書き、Logging量を制限する。月額1,000円を超える見込みが出た場合は実注文を有効化しない。Jobの実行時間・CPU/メモリ・progress write頻度を実測してから費用を再計算する。
 
+2026-11-14時点の公式料金表で確認できる主な無料枠・料金上の制約:
+
+| サービス | 無料枠・目安 | 今回の注意点 |
+|---|---|---|
+| Cloud Run Jobs | 月240,000 vCPU秒 / 450,000 GiB秒（us-central1基準） | 1 vCPU・1 GiBならCPU枠が先に上限。東京リージョン単価と請求先アカウント内の合算使用量を再確認 |
+| Cloud Run Services | 月180,000 vCPU秒 / 360,000 GiB秒 / 200万リクエスト（リクエスト課金時） | Web・Dispatcherともmin instances 0を維持 |
+| Firestore Standard | 1 GiB保存、50,000 read/日、20,000 write/日、20,000 delete/日、10 GiB送信/月 | 無料枠対象は1 Projectにつき既定DB 1つ。TTL/PITR/Backup等は無料枠外 |
+| Cloud Tasks | 月100万課金対象operation | API呼び出しとpush配信試行の両方が対象 |
+| Cloud Scheduler | 請求先アカウントあたり月3ジョブ | 今回の2ジョブは、他プロジェクトの利用がなければ無料枠内 |
+| Artifact Registry | 請求先アカウントあたり0.5 GiB-month | 古いイメージを残しすぎない。超過分は保存料金が発生 |
+
+無料枠はサービスごとに適用単位が異なり、請求先アカウント単位で他プロジェクトと共有されるものがある。無料枠を使い切っている場合や、東京リージョンの料金が異なる場合は追加料金が発生する。Firestoreの無料枠は日次でリセットされる。**この無料枠表だけでは月額1,000円以内を保証できない。**
+
 
 ## 15. Cloud Run Job終了状態の照合スケジュール
 
@@ -321,6 +334,11 @@ Dispatcherがslot予約後、Cloud Run JobのExecution名をFirestoreへ保存�
 - [Cloud Run container runtime contract（CLOUD_RUN_EXECUTION）](https://cloud.google.com/run/docs/container-contract)
 - [Cloud Tasks HTTP target tasks / OIDC](https://cloud.google.com/tasks/docs/create-http-task)
 - [Firestore locations](https://cloud.google.com/firestore/docs/locations)
+- [Cloud Run pricing](https://cloud.google.com/run/pricing)
+- [Firestore pricing](https://cloud.google.com/firestore/pricing)
+- [Cloud Tasks pricing](https://cloud.google.com/tasks/pricing)
+- [Cloud Scheduler pricing](https://cloud.google.com/scheduler/pricing)
+- [Artifact Registry pricing](https://cloud.google.com/artifact-registry/pricing)
 
 
 ## 16. Worker snapshot log/report chunk保存
