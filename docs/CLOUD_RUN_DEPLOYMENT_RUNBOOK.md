@@ -193,6 +193,30 @@ Cloud Schedulerから1分ごとに非公開Dispatcherの `POST /sweep` と `POST
 
 Scheduler用サービスアカウントにはDispatcher Serviceへの `roles/run.servicesInvoker` だけを付与する。Cloud Schedulerには `catsdaiko-outbox-sweep`（POST /sweep）と `catsdaiko-execution-reconcile`（POST /reconcile）の2ジョブを作成し、どちらも1分ごとに実行する。
 
+作成例（同じScheduler SAを両方に使う）。
+
+```bash
+gcloud scheduler jobs create http catsdaiko-outbox-sweep \
+  --location=asia-northeast1 \
+  --schedule="* * * * *" \
+  --time-zone="Asia/Tokyo" \
+  --uri="$DISPATCHER_URL/sweep" \
+  --http-method=POST \
+  --oidc-service-account="$SCHEDULER_SA" \
+  --oidc-token-audience="$DISPATCHER_URL" \
+  --project="$PROJECT_ID"
+
+gcloud scheduler jobs create http catsdaiko-execution-reconcile \
+  --location=asia-northeast1 \
+  --schedule="* * * * *" \
+  --time-zone="Asia/Tokyo" \
+  --uri="$DISPATCHER_URL/reconcile" \
+  --http-method=POST \
+  --oidc-service-account="$SCHEDULER_SA" \
+  --oidc-token-audience="$DISPATCHER_URL" \
+  --project="$PROJECT_ID"
+```
+
 ## 12. デプロイ後の検証（注文受付は停止したまま）
 
 1. Web `/health` とDispatcher `/healthz` を確認。
