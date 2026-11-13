@@ -1559,7 +1559,7 @@ def admin_paypay_page():
     try: pp_status = paypay_gateway.status()
     except paypay_gateway.PayPayError as exc: pp_status = {"connected":False,"ready":False,"error":exc.message}
     csrf = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
-    otp_waiting = bool(paypay_gateway._pending_otp)
+    otp_waiting = paypay_gateway.otp_pending()
     body = """<div class="card"><h2>PayPay接続</h2><p>接続状態：<b>"""+("受取可能" if pp_status.get("ready") else "未接続・再認証が必要")+"""</b></p>
 <p class="muted">SMS認証はPayPayが要求した場合のみです。認証情報は暗号化して保存されます。</p>
 <form method="post" action="/admin/paypay/connect"><input type="hidden" name="csrf" value="{{ csrf }}">
