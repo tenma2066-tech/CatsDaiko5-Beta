@@ -1392,6 +1392,15 @@ def shop_order_progress(order_id):
         session["_order_execution"] = True
         session["job_owner"] = "order:" + order_id
         response = status(job_id)
+        if isinstance(response, tuple):
+            body, code = response
+            if code == 404:
+                try:
+                    shop_store.set_status(order_id, "review", note="サーバー再起動等で処理状況を復元できません")
+                except shop_store.ShopError:
+                    pass
+                return jsonify(status="error", error="サーバー再起動等により処理状況を復元できません。管理者へお問い合わせください。")
+            return body, code
         job_data = response.get_json(silent=True) if hasattr(response, "get_json") else None
     if isinstance(job_data, dict) and job_data.get("status") == "done":
         try:
