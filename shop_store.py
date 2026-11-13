@@ -70,30 +70,45 @@ def catalog():
                        "description": str(row.get("description") or "")[:300]})
     return result
 
-def create_order(sku: str, transfer_code: str, pin: str):
+def create_order(sku: str):
     items = {x["id"]: x for x in catalog()}
     item = items.get(sku)
     if not item:
         raise ShopError("商品が見つからないか、現在販売していません。")
+    order_id = secrets.token_hex(5).upper()
+    access_token = secrets.token_urlsafe(32)
+    credentials = _cipher().encrypt(json.dumps(
+        {"transfer_code": "", "pin": ""}, ensure_ascii=False
+    ).encode("utf-8"))
+    now = time.time()
+    with _db() as db:
+        db.execute("""INSERT INTO orders
+            (id,access_hash,sku,title,amount,credential_enc,credentials_submitted,status,created,updated)
+            VALUES(?,?,?,?,?,?,0,'awaiting_payment',?,?)""",
+            (order_id, hashlib.sha256(access_token.encode()).hexdigest(), sku,
+             item["title"], item["price_yen"], credentials, now, now))
+    return {"id": order_id, "access_token": access_token, "title": item["title"],
+            "amount": item["price_yen"], "status": "awaiting_payment"}
+
+def save_credentials(order_id: str, access_token: str, transfer_code: str, pin: str):
     transfer_code, pin = (transfer_code or "").strip(), (pin or "").strip()
     if not transfer_code or not pin or len(transfer_code) > 128 or len(pin) > 32:
         raise ShopError("引継ぎコードと暗証番号を正しく入力してください。")
     if any(ord(ch) < 32 for ch in transfer_code + pin):
         raise ShopError("入力内容に使用できない文字が含まれています。")
-    order_id = secrets.token_hex(5).upper()
-    access_token = secrets.token_urlsafe(32)
-    credentials = _cipher().encrypt(json.dumps(
+    row = _row(order_id)
+    if not row or not secrets.compare_digest(
+        row["access_hash"], hashlib.sha256((access_token or "").encode()).hexdigest()
+    ):
+        raise ShopError("注文が見つかりません。")
+    if row["status"] != "paid":
+        raise ShopError("決済確認後に引継ぎ情報を入力できます。")
+    encrypted = _cipher().encrypt(json.dumps(
         {"transfer_code": transfer_code, "pin": pin}, ensure_ascii=False
     ).encode("utf-8"))
-    now = time.time()
     with _db() as db:
-        db.execute("""INSERT INTO orders
-            (id,access_hash,sku,title,amount,credential_enc,status,created,updated)
-            VALUES(?,?,?,?,?,?,'awaiting_payment',?,?)""",
-            (order_id, hashlib.sha256(access_token.encode()).hexdigest(), sku,
-             item["title"], item["price_yen"], credentials, now, now))
-    return {"id": order_id, "access_token": access_token, "title": item["title"],
-            "amount": item["price_yen"], "status": "awaiting_payment"}
+        db.execute("""UPDATE orders SET credential_enc=?,credentials_submitted=1,updated=?
+                      WHERE id=? AND status='paid'""", (encrypted, time.time(), order_id))
 
 def _row(order_id):
     if not ORDER_ID_RE.fullmatch(order_id or ""):
@@ -109,14 +124,15 @@ def public_order(order_id: str, access_token: str):
     ):
         return None
     return {"id": row["id"], "title": row["title"], "amount": row["amount"],
-            "status": row["status"], "created": int(row["created"])}
+            "status": row["status"], "credentials_submitted": bool(row["credentials_submitted"]),
+            "created": int(row["created"])}
 
 def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
     allowed = {"paid", "review", "fulfilling", "completed", "cancelled"}
     if status not in allowed:
         raise ShopError("不正な注文状態です。")
     with _db() as db:
-        row = db.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+        row = db.execute("SELECT status,credentials_submitted FROM orders WHERE id=?", (order_id,)).fetchone()
         if not row:
             raise ShopError("注文が見つかりません。")
         current = row["status"]
@@ -129,6 +145,8 @@ def set_status(order_id: str, status: str, *, payment_digest=None, note=None):
         }
         if status not in transitions.get(current, set()):
             raise ShopError("この注文状態からは変更できません。")
+        if status == "fulfilling" and not row["credentials_submitted"]:
+            raise ShopError("購入者の引継ぎ情報が未入力です。")
         db.execute("""UPDATE orders SET status=?,payment_digest=COALESCE(?,payment_digest),
                       payment_note=?,updated=? WHERE id=?""",
                    (status, payment_digest, (note or "")[:300], time.time(), order_id))
