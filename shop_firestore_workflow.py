@@ -502,12 +502,45 @@ class FirestoreWorkflowRepository:
             raise ValueError("invalid encrypted OTP session")
         if expires_at <= self._clock() or expires_at > self._clock() + 900:
             raise ValueError("OTP session expiry must be within 15 minutes")
-        self._otp.document(session_id).create({
-            "encrypted_state": encrypted_state,
-            "state": "pending",
-            "expires_at": expires_at,
-            "created": self._clock(),
-        })
+        reference = self._otp.document(session_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def save(tx):
+            snapshot = reference.get(transaction=tx)
+            data = {
+                "encrypted_state": encrypted_state,
+                "state": "pending",
+                "expires_at": expires_at,
+                "updated": self._clock(),
+            }
+            if snapshot.exists:
+                tx.set(reference, {**data, "created": snapshot.to_dict().get("created", self._clock())})
+            else:
+                tx.create(reference, {**data, "created": self._clock()})
+
+        save(transaction)
+
+    def get_otp_session(self, session_id: str) -> str | None:
+        snapshot = self._otp.document(session_id).get()
+        if not snapshot.exists:
+            return None
+        data = snapshot.to_dict()
+        if data.get("state") != "pending" or data.get("expires_at", 0) <= self._clock():
+            return None
+        return data.get("encrypted_state")
+
+    def clear_otp_session(self, session_id: str) -> None:
+        reference = self._otp.document(session_id)
+        transaction = self._client.transaction(max_attempts=5)
+
+        @firestore.transactional
+        def clear(tx):
+            snapshot = reference.get(transaction=tx)
+            if snapshot.exists:
+                tx.update(reference, {"state": "cleared", "cleared": self._clock()})
+
+        clear(transaction)
 
     def consume_otp_session(self, session_id: str) -> str | None:
         reference = self._otp.document(session_id)
