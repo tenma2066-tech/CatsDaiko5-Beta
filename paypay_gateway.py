@@ -24,6 +24,8 @@ from uuid import uuid4
 import aiohttp
 from cryptography.fernet import Fernet
 
+import github_runtime_store
+
 TOKEN_ENDPOINT = "https://www.paypay.ne.jp/app/v1/oauth/token"
 LINK_CHECK_ENDPOINT = "https://www.paypay.ne.jp/app/v2/p2p-api/getP2PLinkInfo"
 LINK_ACCEPT_ENDPOINT = "https://www.paypay.ne.jp/app/v2/p2p-api/acceptP2PSendMoneyLink"
@@ -57,8 +59,14 @@ def _cipher():
         raise PayPayError("invalid_key", "PAYPAY_ENCRYPTION_KEY の形式が正しくありません。") from None
 
 def _save_account(account: dict):
-    _ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     raw = _cipher().encrypt(json.dumps(account).encode())
+    if github_runtime_store.enabled():
+        try:
+            github_runtime_store.write_blob("paypay/account.enc", raw)
+        except github_runtime_store.RuntimeStoreError as exc:
+            raise PayPayError("runtime_store", str(exc)) from exc
+        return
+    _ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix=".account-", dir=_ROOT)
     try:
         os.chmod(temp, 0o600)
@@ -70,10 +78,14 @@ def _save_account(account: dict):
             os.unlink(temp)
 
 def _load_account():
-    if not _ACCOUNT_FILE.exists():
+    try:
+        raw = github_runtime_store.read_blob("paypay/account.enc", _ACCOUNT_FILE)
+    except github_runtime_store.RuntimeStoreError as exc:
+        raise PayPayError("runtime_store", str(exc)) from exc
+    if not raw:
         return None
     try:
-        data = json.loads(_cipher().decrypt(_ACCOUNT_FILE.read_bytes()))
+        data = json.loads(_cipher().decrypt(raw))
         required = ("phone", "password", "uuid", "access_token", "session_cookie", "expires_at")
         if not isinstance(data, dict) or not all(data.get(k) for k in required):
             raise ValueError()
@@ -255,16 +267,17 @@ def _provider_hold_code(body):
 
 @contextmanager
 def _ledger():
-    _LEDGER_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    db=sqlite3.connect(_LEDGER_FILE,timeout=20)
     try:
-        os.chmod(_LEDGER_FILE, 0o600)
-        db.execute("CREATE TABLE IF NOT EXISTS links (digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, state TEXT NOT NULL, created REAL NOT NULL)")
-        yield db
-        db.commit()
-    except Exception:
-        db.rollback(); raise
-    finally: db.close()
+        with github_runtime_store.sqlite_database("paypay-ledger.sqlite3", _LEDGER_FILE) as db:
+            db.execute("""CREATE TABLE IF NOT EXISTS links (
+                digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL,
+                state TEXT NOT NULL, created REAL NOT NULL
+            )""")
+            if not github_runtime_store.enabled():
+                os.chmod(_LEDGER_FILE, 0o600)
+            yield db
+    except github_runtime_store.RuntimeStoreError as exc:
+        raise PayPayError("runtime_store", str(exc)) from exc
 
 async def receive_payment(raw_link: str, amount: int, purchase_id: str):
     code = _normalize_link(raw_link)
