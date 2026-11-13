@@ -66,8 +66,6 @@ def _db():
             yield con
     except shop_storage.ShopStorageError as exc:
         raise ShopError(str(exc)) from exc
-    except shop_storage.ShopStorageError as exc:
-        raise ShopError(str(exc)) from exc
 
 def catalog():
     raw = os.environ.get("SHOP_CATALOG_JSON", "").strip()
