@@ -151,6 +151,27 @@ class RuntimeMigrationParserTests(unittest.TestCase):
         )
         self.assertEqual(result["invalid_attempts"], 1)
 
+    def test_apply_requires_complete_shop_orders_schema(self):
+        from migrate_runtime_data_to_firestore import require_shop_snapshot_for_apply
+
+        with self.assertRaisesRegex(RuntimeError, "snapshot is missing"):
+            require_shop_snapshot_for_apply(None)
+        connection = sqlite3.connect(":memory:")
+        try:
+            with self.assertRaisesRegex(RuntimeError, "orders table is missing"):
+                require_shop_snapshot_for_apply(connection)
+            connection.execute(
+                "CREATE TABLE orders (id TEXT, access_hash TEXT, sku TEXT, title TEXT, "
+                "amount INTEGER, credential_enc BLOB, status TEXT, payment_digest TEXT, created REAL)"
+            )
+            require_shop_snapshot_for_apply(connection)
+            connection.execute("ALTER TABLE orders RENAME TO old_orders")
+            connection.execute("CREATE TABLE orders (id TEXT)")
+            with self.assertRaisesRegex(RuntimeError, "schema is incomplete"):
+                require_shop_snapshot_for_apply(connection)
+        finally:
+            connection.close()
+
     def test_apply_requires_complete_global_paypay_ledger_snapshot(self):
         from migrate_runtime_data_to_firestore import require_ledger_snapshot_for_apply
 
