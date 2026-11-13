@@ -166,5 +166,27 @@ class ShopStoreTests(unittest.TestCase):
         )
 
 
+    def test_new_account_order_accepts_both_credentials_blank(self):
+        order = self.store.create_operation_order(
+            {"items": ["XP"], "clone": False, "integrity_only": False},
+            "other-service", 1
+        )
+        self.store.claim_payment(order["id"])
+        self.store.complete_payment(order["id"], "new-account-digest")
+        self.store.save_credentials(order["id"], order["access_token"], "", "")
+        operation = self.store.operation_for_execution(order["id"], order["access_token"])
+        self.assertEqual(operation["transfer"], "")
+        self.assertEqual(operation["confirm"], "")
+
+    def test_existing_save_modes_require_both_credentials(self):
+        order = self.store.create_operation_order(
+            {"clone": True}, "other-service", 1
+        )
+        self.store.claim_payment(order["id"])
+        self.store.complete_payment(order["id"], "clone-digest")
+        self.store.save_credentials(order["id"], order["access_token"], "", "")
+        with self.assertRaises(self.store.ShopError):
+            self.store.operation_for_execution(order["id"], order["access_token"])
+
 if __name__ == "__main__":
     unittest.main()
