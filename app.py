@@ -1240,7 +1240,7 @@ def shop_create_order():
         return jsonify(error="現在は注文受付を停止しています。"), 503
     data = request.get_json(silent=True) or {}
     try:
-        order = shop_store.create_order(data.get("sku", ""), data.get("transfer_code", ""), data.get("pin", ""))
+        order = shop_store.create_order(data.get("sku", ""))
         return jsonify(order), 201
     except shop_store.ShopError as exc:
         return jsonify(error=str(exc)), 400
@@ -1252,13 +1252,43 @@ def shop_order_page(order_id):
     if not order:
         return _shop_page("注文確認", '<div class="card"><h2>注文が見つかりません</h2><p>注文URLを確認してください。</p></div>'), 404
     body = r"""<div class="card"><h2>注文内容</h2><p>注文番号：<b>__ID__</b></p><p>商品：<b>__TITLE__</b></p><p class="price">__AMOUNT__円</p>
-<p id="status">決済待ち</p><p class="muted">PayPayアプリで送金リンクを作成し、そのリンクを下に貼り付けてください。金額が注文額と一致した場合に受取確認を行います。</p>
+<p id="status">決済待ち</p><p class="muted">まずPayPayでお支払いください。受取確認後、この画面で引継ぎコードと暗証番号を入力できます。</p>
+<div id="payment">
 <label>PayPay送金リンク<input id="paypay-link" maxlength="2048" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off"></label>
-<button id="pay">PayPayで支払う</button><p id="error" class="error"></p><p class="muted">受取処理中に通信が途切れた場合、二重受取を避けるため自動再試行しません。画面の案内に従って管理者へお問い合わせください。</p></div>
+<button id="pay">PayPayで支払う</button></div>
+<div id="credentials" hidden><h2>引継ぎ情報の入力</h2>
+<label>引継ぎコード<input id="transfer" maxlength="128" autocomplete="off" autocapitalize="off"></label>
+<label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
+<button id="send-credentials">引継ぎ情報を送信</button></div>
+<p id="error" class="error"></p><p class="muted">受取処理中に通信が途切れた場合、二重受取を避けるため自動再試行しません。画面の案内に従って管理者へお問い合わせください。</p></div>
 <script>
 const id="__ID__",key=new URLSearchParams(location.search).get('key')||'';
-async function refresh(){try{const r=await fetch('/api/shop/order/'+id+'?key='+encodeURIComponent(key));if(!r.ok)return;const o=await r.json();const names={awaiting_payment:'決済待ち',paid:'決済確認済み・作業待ち',review:'管理者による確認中',fulfilling:'作業中',completed:'完了',cancelled:'キャンセル'};document.getElementById('status').textContent=names[o.status]||o.status;if(o.status!=='awaiting_payment'){document.getElementById('pay').disabled=true;document.getElementById('paypay-link').disabled=true;}}catch(e){}}
-document.getElementById('pay').addEventListener('click',async()=>{const b=document.getElementById('pay'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='PayPay受取を確認中…';try{const r=await fetch('/api/shop/order/'+id+'/paypay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,link:document.getElementById('paypay-link').value})});const d=await r.json();if(!r.ok)throw Error(d.error||'決済を確認できませんでした。');e.textContent=d.message||'決済を確認しました。';await refresh();}catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='PayPayで支払う';}});
+async function refresh(){
+ try{
+  const r=await fetch('/api/shop/order/'+id+'?key='+encodeURIComponent(key));if(!r.ok)return;
+  const o=await r.json();
+  const names={awaiting_payment:'決済待ち',paid:'決済確認済み',review:'管理者による確認中',fulfilling:'作業中',completed:'完了',cancelled:'キャンセル'};
+  const status=document.getElementById('status'),payment=document.getElementById('payment'),credentials=document.getElementById('credentials');
+  status.textContent=names[o.status]||o.status;
+  if(o.status==='awaiting_payment'){payment.hidden=false;credentials.hidden=true;}
+  else if(o.status==='paid'&&!o.credentials_submitted){payment.hidden=true;credentials.hidden=false;status.textContent='決済確認済み。引継ぎ情報を入力してください。';}
+  else{payment.hidden=true;credentials.hidden=true;if(o.status==='paid')status.textContent='引継ぎ情報送信済み。作業待ちです。';}
+ }catch(e){}
+}
+document.getElementById('pay').addEventListener('click',async()=>{
+ const b=document.getElementById('pay'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='PayPay受取を確認中…';
+ try{
+  const r=await fetch('/api/shop/order/'+id+'/paypay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,link:document.getElementById('paypay-link').value})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'決済を確認できませんでした。');e.textContent=d.message||'決済を確認しました。';await refresh();
+ }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='PayPayで支払う';}
+});
+document.getElementById('send-credentials').addEventListener('click',async()=>{
+ const b=document.getElementById('send-credentials'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='送信中…';
+ try{
+  const r=await fetch('/api/shop/order/'+id+'/credentials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,transfer_code:document.getElementById('transfer').value,pin:document.getElementById('pin').value})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'引継ぎ情報を送信できませんでした。');e.textContent=d.message||'引継ぎ情報を送信しました。';await refresh();
+ }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='引継ぎ情報を送信';}
+});
 refresh();
 </script>""".replaceAll("__ID__", order.id).replace("__TITLE__", order.title).replace("__AMOUNT__", String(order.amount))
     return _shop_page("注文確認", body)
@@ -1269,6 +1299,15 @@ def shop_order_status(order_id):
     if not order:
         return jsonify(error="注文が見つかりません。"), 404
     return jsonify(order)
+
+@app.post("/api/shop/order/<order_id>/credentials")
+def shop_submit_credentials(order_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        shop_store.save_credentials(order_id, data.get("key", ""), data.get("transfer_code", ""), data.get("pin", ""))
+        return jsonify(ok=True, message="引継ぎ情報を送信しました。管理者が確認します。")
+    except shop_store.ShopError as exc:
+        return jsonify(error=str(exc)), 400
 
 @app.post("/api/shop/order/<order_id>/paypay")
 def shop_paypay_submit(order_id):
@@ -1337,7 +1376,7 @@ def admin_orders_page():
     rows=shop_store.admin_orders()
     csrf=session.setdefault("admin_csrf",secrets.token_urlsafe(32))
     order_body=render_template_string("""{% for o in rows %}<div class="card"><b>{{ o.id }} / {{ o.title }} / {{ o.amount }}円</b><p>状態：{{ o.status }}</p>
-<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>
+{% if o.credentials_submitted %}<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>{% else %}<p>引継ぎ情報：購入者の入力待ち</p>{% endif %}
 <form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
 <select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
         transitions={"awaiting_payment":["review","cancelled"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed"],"completed":[],"cancelled":[]})
