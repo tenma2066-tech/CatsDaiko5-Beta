@@ -54,7 +54,7 @@ class RuntimeMigrationParserTests(unittest.TestCase):
             {"id": "0000000003", "payment_digest": "not-a-digest"},
             {"id": "0000000004", "payment_digest": None},
         ]
-        attempts = [{"digest": "a" * 64, "order_id": "0000000001"}]
+        attempts = [{"digest": "a" * 64, "order_id": "0000000001", "state": "paid"}]
         from migrate_runtime_data_to_firestore import payment_digest_coverage
 
         self.assertEqual(
