@@ -1,6 +1,12 @@
+import os
+import sqlite3
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
+from cryptography.fernet import Fernet
+
+import github_runtime_store
 import paypay_gateway
 
 
@@ -73,6 +79,46 @@ class PayPayGatewayValidationTests(unittest.TestCase):
         self.assertEqual(len(code_digest), 64)
         with self.assertRaises(paypay_gateway.PayPayError):
             paypay_gateway.payment_link_digest("https://evil.example/AbCd123456")
+
+    def test_legacy_ledger_duplicate_check_uses_readonly_encrypted_snapshot(self):
+        key = Fernet.generate_key()
+        db = sqlite3.connect(":memory:")
+        db.execute(
+            "CREATE TABLE links (digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, state TEXT NOT NULL, created REAL NOT NULL)"
+        )
+        digest = "a" * 64
+        db.execute(
+            "INSERT INTO links VALUES (?, ?, ?, ?)",
+            (digest, "0123456789", "paid", 1800000000),
+        )
+        encrypted = Fernet(key).encrypt(db.serialize())
+        db.close()
+        with patch.dict(os.environ, {"PAYPAY_ENCRYPTION_KEY": key.decode("ascii")}):
+            with patch.object(github_runtime_store, "enabled", return_value=True):
+                with patch.object(github_runtime_store, "read_blob_readonly", return_value=encrypted) as read:
+                    self.assertTrue(paypay_gateway._legacy_ledger_contains_digest(digest))
+                    self.assertFalse(paypay_gateway._legacy_ledger_contains_digest("b" * 64))
+                    self.assertEqual(read.call_count, 2)
+
+    def test_legacy_ledger_duplicate_check_fails_closed_when_snapshot_missing(self):
+        with patch.object(github_runtime_store, "enabled", return_value=True):
+            with patch.object(github_runtime_store, "read_blob_readonly", return_value=None):
+                with self.assertRaises(paypay_gateway.PayPayError) as error:
+                    paypay_gateway._legacy_ledger_contains_digest("a" * 64)
+        self.assertEqual(error.exception.code, "runtime_store")
+
+    def test_legacy_ledger_duplicate_check_fails_closed_when_schema_missing(self):
+        key = Fernet.generate_key()
+        db = sqlite3.connect(":memory:")
+        db.execute("CREATE TABLE unrelated (value TEXT)")
+        encrypted = Fernet(key).encrypt(db.serialize())
+        db.close()
+        with patch.dict(os.environ, {"PAYPAY_ENCRYPTION_KEY": key.decode("ascii")}):
+            with patch.object(github_runtime_store, "enabled", return_value=True):
+                with patch.object(github_runtime_store, "read_blob_readonly", return_value=encrypted):
+                    with self.assertRaises(paypay_gateway.PayPayError) as error:
+                        paypay_gateway._legacy_ledger_contains_digest("a" * 64)
+        self.assertEqual(error.exception.code, "runtime_store")
 
     def test_legacy_otp_state_consume_is_single_use(self):
         original = dict(paypay_gateway._pending_otp)
