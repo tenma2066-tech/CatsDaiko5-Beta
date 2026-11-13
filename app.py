@@ -1298,7 +1298,9 @@ def shop_order_page(order_id):
 <label>引継ぎコード<input id="transfer" maxlength="128" autocomplete="off" autocapitalize="off"></label>
 <label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
 <button id="send-credentials">引継ぎ情報を送信</button></div>
-<p id="error" class="error"></p><p class="muted">受取処理中に通信が途切れた場合、二重受取を避けるため自動再試行しません。画面の案内に従って管理者へお問い合わせください。</p></div>
+<p id="error" class="error"></p>
+<div id="job-progress" hidden><h2>処理状況</h2><p id="job-state" class="muted"></p><pre id="job-log" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto"></pre></div>
+<p class="muted">受取処理中に通信が途切れた場合、二重受取を避けるため自動再試行しません。画面の案内に従って管理者へお問い合わせください。</p></div>
 <script>
 const id="__ID__",key=new URLSearchParams(location.search).get('key')||'';
 async function refresh(){
@@ -1311,6 +1313,19 @@ async function refresh(){
   if(o.status==='awaiting_payment'){payment.hidden=false;credentials.hidden=true;}
   else if(o.status==='paid'&&!o.credentials_submitted){payment.hidden=true;credentials.hidden=false;status.textContent='決済確認済み。引継ぎ情報を入力してください。';}
   else{payment.hidden=true;credentials.hidden=true;if(o.status==='paid')status.textContent='引継ぎ情報送信済み。作業待ちです。';}
+  if(o.job_id && o.job_id!=='starting') await refreshProgress();
+ }catch(e){}
+}
+async function refreshProgress(){
+ try{
+  const r=await fetch('/api/shop/order/'+id+'/progress?key='+encodeURIComponent(key),{cache:'no-store'});
+  if(!r.ok)return;
+  const j=await r.json(),box=document.getElementById('job-progress');
+  box.hidden=false;
+  document.getElementById('job-state').textContent='処理状態：'+(j.status||j.job_status||'確認中')+(j.queue_position?'（待機 '+j.queue_position+' 番目）':'');
+  document.getElementById('job-log').textContent=(j.log||[]).join('\\n')+(j.error?'\\n'+j.error:'');
+  if(j.status==='done')document.getElementById('status').textContent='処理完了';
+  if(j.status==='error')document.getElementById('status').textContent='処理エラー：管理者へお問い合わせください';
  }catch(e){}
 }
 document.getElementById('pay').addEventListener('click',async()=>{
@@ -1501,8 +1516,6 @@ def index():
 @app.get("/api/state")
 def api_state():
     """画面の接続表示用。軽い処理だけを返す。"""
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     with _jobs_lock:
         parallel = _parallel_state_locked()
     return jsonify(
@@ -1535,8 +1548,6 @@ def api_state():
 @app.post("/api/warmup")
 def api_warmup():
     """ゲームデータを先に準備しておく（実行ボタンを押す前に待ち時間を済ませる）。"""
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     if _warm_cache_lock.acquire(blocking=False):
         _warm_cache.update(status="loading", prepared=0, error=None)
         threading.Thread(target=_warmup_thread, daemon=True).start()
@@ -1546,8 +1557,6 @@ def api_warmup():
 @app.get("/api/cats")
 def api_cats():
     """キャラ名の一覧（検索用）。未取得なら裏で取りにいく。"""
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     _start_names()
     return jsonify(version=_names.get("version"), updated=_names.get("updated"), state=_names["state"], count=len(_names["items"]), method=_names["method"],
                    error=_names["error"], items=_names["items"] if _names["state"] == "ready" else [])
@@ -1555,8 +1564,6 @@ def api_cats():
 
 @app.post("/api/cats/latest")
 def api_cats_latest():
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     if not _run_lock.acquire(blocking=False):
         return jsonify(error="データを準備中です。完了してからもう一度押してください。"), 409
     _catalog_update.update(status="loading", error=None)
@@ -1571,8 +1578,6 @@ def api_cats_latest():
 
 @app.post("/api/cats/refresh")
 def api_cats_refresh():
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     if _names["state"] in ("ready", "error", "none"):
         _names.update(state="none", items=[], method=None, error=None)
         _start_names()
@@ -2031,12 +2036,8 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
 
   <section class="view" id="v-input" role="tabpanel" aria-labelledby="t-input">
     <div class="panel">
-      <h2>引継ぎ情報</h2>
-      <p class="sub">両方空欄にすると、初期アカウントから作ります。</p>
-      <label class="field"><span>引継ぎコード</span>
-        <input type="text" id="transfer" placeholder="例：aBcD1234e" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></label>
-      <label class="field"><span>暗証番号</span>
-        <input type="text" id="confirm" placeholder="例：1234" autocomplete="off" inputmode="numeric"></label>
+      <h2>決済・引継ぎ情報</h2>
+      <p class="sub">選択内容を確定すると注文画面へ進みます。PayPay決済の確認後に、引継ぎコードと暗証番号を入力してください。お客様ログインは不要です。</p>
       <div class="mode" id="mode"></div>
       <div class="err" id="inputErr" role="alert"></div>
     </div>
