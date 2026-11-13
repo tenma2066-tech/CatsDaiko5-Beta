@@ -210,6 +210,8 @@ class FirestoreRepositoryEmulatorTests(unittest.TestCase):
         self.assertFalse(execution["outcome_unknown"])
         self.assertEqual(execution["error_code"], "cloud_tasks_retry_exhausted")
         self.assertEqual(order["status"], "review")
+        self.assertEqual(order["job_id"], execution_id)
+        self.assertEqual(order["payment_note"], "cloud_tasks_retry_exhausted")
         self.assertEqual(workflow.list_pending_outbox(), [])
         self.client.collection("task_outbox").document(execution_id).delete()
         self.client.collection("executions").document(execution_id).delete()
