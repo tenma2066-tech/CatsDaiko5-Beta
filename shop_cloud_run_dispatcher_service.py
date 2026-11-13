@@ -49,6 +49,7 @@ def create_app():
                 audience=os.environ.get("CLOUD_RUN_DISPATCHER_AUDIENCE"),
             )
             result = publisher.publish_pending(limit=100)
+            result["otp_sessions_cleaned"] = repository.cleanup_expired_otp_sessions(limit=100)
             return jsonify(result), 200
         except Exception:
             application.logger.exception("Cloud Tasks outbox sweep failed")
