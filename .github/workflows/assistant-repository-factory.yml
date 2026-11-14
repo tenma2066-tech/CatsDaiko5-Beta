@@ -1,0 +1,125 @@
+name: Assistant Repository Factory
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: assistant-repository-factory
+  cancel-in-progress: false
+
+jobs:
+  create-private-repositories:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Process pending repository requests
+        env:
+          REPO_FACTORY_TOKEN: ${{ secrets.REPO_FACTORY_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          token = os.environ.get("REPO_FACTORY_TOKEN")
+          if not token:
+              print("Missing Actions secret: REPO_FACTORY_TOKEN", file=sys.stderr)
+              sys.exit(1)
+
+          pending_dir = Path(".repo-factory/requests/pending")
+          completed_dir = Path(".repo-factory/requests/completed")
+          pending_dir.mkdir(parents=True, exist_ok=True)
+          completed_dir.mkdir(parents=True, exist_ok=True)
+          requests = sorted(pending_dir.glob("*.json"))
+
+          if not requests:
+              print("No pending repository requests.")
+              sys.exit(0)
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2026-03-10",
+              "Content-Type": "application/json",
+          }
+
+          for request_path in requests:
+              request_data = json.loads(request_path.read_text(encoding="utf-8"))
+              name = request_data.get("name")
+              description = request_data.get("description", "")
+              private = request_data.get("private", True)
+
+              if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", name):
+                  raise ValueError(f"Invalid repository name in {request_path.name}")
+              if name.endswith(".git"):
+                  raise ValueError(f"Repository name must not end in .git: {name}")
+              if not isinstance(description, str) or len(description) > 350:
+                  raise ValueError(f"Invalid description in {request_path.name}")
+              if not isinstance(private, bool):
+                  raise ValueError(f"'private' must be true or false in {request_path.name}")
+
+              body = json.dumps({
+                  "name": name,
+                  "description": description,
+                  "private": private,
+                  "auto_init": True,
+              }).encode("utf-8")
+              req = urllib.request.Request(
+                  "https://api.github.com/user/repos",
+                  data=body,
+                  headers=headers,
+                  method="POST",
+              )
+
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      created = json.loads(response.read().decode("utf-8"))
+              except urllib.error.HTTPError as error:
+                  details = error.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(
+                      f"GitHub rejected request {request_path.name} "
+                      f"(HTTP {error.code}): {details}"
+                  ) from error
+
+              result = {
+                  "name": created["full_name"],
+                  "url": created["html_url"],
+                  "private": created["private"],
+                  "created_at": created["created_at"],
+                  "processed_at": datetime.now(timezone.utc).isoformat(),
+              }
+              completed = completed_dir / request_path.name
+              completed.write_text(
+                  json.dumps({"request": request_data, "result": result}, ensure_ascii=False, indent=2) + "\n",
+                  encoding="utf-8",
+              )
+              request_path.unlink()
+              print(f"Created {created['full_name']} ({'private' if created['private'] else 'public'}).")
+
+          PY
+
+      - name: Save completed request records
+        run: |
+          if [ -n "$(git status --porcelain .repo-factory/requests)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .repo-factory/requests
+            git commit -m "Record completed repository creation requests"
+            git push
+          else
+            echo "No request records changed."
+          fi
