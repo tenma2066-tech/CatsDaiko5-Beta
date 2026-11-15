@@ -111,6 +111,45 @@ class HoldReleaseTests(unittest.TestCase):
         self.assertTrue(self.run_with(fake2, G.confirm_received("abcDEF123456", "order-3", AMOUNT)))
         self.assertEqual(fake2.post_calls, 0)
 
+    def _held(self, order):
+        fake = FakePayPay(gets=[link_body()], posts=[HOLD_REPLY])
+        with self.assertRaises(G.PayPayError):
+            self.run_with(fake, G.receive_payment("abcDEF123456", AMOUNT, order))
+
+    def test_success_status_counts_as_received(self):
+        """受け取り済みのリンクは orderStatus=SUCCESS で返る（COMPLETED ではない）。"""
+        self._held("order-s")
+        fake = FakePayPay(gets=[link_body("SUCCESS")], posts=[])
+        self.assertTrue(self.run_with(fake, G.confirm_received("abcDEF123456", "order-s", AMOUNT)))
+        self.assertEqual(fake.post_calls, 0)
+        self.assertIn("paid", G.link_diag("abcDEF123456"))
+
+    def test_success_received_by_someone_else_is_not_paid(self):
+        self._held("order-x")
+        body = link_body("SUCCESS")
+        body["payload"]["receiver"]["externalId"] = "another-account"
+        with self.assertRaises(G.PayPayError) as e:
+            self.run_with(FakePayPay(gets=[body], posts=[]), G.confirm_received("abcDEF123456", "order-x", AMOUNT))
+        self.assertEqual(e.exception.code, "hold_failed")
+
+    def test_unknown_status_keeps_waiting_and_is_recorded(self):
+        self._held("order-u")
+        with self.assertRaises(G.PayPayError) as e:
+            self.run_with(FakePayPay(gets=[link_body("PROCESSING")], posts=[]), G.confirm_received("abcDEF123456", "order-u", AMOUNT))
+        self.assertEqual(e.exception.code, "still_pending")
+        self.assertIn("PROCESSING", G.link_diag("abcDEF123456"))
+
+    def test_cancelled_is_terminal(self):
+        self._held("order-c")
+        with self.assertRaises(G.PayPayError) as e:
+            self.run_with(FakePayPay(gets=[link_body("CANCELED")], posts=[]), G.confirm_received("abcDEF123456", "order-c", AMOUNT))
+        self.assertEqual(e.exception.code, "hold_failed")
+
+    def test_admin_mark_paid(self):
+        self._held("order-a")
+        G.mark_paid_by_admin("abcDEF123456", "order-a")
+        self.assertTrue(asyncio.run(G.confirm_received("abcDEF123456", "order-a", AMOUNT)))
+
     def test_amount_changed_is_rejected_on_recheck(self):
         fake = FakePayPay(gets=[link_body()], posts=[HOLD_REPLY])
         with self.assertRaises(G.PayPayError):

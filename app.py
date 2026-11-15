@@ -1098,6 +1098,29 @@ def admin():
         elif action == "pp_otp":
             res, err = _pp(paypay_gateway.finish_login(request.form.get("otp", "").strip()))
             msg = err or "PayPayに接続しました。"
+        elif action in ("order_paid", "order_dead", "order_hold"):
+            oid = request.form.get("order", "")
+            with _orders_lock:
+                o = _orders.get(oid)
+                if not o or o["state"] in ("started", "paying"):
+                    msg = "その注文は変更できません（開始済み・確認中・期限切れ）。"
+                else:
+                    if action == "order_paid":
+                        o["state"] = "paid"
+                    elif action == "order_dead":
+                        o["state"] = "dead"
+                    else:
+                        o["state"] = "hold" if o.get("link_code") else "unpaid"
+                    o["diag"] = f"admin:{action} {time.strftime('%m/%d %H:%M')}"
+                    msg = "注文を更新しました。"
+                    code_for_ledger = o.get("link_code") if action == "order_paid" else None
+            if msg == "注文を更新しました。":
+                if code_for_ledger:
+                    try:
+                        paypay_gateway.mark_paid_by_admin(code_for_ledger, oid)
+                    except Exception:
+                        pass
+                _persist_orders()
         elif action == "lock":
             session.pop("admin", None)
             return redirect("/admin")
@@ -1108,7 +1131,18 @@ def admin():
             pp = paypay_gateway.status()
         except paypay_gateway.PayPayError as exc:
             msg = msg or exc.message
-    return render_template_string(ADMIN_HTML, msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp,
+    orders = []
+    if unlocked:
+        _gc_orders()
+        with _orders_lock:
+            snap = [(k, dict(v)) for k, v in _orders.items() if v["state"] != "started"]
+        names = {"unpaid": "支払い待ち", "paying": "確認中", "hold": "保留中", "paid": "支払い済み・未開始", "dead": "要確認（停止）"}
+        for k, v in sorted(snap, key=lambda kv: -kv[1]["created"]):
+            orders.append({"id": k, "amount": v["amount"], "state": v["state"], "state_ja": names.get(v["state"], v["state"]),
+                           "created": time.strftime("%m/%d %H:%M", time.localtime(v["created"])),
+                           "diag": v.get("diag", ""), "ledger": paypay_gateway.link_diag(v.get("link_code") or ""),
+                           "has_link": bool(v.get("link_code"))})
+    return render_template_string(ADMIN_HTML, msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   prices=PRICES, payments=PAYMENTS_ENABLED)
 
 
@@ -1117,14 +1151,14 @@ _orders: dict[str, dict] = {}
 _orders_lock = threading.Lock()
 
 
-ORDER_KEEP = {"hold": 86400, "paid": 86400, "paying": 86400}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
+ORDER_KEEP = {"hold": 3 * 86400, "paid": 3 * 86400, "paying": 3 * 86400, "dead": 3 * 86400}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
 _log_orders = logging.getLogger("orders")
 
 
 def _gc_orders() -> None:
     now = time.time()
     with _orders_lock:
-        for k in [k for k, v in _orders.items() if now - v["created"] > ORDER_KEEP.get(v["state"], ORDER_TTL)]:
+        for k in [k for k, v in _orders.items() if now - v["created"] > ORDER_KEEP.get(v["state"], ORDER_TTL)]:  # 保留・支払い済み・要確認は3日残す
             del _orders[k]
 
 
@@ -1418,6 +1452,7 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
 
 
 RESUMABLE = ("unpaid", "hold", "paid")
+VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号を管理者に伝えられるよう表示する
 
 
 def _public_order(order_id: str, o: dict) -> dict:
@@ -1431,7 +1466,7 @@ def my_orders():
     _gc_orders()
     me = _owner()
     with _orders_lock:
-        items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in RESUMABLE]
+        items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in VISIBLE]
     items.sort(key=lambda x: -x["created"])
     return jsonify(orders=items)
 
@@ -1445,7 +1480,7 @@ def claim_order(order_id: str):
     order_id = (order_id or "").strip()
     with _orders_lock:
         o = _orders.get(order_id)
-        if not o or o["state"] not in RESUMABLE:
+        if not o or o["state"] not in VISIBLE:
             _fail.setdefault("claim:" + ip, []).append(time.time())
             return jsonify(error="再開できる注文が見つかりません。番号を確認してください（実行開始済み・期限切れの注文は再開できません）。", code="order_missing"), 404
         o["owner"] = _owner()
@@ -1500,6 +1535,7 @@ def _pay_order(order_id: str):
             dead = exc.code in ("hold_failed", "not_found") and mode == "recheck"
             with _orders_lock:
                 order["state"] = "dead" if dead else ("hold" if hold else "unpaid")
+                order["diag"] = f"{exc.code} {time.strftime('%m/%d %H:%M')}"
             return jsonify(error=exc.message, code=exc.code, hold=hold, uncertain=hold), 402
         except Exception:
             with _orders_lock:
@@ -1587,6 +1623,18 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <label>パスワード <input name="password" type="password" autocomplete="off" required></label><br><button>PayPayにログイン</button></form>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_otp">
 <label>SMS認証コード(4桁) <input name="otp" inputmode="numeric" maxlength="4" autocomplete="off"></label><button>認証</button></form>
+<h2>未完了の注文</h2>
+<p>保留などで止まった注文です。<b>PayPayアプリで着金を確認できたら「支払い済みにする」</b>を押してください。利用者の画面（入力タブ上部の「未完了の注文」）に「実行を開始」ボタンが出ます。</p>
+{% for o in orders %}
+<div style="border:1px solid #999;border-radius:8px;padding:.6rem;margin:.6rem 0">
+<b>{{ o.state_ja }}</b>　{{ o.amount }}円　{{ o.created }}<br>
+<small>注文番号: <code>{{ o.id }}</code><br>最後の結果: {{ o.diag or "-" }}{% if o.ledger %}　／　PayPay: {{ o.ledger }}{% endif %}{% if not o.has_link %}　／　リンク未送信{% endif %}</small>
+<form method="post" style="margin:.3rem 0"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="order" value="{{ o.id }}">
+{% if o.state != "paid" %}<button name="action" value="order_paid" onclick="return confirm('PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？')">支払い済みにする</button>{% endif %}
+{% if o.state == "dead" %}<button name="action" value="order_hold">保留に戻す（再確認させる）</button>{% endif %}
+{% if o.state != "dead" %}<button name="action" value="order_dead" onclick="return confirm('この注文を停止しますか？')">停止する</button>{% endif %}
+</form></div>
+{% else %}<p>ありません。</p>{% endfor %}
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button>管理者モードを終了</button></form>
 {% endif %}
 </body></html>"""
@@ -2831,7 +2879,7 @@ const PAY_MSG={
   accept_unconfirmed:['受け取りを確定できません','PayPayアプリで該当の送金を受け取ったら、下のボタンで確認してください（再送金は不要です）。'],
   temporary_hold:['PayPay側で一時保留になりました','送金した側がPayPayアプリで保留を解除すると、自動で受け取って実行します。この画面を開いたままお待ちください（再送金は不要です）。'],
   still_pending:['保留の解除待ちです','送金した側がPayPayアプリで保留を解除すると、自動で受け取って実行します。この画面を開いたままお待ちください。'],
-  hold_failed:['受け取れない状態です','リンクが取り消し・期限切れになっています。管理者に連絡してください。'],
+  hold_failed:['自動では確認できませんでした','リンクが取り消し・期限切れ等の状態です。お支払い済みの場合は、上の注文番号を管理者に伝えてください。'],
   not_found:['送金記録が見つかりません','管理者に連絡してください。'],
   too_many_fails:['失敗が続いています','10分ほど待ってからお試しください。'],
   order_missing:['注文の期限が切れました','もう一度「実行」から始めてください。'],
@@ -2839,7 +2887,7 @@ const PAY_MSG={
   started:['すでに開始済みです','「状況」タブを確認してください。'],
   busy:['支払いは完了しています','待機枠がいっぱいです。少し待って、もう一度ボタンを押してください（再送金は不要です）。'],
   start_failed:['支払いは完了しています','開始に失敗しました。もう一度ボタンを押してください（再送金は不要です）。'],
-  dead:['この注文は使えません','PayPayアプリで送金状態を確認し、管理者に連絡してください。'],
+  dead:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。確認が取れると、入力タブの「未完了の注文」から実行を開始できます（再送金は不要です）。'],
   internal:['予期しないエラー','PayPayアプリで送金状態を確認し、送金済みなら管理者に連絡してください。'],
 };
 function payError(j,fallback,lv){
@@ -2898,7 +2946,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#helpPanel').h
 /* ---------- 起動時 ---------- */
 
 /* ---------- 未完了の注文の再開 ---------- */
-const STATE_JA={unpaid:'支払い待ち',hold:'保留中（解除待ち）',paid:'支払い済み・未開始'};
+const STATE_JA={unpaid:'支払い待ち',hold:'保留中（解除待ち）',paid:'支払い済み・未開始',dead:'確認が必要です'};
 async function loadResume(){
   try{
     const r=await fetch('/api/orders/mine',{cache:'no-store'}); if(!r.ok) return;
@@ -2907,9 +2955,16 @@ async function loadResume(){
     list.forEach(o=>{
       const row=el('div','rrow'); const d=new Date(o.created*1000);
       row.append(el('span',null,(d.getMonth()+1)+'/'+d.getDate()+' '+clock(d)+'　'+Number(o.amount).toLocaleString('ja-JP')+'円　'+(STATE_JA[o.state]||o.state)));
-      const b=el('button','btn','支払い画面を開く'); b.type='button';
-      b.addEventListener('click',()=>openPay(o.order,o.amount,o.breakdown,o.skipped,o.state));
-      row.append(b); box.append(row);
+      if(o.state==='dead'){
+        const b=el('button','btn','注文番号をコピー'); b.type='button';
+        b.addEventListener('click',async()=>{ const ok=await copyText(o.order); toast(ok?'注文番号をコピーしました。管理者に伝えてください':'コピーできませんでした'); });
+        row.append(b); box.append(row);
+        box.append(el('p','note','自動では確認できませんでした。お支払い済みの場合は、注文番号を管理者に伝えてください。確認が取れると、ここから実行を開始できます（再送金は不要です）。'));
+      }else{
+        const b=el('button','btn',o.state==='paid'?'実行を開始する':'支払い画面を開く'); b.type='button';
+        b.addEventListener('click',()=>openPay(o.order,o.amount,o.breakdown,o.skipped,o.state));
+        row.append(b); box.append(row);
+      }
     });
   }catch(e){}
 }

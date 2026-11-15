@@ -38,6 +38,9 @@ UUID_RE = re.compile(r"^[a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}$")
 OTP_RE = re.compile(r"^[0-9]{4}$")
 SESSION_MAX_SECONDS = 7200
 HOLD_CODES = {"42007013", "42007014", "42007015", "42007016"}
+# getP2PLinkInfo の orderStatus。受け取り済みは "SUCCESS"（受け取りPOSTの応答は "COMPLETED"）。
+RECEIVED_STATUSES = {"SUCCESS", "COMPLETED"}
+CANCELLED_STATUSES = {"CANCELED", "CANCELLED", "REJECTED", "REFUNDED", "FAILED"}
 _ROOT = Path(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay")).resolve()
 _ACCOUNT_FILE = _ROOT / "account.enc"
 _LEDGER_FILE = Path(os.environ.get("PAYPAY_LEDGER_PATH", str(_ROOT / "payments.sqlite3")))
@@ -272,9 +275,9 @@ def _verify_link(body, amount):
         raise PayPayError("invalid_link", "PayPayリンクを確認できませんでした。")
     p = body.get("payload")
     status = p.get("orderStatus") if isinstance(p, dict) else None
-    if status == "COMPLETED":
+    if status in RECEIVED_STATUSES:
         raise PayPayError("already_received", "このリンクはすでに受け取り済みです。新しい送金リンクを作ってください。")
-    if status in ("CANCELED", "CANCELLED", "REJECTED"):
+    if status in CANCELLED_STATUSES:
         raise PayPayError("link_cancelled", "このリンクは取り消し・辞退されています。新しい送金リンクを作ってください。")
     if status == "EXPIRED":
         raise PayPayError("expired", "このリンクは有効期限が切れています。新しい送金リンクを作ってください。")
@@ -300,7 +303,7 @@ def _verify_link(body, amount):
     if not all(isinstance(msg.get(k), str) and msg[k] for k in ("messageId", "chatRoomId")) or not _parse_time(data.get("transactionAt")):
         raise PayPayError("link_incomplete", "送金リンクの取引情報が不足しています。")
     return {"order_id":info["orderId"],"message_id":msg["messageId"],"chat_id":msg["chatRoomId"],
-            "request_at":data["transactionAt"]}
+            "request_at":data["transactionAt"],"receiver":str(receiver["externalId"])}
 
 def _provider_hold_code(body):
     if not isinstance(body, dict):
@@ -331,6 +334,11 @@ def _ledger():
                 digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL,
                 state TEXT NOT NULL, created REAL NOT NULL
             )""")
+            for column in ("receiver TEXT", "last_status TEXT"):
+                try:
+                    db.execute("ALTER TABLE links ADD COLUMN " + column)
+                except sqlite3.OperationalError:
+                    pass  # 追加済み
             if not github_runtime_store.enabled():
                 os.chmod(_LEDGER_FILE, 0o600)
             yield db
@@ -374,6 +382,12 @@ async def _accept(session, account, code, verified, digest):
     except (aiohttp.ClientError,asyncio.TimeoutError):
         with _ledger() as db: db.execute("UPDATE links SET state='review' WHERE digest=?",(digest,))
         raise PayPayError("accept_uncertain","受取結果が不明です。同じリンクを再送せず、管理者へお問い合わせください。") from None
+    try:  # 診断用: 受け取りPOSTの応答コードだけを記録
+        rc = reply.get("header", {}).get("resultCode") if isinstance(reply, dict) and isinstance(reply.get("header"), dict) else None
+        rc = rc if isinstance(rc, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", rc) else "-"
+        with _ledger() as db: db.execute("UPDATE links SET last_status=? WHERE digest=?",(f"accept:{status_code}/{rc}/{_provider_hold_code(reply) or '-'}"[:80],digest))
+    except Exception:
+        pass
     ok=(status_code==200 and isinstance(reply,dict) and isinstance(reply.get("header"),dict)
         and reply["header"].get("resultCode")=="S0000" and isinstance(reply.get("payload"),dict)
         and reply["payload"].get("orderStatus")=="COMPLETED" and reply.get("error") is None)
@@ -414,7 +428,7 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
             verified=_verify_link(body,amount)
             digest=hashlib.sha256(code.encode()).hexdigest()
             with _ledger() as db:
-                try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
+                try: db.execute("INSERT INTO links(digest,order_id,state,created,receiver) VALUES(?,?,?,?,?)",(digest,purchase_id,"attempted",time.time(),verified["receiver"]))
                 except sqlite3.IntegrityError:
                     raise PayPayError("duplicate","このリンクまたは注文はすでに使用済みです。新しい送金リンクを作ってください。") from None
             return await _accept(session, account, code, verified, digest)
@@ -429,7 +443,7 @@ async def confirm_received(code: str, purchase_id: str, amount: int | None = Non
         raise PayPayError("not_found", "確認できる送金リンクがありません。")
     digest = hashlib.sha256(code.encode()).hexdigest()
     with _ledger() as db:
-        row = db.execute("SELECT order_id, state FROM links WHERE digest=?", (digest,)).fetchone()
+        row = db.execute("SELECT order_id, state, receiver FROM links WHERE digest=?", (digest,)).fetchone()
     if not row or row["order_id"] != purchase_id:
         raise PayPayError("not_found", "この注文の送金記録が見つかりません。")
     if row["state"] == "paid":
@@ -455,18 +469,50 @@ async def confirm_received(code: str, purchase_id: str, amount: int | None = Non
             header = body.get("header") if isinstance(body, dict) else None
             payload = body.get("payload") if isinstance(body, dict) else None
             status = payload.get("orderStatus") if isinstance(payload, dict) else None
-            if not isinstance(header, dict) or header.get("resultCode") != "S0000":
-                raise PayPayError("invalid_link", "PayPayリンクを確認できませんでした。")
-            if status == "COMPLETED":
+            status = status if isinstance(status, str) and re.fullmatch(r"[A-Z_]{1,40}", status) else None
+            result_code = header.get("resultCode") if isinstance(header, dict) else None
+            with _ledger() as db:  # 診断用に、PayPayが返した状態名だけを記録（個人情報は含まない）
+                db.execute("UPDATE links SET last_status=? WHERE digest=?", (f"{result_code}/{status}"[:80], digest))
+            if result_code != "S0000":
+                raise PayPayError("still_pending", "PayPayリンクの状態を確認できませんでした。少し待ってからもう一度お試しください。")
+            if status in RECEIVED_STATUSES:
+                # 受け取り済み。受け取ったのがこのアカウントか確認する（他人が受け取ったリンクを支払い済みにしない）。
+                receiver = payload.get("receiver") if isinstance(payload.get("receiver"), dict) else {}
+                got = receiver.get("externalId")
+                expected = row["receiver"]
+                if got and expected and str(got) != str(expected):
+                    with _ledger() as db:
+                        db.execute("UPDATE links SET state='review' WHERE digest=?", (digest,))
+                    raise PayPayError("hold_failed", "このリンクは別のアカウントで受け取られています。管理者に連絡してください。")
                 with _ledger() as db:
                     db.execute("UPDATE links SET state='paid' WHERE digest=?", (digest,))
                 return digest
             if status == "PENDING" and amount is not None:
                 verified = _verify_link(body, amount)  # 金額・期限・送金者などを最初と同じ基準で再確認
                 return await _accept(session, account, code, verified, digest)
-            if status == "PENDING":
-                raise PayPayError("still_pending", "まだ受け取りが完了していません。少し待ってからもう一度お試しください。")
-    raise PayPayError("hold_failed", "このリンクは受け取れない状態になっています（取り消し・期限切れなど）。管理者に連絡してください。")
+            if status in CANCELLED_STATUSES or status == "EXPIRED":
+                raise PayPayError("hold_failed", "このリンクは受け取れない状態になっています（取り消し・期限切れなど）。管理者に連絡してください。")
+    # PENDING（金額不明）や未知の状態は、注文を無効にせず保留のままにする
+    raise PayPayError("still_pending", "まだ受け取りが完了していません。少し待ってからもう一度お試しください。")
+
+
+def link_diag(code: str) -> str:
+    """管理画面用: 台帳の状態と、最後にPayPayが返した状態名。"""
+    if not isinstance(code, str) or not CODE_RE.fullmatch(code):
+        return ""
+    try:
+        with _ledger() as db:
+            row = db.execute("SELECT state, last_status FROM links WHERE digest=?", (hashlib.sha256(code.encode()).hexdigest(),)).fetchone()
+    except Exception:
+        return ""
+    return f"{row['state']} / {row['last_status'] or '-'}" if row else ""
+
+
+def mark_paid_by_admin(code: str, purchase_id: str):
+    """管理者がPayPayアプリで着金を確認したうえで、手動で支払い済みにする。"""
+    if isinstance(code, str) and CODE_RE.fullmatch(code):
+        with _ledger() as db:
+            db.execute("UPDATE links SET state='paid' WHERE digest=? AND order_id=?", (hashlib.sha256(code.encode()).hexdigest(), purchase_id))
 
 
 # ---------------------------------------------------------------- 注文の永続化（再起動しても支払い済み・保留の注文を失わない）

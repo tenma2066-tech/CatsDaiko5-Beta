@@ -105,6 +105,33 @@ class OrderFlow(unittest.TestCase):
         # 開始済みは再開対象外
         self.assertEqual(other.post(f"/api/orders/{j['order']}/claim").status_code, 404)
 
+    def test_admin_can_rescue_dead_order(self):
+        j = self.order()
+        with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("accept_uncertain", "不明"))):
+            self.c.post(f"/api/orders/{j['order']}/pay", json={"link": self.LINK})
+        with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("hold_failed", "x"))):
+            self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        mine = self.c.get("/api/orders/mine").get_json()["orders"]
+        self.assertEqual(mine[0]["state"], "dead")  # 利用者にも見える（注文番号を伝えられる）
+        admin = A.app.test_client()
+        with patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(G, "status", return_value={}), \
+             patch.object(G, "link_diag", return_value="review / S0000/CANCELED"), patch.object(G, "mark_paid_by_admin") as mp:
+            admin.get("/admin")
+            with admin.session_transaction() as s:
+                csrf = s["admin_csrf"]
+            self.assertEqual(admin.post("/admin", data={"action": "order_paid", "csrf": csrf, "order": j["order"]}).status_code, 403)
+            admin.post("/admin", data={"action": "unlock", "csrf": csrf, "passcode": "adm"})
+            with admin.session_transaction() as s:
+                csrf = s["admin_csrf"]
+            page = admin.get("/admin").get_data(as_text=True)
+            self.assertIn(j["order"], page)
+            self.assertIn("hold_failed", page)
+            admin.post("/admin", data={"action": "order_paid", "csrf": csrf, "order": j["order"]})
+            mp.assert_called_once()
+        self.assertEqual(A._orders[j["order"]]["state"], "paid")
+        with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JR")):
+            self.assertEqual(self.c.post(f"/api/orders/{j['order']}/pay", json={}).get_json()["job"], "JR")
+
     def test_hold_failed_kills_order(self):
         j = self.order()
         with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("accept_uncertain", "不明"))):
