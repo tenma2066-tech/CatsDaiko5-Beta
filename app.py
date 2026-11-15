@@ -2008,6 +2008,12 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 /* 下部バー */
 
 
+.tab.locked{opacity:.4;cursor:not-allowed}
+.locknote{border:2px solid var(--accent,#ffc42e);border-radius:10px;padding:10px 12px;margin:0 0 10px;font-size:14px;font-weight:700;line-height:1.5}
+#doneCodes .code{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+#doneCodes .code div{flex:1;min-width:0}#doneCodes small{display:block;color:var(--muted);font-size:12px}
+#doneCodes strong{font-size:22px;letter-spacing:.04em;word-break:break-all;user-select:all;-webkit-user-select:all}
+#doneCodes h4{margin:10px 0 0;font-size:14px}
 .ordno{font-size:13px;color:var(--muted);margin:0 0 6px;line-height:1.5}.ordno code{font-size:12px;word-break:break-all;color:var(--ink)}
 .btn.mini{padding:2px 8px;font-size:12px}
 .resume{border-color:var(--accent,#ffc42e)}.resume .rrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}.resume .rrow span{flex:1;font-size:14px}
@@ -2020,7 +2026,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .payamt b{font-size:40px;font-weight:800;letter-spacing:.02em}.payamt span{font-weight:700}
 .paylist{margin:0 0 10px;padding-left:1.2em;font-size:14px;color:var(--muted);line-height:1.6}
 .mbox .field{display:block;margin:10px 0}.mbox .field span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
-.mbox input{width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:12px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.mbox input:not([type=checkbox]){width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:12px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .payerr{margin:8px 0;padding:10px 12px;border:2px solid var(--bad,#d93636);border-radius:10px;font-size:14px;line-height:1.5}
 .payerr b{display:block;color:var(--bad,#d93636)}
 .payerr[data-lv="wait"]{border-color:var(--line)}.payerr[data-lv="wait"] b{color:var(--ink)}
@@ -2038,7 +2044,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
   background:var(--accent);color:#17181c;font-size:18px;font-weight:800;cursor:pointer;box-shadow:0 4px 0 var(--line)}
 #go:active{transform:translateY(3px);box-shadow:0 1px 0 var(--line)}
 #go:disabled{background:var(--soft);color:var(--muted);cursor:default;box-shadow:0 2px 0 var(--line)}
-.toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9;
+.toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;font-weight:700;max-width:90vw}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style></head><body>
@@ -2211,6 +2217,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
   {% endfor %}
 
   <section class="view" id="v-status" role="tabpanel" aria-labelledby="t-status" hidden>
+    <div class="locknote" id="lockNote" hidden>処理中です。終わるまで、この画面のまま（ほかのタブやページを開かずに）お待ちください。完了すると引継ぎコードが表示されます。</div>
     <div class="panel">
       <h2>実行の進み具合</h2>
       <ol class="steps" id="steps">
@@ -2343,6 +2350,29 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     <div class="mbtns"><button class="btn pri" id="helpClose" type="button">確認しました</button></div>
   </div>
 </div>
+<div class="modal" id="donePanel" role="dialog" aria-modal="true" aria-labelledby="doneTitle" hidden>
+  <div class="mbox">
+    <h2 id="doneTitle">完了しました</h2>
+    <p class="sub">下の<b>引継ぎコード</b>と<b>暗証番号</b>を、必ず今すぐ控えてください（スクリーンショットでもOK）。この表示は30分で消えます。</p>
+    <div id="doneCodes"></div>
+    <h3>ゲームでの引き継ぎ手順</h3>
+    <ol class="howto">
+      <li>にゃんこ大戦争を開きます。いま遊んでいるデータがある端末では、先にそのデータが不要か確認してください（引き継ぐと<b>上書き</b>されます）。</li>
+      <li>タイトル画面、または「設定（オプション）」から<b>「データ引き継ぎ」</b>を開きます。</li>
+      <li><b>「引き継ぎを行う」</b>（データを受け取る側）を選びます。</li>
+      <li>上の<b>引継ぎコード</b>と<b>暗証番号</b>を入力して決定します。</li>
+      <li>データが読み込まれたら完了です。</li>
+    </ol>
+    <ul class="paylist">
+      <li>コードは<b>1回だけ</b>使えます。入力を間違えないよう、コピーして貼り付けるのがおすすめです。</li>
+      <li>コードには有効期限があります。<b>できるだけ早く</b>引き継いでください。</li>
+      <li>元の引継ぎコード（入力したもの）は、もう使えません。</li>
+      <li id="doneCloneNote" hidden>複製の場合は、元アカウント用と複製アカウント用のコードを、<b>別々の端末</b>で引き継いでください。</li>
+    </ul>
+    <label class="sw"><input type="checkbox" id="doneAck"><span><b>コードと暗証番号を控えました</b></span></label>
+    <div class="mbtns"><button class="btn pri" id="doneClose" type="button" disabled>閉じる</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -2361,6 +2391,7 @@ const NAMEOF=new Map();
 
 /* ---------- タブ ---------- */
 function show(t){
+  if(jobRunning&&t!=='status'){ toast('処理が終わるまで、この画面のままお待ちください'); t='status'; }
   TABS.forEach(k=>{
     const on=k===t;
     $('#v-'+k).hidden=!on;
@@ -2776,6 +2807,9 @@ function setRunning(v){
   jobRunning=v;
   $('#go').disabled=v; $('#go').textContent=v?($('#dry').checked?'試運転中…':$('#clone').checked?'複製中…':'実行中…'):goLabel();
   $('#t-status').classList.toggle('running',v);
+  $$('.tab').forEach(b=>{ if(b.dataset.tab!=='status'){ b.disabled=v; b.classList.toggle('locked',v); } });
+  $('#lockNote').hidden=!v;
+  if(v&&$('#v-status').hidden) show('status');
   document.title=v?'実行中… | にゃんこ代行':'にゃんこ代行';
   renderState();
 }
@@ -2853,7 +2887,8 @@ async function poll(){
     if(j.status!=='running'&&j.status!=='queued'){
       stopJob(); setTimeout(loadResume,1500);
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
-      if(j.status==='done'&&j.result&&!j.dry) keepResult(curJob,j);
+      if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); }
+      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「入力」タブ上部の「未完了の注文」から、再送金なしで再実行できます。'; }
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'保全チェック完了'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
   }catch(e){fails++; renderState();} /* 一時的な通信エラーは次回に再試行 */
@@ -3101,8 +3136,28 @@ $('#payGo').addEventListener('click',async()=>{
     payError({code:'link_network'},'通信エラー'); btn.disabled=false;
   }
 });
+function openDone(j){
+  const box=$('#doneCodes'); box.textContent='';
+  const pairs=resultPairs(j.result); if(!pairs.length) return;
+  pairs.forEach(([label,r])=>{
+    if(label) box.append(el('h4',null,label));
+    [['引継ぎコード',r.transfer],['暗証番号',r.confirm]].forEach(([name,val])=>{
+      const row=el('div','code'), d=el('div'); d.append(el('small',null,name),el('strong',null,val||'未発行'));
+      const b=el('button','btn','コピー'); b.type='button';
+      b.addEventListener('click',async()=>{ const ok=await copyText(val||''); toast(ok?name+'をコピーしました':'コピーできませんでした'); });
+      row.append(d,b); box.append(row);
+    });
+  });
+  $('#doneTitle').textContent=j.clone?'複製が完了しました':'完了しました';
+  $('#doneCloneNote').hidden=!j.clone;
+  $('#doneAck').checked=false; $('#doneClose').disabled=true;
+  $('#donePanel').hidden=false; document.body.style.overflow='hidden';
+}
+$('#doneAck').addEventListener('change',()=>{ $('#doneClose').disabled=!$('#doneAck').checked; });
+$('#doneClose').addEventListener('click',()=>{ $('#donePanel').hidden=true; document.body.style.overflow=''; show('status'); });
+window.addEventListener('beforeunload',e=>{ if(jobRunning){ e.preventDefault(); e.returnValue=''; } });
 function openHelp(){ $('#helpPanel').hidden=false; document.body.style.overflow='hidden'; }
-function closeHelp(){ $('#helpPanel').hidden=true; if($('#payPanel').hidden) document.body.style.overflow=''; }
+function closeHelp(){ $('#helpPanel').hidden=true; if($('#payPanel').hidden&&$('#donePanel').hidden) document.body.style.overflow=''; }
 $('#helpBtn').addEventListener('click',openHelp);
 $('#helpClose').addEventListener('click',closeHelp);
 $('#helpPanel').addEventListener('click',e=>{ if(e.target.id==='helpPanel') closeHelp(); });
