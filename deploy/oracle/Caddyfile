@@ -1,0 +1,5 @@
+# SITE_HOST 例: 158-101-1-2.sslip.io（IPアドレスの . を - にしたもの）。Let's Encrypt で自動HTTPS。
+{$SITE_HOST} {
+	encode gzip
+	reverse_proxy app:8080
+}

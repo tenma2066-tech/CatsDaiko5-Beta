@@ -37,7 +37,19 @@ APP_VERSION = "1.15"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+def _read_admin_password() -> str:
+    """ADMIN_PASSWORD_FILE があればそのファイルから読む（記号を含むパスワードでも安全に渡すため）。"""
+    path = os.environ.get("ADMIN_PASSWORD_FILE", "")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read().rstrip("\r\n")
+        except OSError:
+            return ""
+    return os.environ.get("ADMIN_PASSWORD", "")
+
+
+ADMIN_PASSWORD = _read_admin_password()
 PAYMENTS_ENABLED = os.environ.get("PAYMENTS_ENABLED", "1") != "0"  # 0 = 決済なし（動作確認用）
 # 料金（円）
 PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 20}

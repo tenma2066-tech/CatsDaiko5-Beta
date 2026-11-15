@@ -1,0 +1,54 @@
+name: Deploy to Oracle Cloud
+on:
+  push:
+    branches: [claude/oracle-cloud]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+concurrency: oracle-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check secrets
+        run: |
+          if [ -z "$VPS_HOST" ]; then echo "::error::GitHub Secrets に VPS_HOST（サーバーのIPアドレス）を登録してください"; exit 1; fi
+      - name: Prepare SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -eu
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/id_vps
+          chmod 600 ~/.ssh/id_vps
+          echo "SSH_OPTS=-i $HOME/.ssh/id_vps -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30" >> "$GITHUB_ENV"
+          echo "TARGET=${VPS_USER:-ubuntu}@${VPS_HOST}" >> "$GITHUB_ENV"
+          # 独自ドメインがなければ IP から sslip.io の名前を作る（無料で HTTPS 証明書が取れる）
+          if [ -n "${{ secrets.SITE_DOMAIN }}" ]; then echo "SITE_HOST=${{ secrets.SITE_DOMAIN }}" >> "$GITHUB_ENV";
+          else echo "SITE_HOST=$(echo "$VPS_HOST" | tr '.' '-').sslip.io" >> "$GITHUB_ENV"; fi
+      - name: Upload source
+        run: |
+          set -eu
+          NEW="/tmp/catsdaiko-src-$GITHUB_RUN_ID"
+          echo "NEW_SRC=$NEW" >> "$GITHUB_ENV"
+          tar czf - --exclude=.git . | ssh $SSH_OPTS "$TARGET" "rm -rf $NEW && mkdir -p $NEW && tar xzf - -C $NEW"
+      - name: Setup and start on server
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          set -eu
+          printf '%s' "$ADMIN_PASSWORD" | ssh $SSH_OPTS "$TARGET" "sudo bash $NEW_SRC/deploy/oracle/remote-setup.sh '$SITE_HOST' '$NEW_SRC'"
+      - name: Health check
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -m 10 "https://$SITE_HOST/health" >/dev/null; then echo "OK: https://$SITE_HOST/"; exit 0; fi
+            sleep 10
+          done
+          echo "::warning::https://$SITE_HOST/health に接続できません。Oracle のセキュリティリスト（80/443）を確認してください。"
+          curl -sS -m 10 "http://$SITE_HOST/health" || true
+          exit 1

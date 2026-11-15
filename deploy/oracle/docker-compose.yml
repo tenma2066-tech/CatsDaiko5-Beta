@@ -1,0 +1,36 @@
+# Oracle Cloud（または任意のVPS）用。GitHub Actions がサーバーの /opt/catsdaiko に配置して起動する。
+services:
+  app:
+    build: ./src
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      TZ: Asia/Tokyo
+      SECRET_KEY: ${SECRET_KEY}
+      PAYPAY_ENCRYPTION_KEY: ${PAYPAY_ENCRYPTION_KEY}
+      PAYPAY_DATA_DIR: /data/paypay
+      PAYPAY_LEDGER_PATH: /data/paypay/payments.sqlite3
+      ADMIN_PASSWORD_FILE: /run/admin/admin_password
+    volumes:
+      - ./data:/data
+      - ./admin_password:/run/admin/admin_password:ro
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_HOST: ${SITE_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
