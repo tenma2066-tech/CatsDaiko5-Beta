@@ -52,12 +52,34 @@ class OrderFlow(unittest.TestCase):
         start.assert_not_called()
         self.assertFalse(r.get_json()["uncertain"])
 
-    def test_uncertain_kills_order(self):
+    LINK = "https://pay.paypay.ne.jp/abcDEF123456"
+
+    def test_hold_then_received_starts_job_without_new_link(self):
+        j = self.order()
+        with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("temporary_hold", "保留"))):
+            r = self.c.post(f"/api/orders/{j['order']}/pay", json={"link": self.LINK})
+        self.assertEqual(r.status_code, 402)
+        self.assertTrue(r.get_json()["hold"])
+        # まだ受け取られていない → 保留のまま
+        with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("still_pending", "未"))):
+            r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        self.assertEqual((r.status_code, r.get_json()["hold"], r.get_json()["code"]), (402, True, "still_pending"))
+        # 受け取り済み → 開始（新しいリンクもreceive_paymentも使わない）
+        with patch.object(G, "confirm_received", AsyncMock(return_value="d")) as cr, \
+             patch.object(G, "receive_payment", AsyncMock()) as rp, \
+             patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="J3")):
+            r = self.c.post(f"/api/orders/{j['order']}/pay", json={"link": "https://pay.paypay.ne.jp/otherLINK9999"})
+        self.assertEqual(r.get_json()["job"], "J3")
+        cr.assert_awaited_once()
+        rp.assert_not_awaited()
+
+    def test_hold_failed_kills_order(self):
         j = self.order()
         with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("accept_uncertain", "不明"))):
-            r = self.c.post(f"/api/orders/{j['order']}/pay", json={"link": "x"})
-        self.assertTrue(r.get_json()["uncertain"])
-        r = self.c.post(f"/api/orders/{j['order']}/pay", json={"link": "x"})
+            self.c.post(f"/api/orders/{j['order']}/pay", json={"link": self.LINK})
+        with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("hold_failed", "x"))):
+            self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
         self.assertEqual(r.status_code, 409)
 
     def test_other_session_cannot_use_order(self):

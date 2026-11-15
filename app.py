@@ -1355,27 +1355,35 @@ def pay_order(order_id: str):
             return jsonify(error="決済確認中です。少しお待ちください。", code="paying"), 409
         if order["state"] == "started":
             return jsonify(error="この注文はすでに開始済みです。「状況」タブを確認してください。", code="started"), 409
-        if order["state"] == "unpaid":
+        if order["state"] in ("unpaid", "hold"):
             if _too_many_fails("paypay:" + order_id):
                 return jsonify(error="失敗が続いたので、10分ほど待ってください。", code="too_many_fails"), 429
+            mode = "link" if order["state"] == "unpaid" else "recheck"
             order["state"] = "paying"
             need_pay = True
         else:
             need_pay = False
     if need_pay:
+        HOLDISH = ("temporary_hold", "accept_uncertain", "accept_unconfirmed")
         try:
-            asyncio.run(paypay_gateway.receive_payment(str(data.get("link", "")), order["amount"], order_id))
+            if mode == "link":
+                raw = str(data.get("link", ""))
+                order["link_code"] = paypay_gateway._normalize_link(raw) or order.get("link_code")
+                asyncio.run(paypay_gateway.receive_payment(raw, order["amount"], order_id))
+            else:
+                asyncio.run(paypay_gateway.confirm_received(order.get("link_code"), order_id))
         except paypay_gateway.PayPayError as exc:
             _fail.setdefault("paypay:" + order_id, []).append(time.time())
-            # 結果が不明・保留の場合は再送を防ぐため注文を使用不可にする
-            uncertain = exc.code in ("accept_uncertain", "accept_unconfirmed", "temporary_hold")
+            hold = bool(order.get("link_code")) and (exc.code in HOLDISH or (mode == "recheck" and exc.code in ("still_pending", "link_network", "link_check", "rate_limited", "paypay_unavailable")))
+            dead = exc.code in ("hold_failed", "not_found") and mode == "recheck"
             with _orders_lock:
-                order["state"] = "dead" if uncertain else "unpaid"
-            return jsonify(error=exc.message, code=exc.code, uncertain=uncertain), 402
+                order["state"] = "dead" if dead else ("hold" if hold else "unpaid")
+            return jsonify(error=exc.message, code=exc.code, hold=hold, uncertain=hold), 402
         except Exception:
             with _orders_lock:
-                order["state"] = "dead"
-            return jsonify(error="決済確認中に予期しないエラーが発生しました。PayPayアプリで送金状況を確認してください。", code="internal", uncertain=True), 500
+                order["state"] = "hold" if order.get("link_code") and mode == "link" else "dead"
+            return jsonify(error="決済確認中に予期しないエラーが発生しました。PayPayアプリで送金状況を確認してください。", code="internal",
+                           hold=order["state"] == "hold", uncertain=True), 500
         with _orders_lock:
             order["state"] = "paid"
     with _orders_lock:
@@ -1954,7 +1962,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     <div class="payamt"><b id="payAmount"></b><span>円</span></div>
     <ul class="paylist" id="payList"></ul>
     <p class="sub" id="payInfo"></p>
-    <label class="field"><span>送金リンク</span>
+    <label class="field" id="payLinkField"><span>送金リンク</span>
       <input id="payLink" type="url" inputmode="url" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048"></label>
     <div class="payerr" id="payErr" role="alert" hidden><b id="payErrTitle"></b><span id="payErrHint"></span></div>
     <div class="mbtns">
@@ -2682,9 +2690,12 @@ const PAY_MSG={
   login_required:['現在、決済を受け付けられません','受取側PayPayが未接続です。管理者にお知らせください。'],
   otp_required:['現在、決済を受け付けられません','受取側PayPayが再認証待ちです。管理者にお知らせください。'],
   cookie_missing:['現在、決済を受け付けられません','受取側の接続を確認できません。管理者にお知らせください。'],
-  accept_uncertain:['受け取り結果が不明です','同じリンクを送り直さず、PayPayアプリで送金状態を確認して管理者に連絡してください。'],
-  accept_unconfirmed:['受け取りを確定できません','再送金せず、PayPayアプリで状態を確認して管理者に連絡してください。'],
-  temporary_hold:['PayPay側で一時保留です','PayPayアプリで送金状態を確認し、解除操作が出たら解除してください。再送金はしないでください。'],
+  accept_uncertain:['受け取り結果が不明です','同じリンクは送り直さず、PayPayアプリで該当の送金を受け取ったら下のボタンで確認してください。'],
+  accept_unconfirmed:['受け取りを確定できません','PayPayアプリで該当の送金を受け取ったら、下のボタンで確認してください（再送金は不要です）。'],
+  temporary_hold:['PayPay側で一時保留になりました','PayPayアプリで該当の送金を「受け取る」と解除できます。受け取ったら下のボタンを押してください（再送金は不要です）。'],
+  still_pending:['まだ受け取られていません','PayPayアプリで該当の送金を受け取ってから、もう一度ボタンを押してください。'],
+  hold_failed:['受け取れない状態です','リンクが取り消し・期限切れになっています。管理者に連絡してください。'],
+  not_found:['送金記録が見つかりません','管理者に連絡してください。'],
   too_many_fails:['失敗が続いています','10分ほど待ってからお試しください。'],
   order_missing:['注文の期限が切れました','もう一度「実行」から始めてください。'],
   paying:['確認中です','数秒待ってください。'],
@@ -2701,13 +2712,17 @@ function payError(j,fallback,lv){
   $('#payErr').dataset.lv=lv||'bad'; $('#payErr').hidden=false;
 }
 function openPay(id,amount,breakdown){
-  payOrder=id; payDead=false; $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
+  payOrder=id; payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
   $('#payAmount').textContent=Number(amount).toLocaleString('ja-JP');
   const ul=$('#payList'); ul.textContent='';
   (breakdown||[]).forEach(r=>{ const li=document.createElement('li'); li.textContent=r.label+' '+r.count+'件 × '+r.unit+'円'; ul.append(li); });
   $('#payInfo').textContent='PayPayアプリで上の金額ちょうどの「送金リンク」を作り（パスコードなし）、下に貼り付けて送信してください。確認でき次第、自動で実行します。';
   $('#payGo').disabled=false; document.body.style.overflow='hidden';
   setTimeout(()=>$('#payLink').focus(),50);
+}
+function setHold(on){
+  $('#payLinkField').hidden=on; $('#payGo').textContent=on?'受け取りを済ませたので確認する':'送金リンクを送って実行';
+  if(on) $('#payInfo').textContent='保留中です。PayPayアプリで該当の送金を「受け取る」（保留の解除）と、ここで確認して自動で実行します。同じリンクを送り直す必要はありません。';
 }
 function closePay(){ payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
 $('#payCancel').addEventListener('click',()=>{ closePay(); show('input'); });
@@ -2721,7 +2736,8 @@ $('#payGo').addEventListener('click',async()=>{
     const j=await r.json();
     if(!r.ok){
       payError(j,'決済を確認できませんでした');
-      if(j.uncertain||['dead','order_missing','started'].includes(j.code)){ payDead=true; return; }
+      if(j.hold){ setHold(true); btn.disabled=false; return; }
+      if(['dead','order_missing','started'].includes(j.code)){ payDead=true; return; }
       btn.disabled=false; return;
     }
     closePay(); setRunning(true); show('status'); jobStart=Date.now(); watch(j.job);

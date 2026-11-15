@@ -337,29 +337,34 @@ def _ledger():
     except github_runtime_store.RuntimeStoreError as exc:
         raise PayPayError("runtime_store", str(exc)) from exc
 
+async def _fresh_account():
+    """保存済みアカウントを読み、期限切れなら再ログインして返す。呼び出し側で _LOCK を保持すること。"""
+    account = _load_account()
+    if not account:
+        raise PayPayError("login_required", "現在、決済を受け付けられません（受取側のPayPay未接続）。管理者にお知らせください。")
+    if float(account.get("expires_at",0)) <= time.time()+60 or not account.get("session_cookie"):
+        renewed = await _oauth({"scope":"SIGN_IN","client_uuid":account["uuid"],"grant_type":"password",
+                                "username":account["phone"],"password":account["password"],
+                                "add_otp_prefix":True,"language":"ja"},
+                               "https://www.paypay.ne.jp/app/account/sign-in")
+        if renewed["kind"] == "otp":
+            _pending_otp.clear()
+            _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
+                                otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"],
+                                cookies=renewed.get("cookies", {}))
+            raise PayPayError("otp_required", "現在、決済を受け付けられません（受取側のPayPayが再認証待ち）。管理者にお知らせください。")
+        if not renewed.get("session_cookie"):
+            raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
+        account.update(access_token=renewed["access_token"],session_cookie=renewed["session_cookie"],
+                       expires_at=time.time()+renewed["expires_in"])
+        _save_account(account)
+    return account
+
 async def receive_payment(raw_link: str, amount: int, purchase_id: str):
     code = _normalize_link(raw_link)
     if not code: raise _link_problem(raw_link)
     with _LOCK:
-        account = _load_account()
-        if not account:
-            raise PayPayError("login_required", "現在、決済を受け付けられません（受取側のPayPay未接続）。管理者にお知らせください。")
-        if float(account.get("expires_at",0)) <= time.time()+60 or not account.get("session_cookie"):
-            renewed = await _oauth({"scope":"SIGN_IN","client_uuid":account["uuid"],"grant_type":"password",
-                                    "username":account["phone"],"password":account["password"],
-                                    "add_otp_prefix":True,"language":"ja"},
-                                   "https://www.paypay.ne.jp/app/account/sign-in")
-            if renewed["kind"] == "otp":
-                _pending_otp.clear()
-                _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
-                                    otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"],
-                                    cookies=renewed.get("cookies", {}))
-                raise PayPayError("otp_required", "現在、決済を受け付けられません（受取側のPayPayが再認証待ち）。管理者にお知らせください。")
-            if not renewed.get("session_cookie"):
-                raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
-            account.update(access_token=renewed["access_token"],session_cookie=renewed["session_cookie"],
-                           expires_at=time.time()+renewed["expires_in"])
-            _save_account(account)
+        account = await _fresh_account()
         referer=f"https://www.paypay.ne.jp/app/p2p/{code}?pid=SMS&link_key={code}&af_dp=paypay%3A%2F%2Fpending%2Fdetail%3Fsource%3Dsns_link"
         headers=_headers(referer)
         timeout=aiohttp.ClientTimeout(total=25)
@@ -409,3 +414,43 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
             raise PayPayError("temporary_hold" if state=="pending" else "accept_unconfirmed",
                               "PayPay側で一時保留です。状態を確認するまで再送金しないでください。" if state=="pending"
                               else "受取結果を確定できません。再購入せず管理者へお問い合わせください。")
+
+
+async def confirm_received(code: str, purchase_id: str):
+    """保留・結果不明になった注文について、同じリンクが実際に受け取り済みか再確認する。
+    新しいリンクは受け付けない（元のリンクが COMPLETED になったときだけ支払い済みにする）。"""
+    if not isinstance(code, str) or not CODE_RE.fullmatch(code):
+        raise PayPayError("not_found", "確認できる送金リンクがありません。")
+    digest = hashlib.sha256(code.encode()).hexdigest()
+    with _ledger() as db:
+        row = db.execute("SELECT order_id, state FROM links WHERE digest=?", (digest,)).fetchone()
+    if not row or row["order_id"] != purchase_id:
+        raise PayPayError("not_found", "この注文の送金記録が見つかりません。")
+    if row["state"] == "paid":
+        return digest
+    if row["state"] not in ("pending", "review", "attempted"):
+        raise PayPayError("not_found", "この送金は確認できない状態です。")
+    with _LOCK:
+        account = await _fresh_account()
+        referer = f"https://www.paypay.ne.jp/app/p2p/{code}?pid=SMS&link_key={code}&af_dp=paypay%3A%2F%2Fpending%2Fdetail%3Fsource%3Dsns_link"
+        timeout = aiohttp.ClientTimeout(total=25)
+        async with aiohttp.ClientSession(timeout=timeout, headers=_headers(referer), cookies={"token": account["session_cookie"]}) as session:
+            try:
+                async with session.get(LINK_CHECK_ENDPOINT, params={"verificationCode": code, "client_uuid": account["uuid"]}) as r:
+                    if r.status != 200:
+                        raise PayPayError("link_check", f"PayPayリンクを確認できませんでした（応答 {r.status}）。")
+                    body = await r.json(content_type=None)
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                raise PayPayError("link_network", "PayPayリンク確認で通信エラーが発生しました。") from None
+    header = body.get("header") if isinstance(body, dict) else None
+    payload = body.get("payload") if isinstance(body, dict) else None
+    status = payload.get("orderStatus") if isinstance(payload, dict) else None
+    if not isinstance(header, dict) or header.get("resultCode") != "S0000":
+        raise PayPayError("invalid_link", "PayPayリンクを確認できませんでした。")
+    if status == "COMPLETED":
+        with _ledger() as db:
+            db.execute("UPDATE links SET state='paid' WHERE digest=?", (digest,))
+        return digest
+    if status == "PENDING":
+        raise PayPayError("still_pending", "まだ受け取りが完了していません。PayPayアプリで該当の送金を受け取って（保留の解除）から、もう一度押してください。")
+    raise PayPayError("hold_failed", "このリンクは受け取れない状態になっています（取り消し・期限切れなど）。管理者に連絡してください。")
