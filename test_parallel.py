@@ -79,7 +79,7 @@ class ParallelJobTests(unittest.TestCase):
             "BCSFE_PARALLEL_ROOT": str(Path(self.temp.name) / "workers"),
         })
         self.env.start()
-        self.auth_store = patch.object(A, "RUN_PRICE_JPY", 0)
+        self.auth_store = patch.object(A, "PAYMENTS_ENABLED", False)
         self.auth_store.start()
         self.max_jobs = patch.object(A, "MAX_CONCURRENT_JOBS", 4)
         self.slots = patch.object(A, "_slots", [None] * 4)

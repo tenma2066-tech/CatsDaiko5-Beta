@@ -37,7 +37,10 @@ GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
-RUN_PRICE_JPY = int(os.environ.get("RUN_PRICE_JPY", "100") or 0)  # 0 = 決済なし
+PAYMENTS_ENABLED = os.environ.get("PAYMENTS_ENABLED", "1") != "0"  # 0 = 決済なし（動作確認用）
+# 料金（円）
+PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 20}
+CRASH_ITEMS = ("ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正")
 ORDER_TTL = 1800
 
 app = Flask(__name__)
@@ -1023,6 +1026,21 @@ def _too_many_fails(ip: str) -> bool:
     return len(recent) >= 5
 
 
+def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only) -> tuple[int, list]:
+    """サーバー側で金額を決める（ブラウザの金額は信用しない）。戻り値は (合計, 内訳)。"""
+    if integrity_only:
+        return PRICES["ban_guarantee"], [("バン保証（セーブ保全チェック）", 1, PRICES["ban_guarantee"])]
+    if clone:
+        return PRICES["clone"], [("アカウント複製", 1, PRICES["clone"])]
+    crash = [x for x in others if x in CRASH_ITEMS]
+    other_n = len(set(items) | set(qty)) + len(subs) + len([x for x in others if x not in CRASH_ITEMS])
+    rows = [("キャラ指定", len(cat_nums), PRICES["chara"]),
+            ("クラッシュ解除", len(crash), PRICES["crash"]),
+            ("その他の項目", other_n, PRICES["other"])]
+    rows = [r for r in rows if r[1]]
+    return sum(n * p for _, n, p in rows), rows
+
+
 def _owner() -> str:
     return session.setdefault("job_owner", secrets.token_urlsafe(32))
 
@@ -1079,7 +1097,7 @@ def admin():
         except paypay_gateway.PayPayError as exc:
             msg = msg or exc.message
     return render_template_string(ADMIN_HTML, msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp,
-                                  price=RUN_PRICE_JPY)
+                                  prices=PRICES, payments=PAYMENTS_ENABLED)
 
 
 # ---------------------------------------------------------------- 注文（決済してから実行）
@@ -1105,7 +1123,7 @@ def index():
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
-        MAIN_HTML, price=RUN_PRICE_JPY, groups=groups, totals=totals, version=APP_VERSION,
+        MAIN_HTML, payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
@@ -1283,14 +1301,15 @@ def run():
         with _jobs_lock:
             if transfer_key in _active_transfers:
                 return jsonify(error="この引継ぎコードの処理はすでに実行中です。完了までお待ちください。"), 409
-    if RUN_PRICE_JPY <= 0:
+    if not PAYMENTS_ENABLED:
         return _start_job(job, arguments, transfer_key)
     _gc_orders()
+    amount, rows = compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only)
     order_id = secrets.token_urlsafe(16)
     with _orders_lock:
-        _orders[order_id] = {"owner": _owner(), "state": "unpaid", "amount": RUN_PRICE_JPY, "created": time.time(),
+        _orders[order_id] = {"owner": _owner(), "state": "unpaid", "amount": amount, "created": time.time(),
                              "job": job, "arguments": arguments, "transfer_key": transfer_key}
-    return jsonify(order=order_id, amount=RUN_PRICE_JPY)
+    return jsonify(order=order_id, amount=amount, breakdown=[{"label": l, "count": n, "unit": p} for l, n, p in rows])
 
 
 def _start_job(job: dict, arguments: tuple, transfer_key):
@@ -1430,7 +1449,7 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <label>管理者パスコード <input name="passcode" type="password" autocomplete="current-password" required></label><button>入る</button></form>
 {% else %}
 <h2>PayPay受取アカウント</h2>
-<p>料金: 1回 {{ price }} 円（RUN_PRICE_JPY で変更。0で決済なし）</p>
+<p>料金: キャラ指定 {{ prices.chara }}円/体・クラッシュ解除 {{ prices.crash }}円・バン保証 {{ prices.ban_guarantee }}円・アカウント複製 {{ prices.clone }}円・その他 {{ prices.other }}円/件（決済{{ "あり" if payments else "なし" }}）</p>
 <p>状態: {% if pp.ready %}接続済み（有効）{% elif pp.connected %}接続済み（セッション期限切れ。次の決済時に再認証）{% else %}未接続{% endif %}</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_login">
 <label>電話番号 <input name="phone" inputmode="tel" autocomplete="off" required></label><br>
@@ -1711,12 +1730,8 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
         <span><b>安全モード</b><small>bcsfeの配布元に「BANされることがある」と書かれている項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
       <label class="sw"><input type="checkbox" id="dry">
         <span><b>試運転（コードを発行しない）</b><small>書き換えまで行い、変更内容だけ見せます。アップロードはしません。</small></span></label>
-      <label class="sw"><input type="checkbox" id="clone">
-        <span><b>独立アカウント複製（実験機能）</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。PONOS非公式の方法で、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
       <label class="sw"><input type="checkbox" id="keepResults" checked>
         <span><b>発行したコードをこの端末に残す</b><small>完了時の引継ぎコードと暗証番号を、このブラウザに最大10件まで保存します。画面を閉じたり、サーバーの表示期限（30分）が過ぎたりしても「状況」タブで確認できます。共用の端末ではオフにしてください。</small></span></label>
-      <label class="sw"><input type="checkbox" id="integrity">
-        <span><b>セーブ保全チェック（既知異常の自動修復）</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
     </div>
     <div class="panel">
       <h2>よく使う組み合わせ</h2>
@@ -1826,6 +1841,16 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
       </div>
       {% endif %}
     </div>
+    {% if key == 'subs' %}
+    <div class="panel">
+      <h2>特別メニュー</h2>
+      <p class="sub">どちらかを選ぶと、上の項目やキャラ指定は使わず、引継ぎコードと暗証番号のセーブだけを処理します。</p>
+      <label class="sw"><input type="checkbox" id="integrity">
+        <span><b>バン保証（セーブ保全チェック・既知異常の自動修復）　{{ prices.ban_guarantee }}円</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
+      <label class="sw"><input type="checkbox" id="clone">
+        <span><b>アカウント複製（実験機能）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。PONOS非公式の方法で、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
+    </div>
+    {% endif %}
   </section>
   {% endfor %}
 
@@ -1910,13 +1935,14 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     <button class="btn" id="payGo" type="button">送金リンクを送って実行</button>
     <button class="btn" id="payCancel" type="button">やめる</button>
   </div>
-  <button id="go" type="button">{% if price %}決済して実行{% else %}実行{% endif %}</button>
+  <button id="go" type="button">{% if payments %}決済して実行{% else %}実行{% endif %}</button>
 </div></div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const TOTALS={{ totals|tojson }};
+const PRICES={{ prices|tojson }}, CRASH={{ crash_items|tojson }}, PAYMENTS={{ payments|tojson }};
 const HIGH={{ high|tojson }};
 const ERRNUMS={{ error_nums|tojson }};
 const GROUPS=['items','subs','others'];
@@ -2224,13 +2250,22 @@ function renderChecks(pc,qm,total){
   L.forEach(([lv,tx])=>{ const li=document.createElement('li'); li.dataset.lv=lv;
     li.append(el('i',null,lv==='ok'?'✓':lv==='warn'?'!':'✕'),el('span',null,tx)); ul.append(li); });
 }
+function estimate(pc,qm){
+  if($('#integrity').checked) return PRICES.ban_guarantee;
+  if($('#clone').checked) return PRICES.clone;
+  const oth=picked('others');
+  const crash=oth.filter(x=>CRASH.includes(x)).length;
+  const other=new Set([...picked('items'),...Object.keys(qm)]).size+picked('subs').length+oth.length-crash;
+  return (pc.err?0:pc.nums.length)*PRICES.chara+crash*PRICES.crash+other*PRICES.other;
+}
 function renderExtras(pc,qm,total,bm){
   renderChecks(pc,qm,total);
   if(!pc.err) renderChips(pc.nums);
   renderResults();
   $('#barmode').textContent=bm+($('#dry').checked?'・試運転':'')+($('#integrity').checked?'・保全チェック':$('#clone').checked?'・複製':($('#safe').checked?'・安全':''));
   if($('#clone').checked) $('#total').textContent='複製モード';
-  if($('#integrity').checked) $('#total').textContent='保全チェック';
+  if($('#integrity').checked) $('#total').textContent='バン保証';
+  if(PAYMENTS){ const y=estimate(pc,qm); $('#total').textContent+='　'+(y?y.toLocaleString('ja-JP')+'円':''); }
   if(!jobRunning) $('#go').textContent=goLabel();
 }
 try{ if(localStorage.getItem('nyanko-safe')==='0') $('#safe').checked=false; }catch(e){}

@@ -8,7 +8,7 @@ import paypay_gateway as G
 
 class OrderFlow(unittest.TestCase):
     def setUp(self):
-        self.p = patch.object(A, "RUN_PRICE_JPY", 100)
+        self.p = patch.object(A, "PAYMENTS_ENABLED", True)
         self.p.start()
         self.c = A.app.test_client()
 
@@ -22,8 +22,26 @@ class OrderFlow(unittest.TestCase):
 
     def test_run_returns_order_not_job(self):
         j = self.order()
-        self.assertEqual(j["amount"], 100)
+        self.assertEqual(j["amount"], 20)
         self.assertNotIn("job", j)
+
+    def test_prices(self):
+        f = A.compute_amount
+        self.assertEqual(f(["XP"], [], [], {}, [], False, False)[0], 20)
+        self.assertEqual(f(["XP"], ["全キャラレベルMAX"], [], {"XP": 5, "NP": 1}, [], False, False)[0], 60)  # XP/NP/サブ=3件
+        self.assertEqual(f([], [], [], {}, [1, 2, 3], False, False)[0], 150)
+        self.assertEqual(f([], [], list(A.CRASH_ITEMS), {}, [], False, False)[0], 100)
+        self.assertEqual(f([], [], list(A.CRASH_ITEMS) + ["施設全強化"], {}, [7], False, False)[0], 170)
+        self.assertEqual(f([], [], [], {}, [], True, False)[0], 100)
+        self.assertEqual(f([], [], [], {}, [], False, True)[0], 500)
+
+    def test_order_amount_is_server_side(self):
+        r = self.c.post("/run", json={"chars": "1-3", "amount": 1}).get_json()
+        self.assertEqual(r["amount"], 150)
+        r = self.c.post("/run", json={"transfer": "abc", "confirm": "1234", "integrity_only": True}).get_json()
+        self.assertEqual(r["amount"], 500)
+        r = self.c.post("/run", json={"transfer": "abc", "confirm": "1234", "clone": True}).get_json()
+        self.assertEqual(r["amount"], 100)
 
     def test_unpaid_failure_does_not_start(self):
         j = self.order()

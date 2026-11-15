@@ -14,7 +14,7 @@ import engine
 class ImprovementTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.store_patch = patch.object(A, 'RUN_PRICE_JPY', 0)
+        self.store_patch = patch.object(A, 'PAYMENTS_ENABLED', False)
         self.store_patch.start()
         self.client = A.app.test_client()
 

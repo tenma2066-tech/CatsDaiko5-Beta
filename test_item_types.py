@@ -159,7 +159,7 @@ class AppTests(unittest.TestCase):
         import app
         self.app = app
         self.client = app.app.test_client()
-        self.patch = mock.patch.object(app, "RUN_PRICE_JPY", 0)
+        self.patch = mock.patch.object(app, "PAYMENTS_ENABLED", False)
         self.patch.start()
 
     def tearDown(self):

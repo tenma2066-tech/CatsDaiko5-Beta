@@ -25,7 +25,7 @@ for _name in ("bcsfe.core", "bcsfe.core.game", "bcsfe.core.game.catbase"):
 _cat_mod = types.ModuleType("bcsfe.core.game.catbase.cat")
 _cat_mod.Cat = types.SimpleNamespace(init=lambda i: Cat(i), unlock=lambda *a, **k: None)
 sys.modules["bcsfe.core.game.catbase.cat"] = _cat_mod
-os.environ["RUN_PRICE_JPY"] = "0"  # selftest は決済なしで実行
+os.environ["PAYMENTS_ENABLED"] = "0"  # selftest は決済なしで実行
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 for _f in ("/tmp/bcsfe_game_version.json", "/tmp/bcsfe_cat_names.json"):
