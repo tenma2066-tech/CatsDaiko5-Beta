@@ -265,5 +265,15 @@ Blueprintがうまくいかないとき（New → Web Service で手動）
 
 - ログイン画面はありません。画面で「決済して実行」を押すと注文が作られ、PayPayで `RUN_PRICE_JPY` 円（既定100円・`0`で決済なし）の**送金リンク**を作って貼り付けます。リンクの金額・期限・未受取を確認して受け取れたら、自動で実行が始まります。
 - 結果が不明・保留のときは注文を無効にし、**同じリンクを再送しません**（PayPayアプリで状態を確認してください）。支払い済みで待機枠が満杯の場合は、再送金なしで再試行できます。
-- 受取側PayPayアカウントは `/admin`（`ADMIN_PASSWORD`）でログイン＋SMS認証して登録します。認証情報は `PAYPAY_ENCRYPTION_KEY`（Fernetキー。`python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`）で暗号化。Renderの無料枠はディスクが消えるため、`RUNTIME_GITHUB_*`（非公開リポジトリ）に暗号化して保存します。
+- 受取側PayPayアカウントは `/admin`（`ADMIN_PASSWORD`）でログイン＋SMS認証して登録します。認証情報は `PAYPAY_ENCRYPTION_KEY`（Fernetキー）で暗号化し、Fly.io のボリューム（`/data`）に保存します。
+
+### Fly.io へのデプロイ（Render は使いません）
+```
+fly launch --copy-config --no-deploy          # アプリ名を決める
+fly volumes create data --size 1 --region nrt  # 永続ボリューム（1台のみ）
+fly secrets set ADMIN_PASSWORD=... SECRET_KEY=$(openssl rand -hex 32) \
+  PAYPAY_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())")
+fly deploy --ha=false
+```
+`PAYPAY_ENCRYPTION_KEY` は紛失すると保存済みPayPay情報を読めなくなるので控えてください。ボリュームは1台専用のため、台数は1のまま（`--ha=false`）にします。
 - PayPayのWeb非公式APIを使うため、仕様変更で動かなくなる可能性があります。単一インスタンス・単一ワーカー前提です。
