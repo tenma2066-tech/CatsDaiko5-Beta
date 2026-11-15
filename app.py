@@ -1371,7 +1371,7 @@ def run():
         _orders[order_id] = {"owner": _owner(), "state": "unpaid", "amount": amount, "created": time.time(),
                              "job": job, "arguments": arguments, "transfer_key": transfer_key}
     _persist_orders()
-    return jsonify(order=order_id, amount=amount, breakdown=[{"label": l, "count": n, "unit": p} for l, n, p in rows])
+    return jsonify(order=order_id, amount=amount, skipped=skipped, breakdown=[{"label": l, "count": n, "unit": p} for l, n, p in rows])
 
 
 def _start_job(job: dict, arguments: tuple, transfer_key):
@@ -2031,6 +2031,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     <h2 id="payTitle">PayPayでお支払い</h2>
     <div class="payamt"><b id="payAmount"></b><span>円</span></div>
     <ul class="paylist" id="payList"></ul>
+    <div class="payerr" id="paySkip" data-lv="wait" hidden><b>安全モードのため実行されない項目</b><span id="paySkipList"></span><span>これらは料金に含まれません。実行したい場合は「やめる」→入力画面で安全モードをオフにしてください（BANの恐れがあります）。</span></div>
     <p class="sub" id="payInfo"></p>
     <label class="field" id="payLinkField"><span>送金リンク</span>
       <input id="payLink" type="url" inputmode="url" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048"></label>
@@ -2724,7 +2725,7 @@ async function start(){
       safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c, items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')})});
     const j=await r.json();
     if(!r.ok){ setRunning(false); $('#log').textContent=''; $('#fail').hidden=false; $('#fail').textContent=j.error||'エラー'; return; }
-    if(j.order){ setRunning(false); $('#log').textContent=''; openPay(j.order,j.amount,j.breakdown); return; }
+    if(j.order){ setRunning(false); $('#log').textContent=''; openPay(j.order,j.amount,j.breakdown,j.skipped); return; }
     jobStart=Date.now(); watch(j.job);
   }catch(e){
     setRunning(false); $('#log').textContent='';
@@ -2781,12 +2782,13 @@ function payError(j,fallback,lv){
   $('#payErrHint').textContent=(m[1]||'')+(()=>{ const m=(j&&j.code==='amount_mismatch'&&j.error)?j.error.match(/（(リンク[^）]*)）/):null; return m?' ['+m[1]+']':''; })();
   $('#payErr').dataset.lv=lv||'bad'; $('#payErr').hidden=false;
 }
-function openPay(id,amount,breakdown){
+function openPay(id,amount,breakdown,skipped){
   payOrder=id; payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
   $('#payAmount').textContent=Number(amount).toLocaleString('ja-JP');
   const ul=$('#payList'); ul.textContent='';
   (breakdown||[]).forEach(r=>{ const li=document.createElement('li'); li.textContent=r.label+' '+r.count+'件 × '+r.unit+'円'; ul.append(li); });
   $('#payInfo').textContent='PayPayアプリで上の金額ちょうどの「送金リンク」を作り（パスコードなし）、下に貼り付けて送信してください。確認でき次第、自動で実行します。';
+  $('#paySkip').hidden=!(skipped&&skipped.length); $('#paySkipList').textContent=(skipped||[]).join('・');
   $('#payGo').disabled=false; document.body.style.overflow='hidden';
   setTimeout(()=>$('#payLink').focus(),50);
 }
