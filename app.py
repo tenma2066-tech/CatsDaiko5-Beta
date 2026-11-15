@@ -1281,7 +1281,7 @@ def run():
         if not (transfer and confirm):
             return jsonify(error="複製には、引継ぎコードと暗証番号が必要です。"), 400
         data = {"clone": True, "dry": data.get("dry", False), "safe": False}
-    safe = bool(data.get("safe", True))
+    safe = bool(data.get("safe", False))
     dry = bool(data.get("dry", False))
     if integrity_only:
         safe = False
@@ -1822,7 +1822,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     </div>
     <div class="panel">
       <h2>実行モード</h2>
-      <label class="sw"><input type="checkbox" id="safe" checked>
+      <label class="sw"><input type="checkbox" id="safe">
         <span><b>安全モード</b><small>bcsfeの配布元に「BANされることがある」と書かれている項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
       <label class="sw"><input type="checkbox" id="dry">
         <span><b>試運転（コードを発行しない）</b><small>書き換えまで行い、変更内容だけ見せます。アップロードはしません。</small></span></label>
@@ -2400,8 +2400,8 @@ function renderExtras(pc,qm,total,bm){
   if(PAYMENTS){ const y=estimate(pc,qm); $('#total').textContent+='　'+(y?y.toLocaleString('ja-JP')+'円':''); }
   if(!jobRunning) $('#go').textContent=goLabel();
 }
-try{ if(localStorage.getItem('nyanko-safe')==='0') $('#safe').checked=false; }catch(e){}
-$('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe',$('#safe').checked?'1':'0')}catch(e){} refresh(); });
+try{ if(localStorage.getItem('nyanko-safe2')==='1') $('#safe').checked=true; }catch(e){}
+$('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe2',$('#safe').checked?'1':'0')}catch(e){} refresh(); });
 $('#dry').addEventListener('change',refresh);
 $('#clone').addEventListener('change',()=>{ if($('#clone').checked) $('#integrity').checked=false; refresh(); });
 $('#integrity').addEventListener('change',()=>{ if($('#integrity').checked) $('#clone').checked=false; refresh(); });
@@ -2654,7 +2654,7 @@ function applyPreset(p){
   $('#chars').value=p.chars||'';
   Object.keys(catSettings).forEach(k=>delete catSettings[k]);
   Object.entries(p.cats||{}).forEach(([n,c])=>catSettings[n]=Object.assign({base_level:'',plus_level:'',form:'',talents_all:false},c));
-  $('#safe').checked=p.safe!==false; $('#dry').checked=!!p.dry;
+  $('#safe').checked=p.safe===true; $('#dry').checked=!!p.dry;
   $('#clone').checked=false; $('#integrity').checked=false;
   chipSig=null; refresh();
   toast('「'+p.name+'」を呼び出しました');
