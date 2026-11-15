@@ -40,7 +40,7 @@ CAT_NAMES_CACHE_SCHEMA = 2
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 PAYMENTS_ENABLED = os.environ.get("PAYMENTS_ENABLED", "1") != "0"  # 0 = 決済なし（動作確認用）
 # 料金（円）
-PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 20}
+PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25}
 CRASH_ITEMS = ("ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正")
 ORDER_TTL = 1800
 
@@ -1027,7 +1027,18 @@ def _too_many_fails(ip: str) -> bool:
     return len(recent) >= 5
 
 
-def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only) -> tuple[int, list]:
+def chara_units(cat_nums, cat_settings) -> int:
+    """キャラ1体ごとに、設定した項目（レベル・形態・本能）1つにつき1件。設定なし（解放のみ）は1件。
+    レベルは本体レベルと＋値をまとめて1件とする。cat_settings のキーはセーブ内部ID（番号-1）。"""
+    total = 0
+    for n in cat_nums:
+        s = (cat_settings or {}).get(n - DB_OFFSET) or {}
+        k = (1 if ("base_level" in s or "plus_level" in s) else 0) + (1 if "form" in s else 0) + (1 if s.get("talents_all") else 0)
+        total += max(1, k)
+    return total
+
+
+def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings=None) -> tuple[int, list]:
     """サーバー側で金額を決める（ブラウザの金額は信用しない）。戻り値は (合計, 内訳)。"""
     if integrity_only:
         return PRICES["ban_guarantee"], [("バン保証（セーブ保全チェック）", 1, PRICES["ban_guarantee"])]
@@ -1035,7 +1046,7 @@ def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only) ->
         return PRICES["clone"], [("アカウント複製", 1, PRICES["clone"])]
     crash = [x for x in others if x in CRASH_ITEMS]
     other_n = len(set(items) | set(qty)) + len(subs) + len([x for x in others if x not in CRASH_ITEMS])
-    rows = [("キャラ指定", len(cat_nums), PRICES["chara"]),
+    rows = [("キャラ指定（レベル・形態・本能など1項目ずつ）", chara_units(cat_nums, cat_settings), PRICES["chara"]),
             ("クラッシュ解除", len(crash), PRICES["crash"]),
             ("その他の項目", other_n, PRICES["other"])]
     rows = [r for r in rows if r[1]]
@@ -1365,7 +1376,7 @@ def run():
     if not PAYMENTS_ENABLED:
         return _start_job(job, arguments, transfer_key)
     _gc_orders()
-    amount, rows = compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only)
+    amount, rows = compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings)
     order_id = secrets.token_urlsafe(16)
     with _orders_lock:
         _orders[order_id] = {"owner": _owner(), "state": "unpaid", "amount": amount, "created": time.time(),
@@ -1528,7 +1539,7 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <label>管理者パスコード <input name="passcode" type="password" autocomplete="current-password" required></label><button>入る</button></form>
 {% else %}
 <h2>PayPay受取アカウント</h2>
-<p>料金: キャラ指定 {{ prices.chara }}円/体・クラッシュ解除 {{ prices.crash }}円・バン保証 {{ prices.ban_guarantee }}円・アカウント複製 {{ prices.clone }}円・その他 {{ prices.other }}円/件（決済{{ "あり" if payments else "なし" }}）</p>
+<p>料金: キャラ指定 {{ prices.chara }}円/項目・クラッシュ解除 {{ prices.crash }}円・バン保証 {{ prices.ban_guarantee }}円・アカウント複製 {{ prices.clone }}円・その他 {{ prices.other }}円/件（決済{{ "あり" if payments else "なし" }}）</p>
 <p>状態: {% if pp.ready %}接続済み（有効）{% elif pp.connected %}接続済み（セッション期限切れ。次の決済時に再認証）{% else %}未接続{% endif %}</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_login">
 <label>電話番号 <input name="phone" inputmode="tel" autocomplete="off" required></label><br>
@@ -2055,7 +2066,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     </ol>
     <h3>料金</h3>
     <ul class="paylist">
-      <li>キャラ指定：1体 {{ prices.chara }}円</li>
+      <li>キャラ指定：1体ごとに、レベル・形態・本能を1項目 {{ prices.chara }}円（設定なしの解放のみは1体 {{ prices.chara }}円）</li>
       <li>クラッシュ解除（ガマトト・オトート砲台）：1件 {{ prices.crash }}円</li>
       <li>バン保証（サブ→特別メニュー）：{{ prices.ban_guarantee }}円</li>
       <li>アカウント複製（サブ→特別メニュー）：{{ prices.clone }}円</li>
@@ -2388,7 +2399,9 @@ function estimate(pc,qm){
   const oth=picked('others');
   const crash=oth.filter(x=>CRASH.includes(x)).length;
   const other=new Set([...picked('items'),...Object.keys(qm)]).size+picked('subs').length+oth.length-crash;
-  return (pc.err?0:pc.nums.length)*PRICES.chara+crash*PRICES.crash+other*PRICES.other;
+  let units=0;
+  if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
+  return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other;
 }
 function renderExtras(pc,qm,total,bm){
   renderChecks(pc,qm,total);
