@@ -76,3 +76,5 @@
 - 移行時の注意: URLが変わる。PayPayは新サーバーの `/admin` で再ログインが必要。Fly側の未完了注文は引き継がれない。
 - 状態: Oracle Cloud は登録時にクレジットカードを要求され**利用不可**（2026-11-15）。
 - 次の候補: 国内VPSのコンビニ払い（ConoHa / Xserver VPS / シン・VPS）。`claude/oracle-cloud` ブランチの仕組みは Ubuntu の VPS ならそのまま使える（`VPS_USER=root` を設定、ポート80/443を開ける）。
+- 第一候補: **ConoHa VPS 1GB（東京・ConoHaチャージでコンビニ払い）**。2026-11-15 時点でConoHaがメンテナンス中のため**保留**。
+- 次点: シン・VPS 1GB（約750円/月・Xserver系。コンビニ払い可否は要確認）、ABLENET VPS。Xserver VPS は2GB新規停止中。
