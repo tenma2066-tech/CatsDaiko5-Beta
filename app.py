@@ -28,6 +28,7 @@ from flask import Flask, jsonify, redirect, render_template_string, request, ses
 import engine
 import item_catalog
 import asyncio
+import logging
 import paypay_gateway
 import save_audit
 import save_repair
@@ -1105,11 +1106,71 @@ _orders: dict[str, dict] = {}
 _orders_lock = threading.Lock()
 
 
+ORDER_KEEP = {"hold": 86400, "paid": 86400, "paying": 86400}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
+_log_orders = logging.getLogger("orders")
+
+
 def _gc_orders() -> None:
     now = time.time()
     with _orders_lock:
-        for k in [k for k, v in _orders.items() if now - v["created"] > ORDER_TTL and v["state"] != "paying"]:
+        for k in [k for k, v in _orders.items() if now - v["created"] > ORDER_KEEP.get(v["state"], ORDER_TTL)]:
             del _orders[k]
+
+
+def _order_to_json(o: dict) -> dict:
+    out = {k: v for k, v in o.items() if k not in ("arguments", "transfer_key")}
+    args = o.get("arguments")
+    if args is not None:
+        a = list(args)
+        a[7] = {str(k): v for k, v in a[7].items()}  # cat_settings のキーを文字列に
+        out["arguments"] = a
+    tk = o.get("transfer_key")
+    out["transfer_key"] = tk.hex() if tk else None
+    return out
+
+
+def _order_from_json(o: dict) -> dict:
+    out = dict(o)
+    if out.get("arguments") is not None:
+        a = list(out["arguments"])
+        a[7] = {int(k): v for k, v in a[7].items()}
+        out["arguments"] = tuple(a)
+    out["transfer_key"] = bytes.fromhex(out["transfer_key"]) if out.get("transfer_key") else None
+    if out.get("state") == "paying":  # 決済確認中に再起動した → 同じリンクを再確認できる保留へ
+        out["state"] = "hold" if out.get("link_code") else "unpaid"
+    return out
+
+
+def _persist_orders() -> None:
+    """注文を暗号化して保存する。失敗してもサービスは止めない（ログのみ）。"""
+    if not PAYMENTS_ENABLED:
+        return
+    with _orders_lock:
+        snapshot = {k: _order_to_json(v) for k, v in _orders.items()}
+    try:
+        paypay_gateway.save_orders(snapshot)
+    except Exception:
+        _log_orders.exception("order persistence failed")
+
+
+def _load_orders() -> None:
+    if not PAYMENTS_ENABLED:
+        return
+    try:
+        data = paypay_gateway.load_orders()
+    except Exception:
+        _log_orders.exception("order load failed")
+        return
+    with _orders_lock:
+        for k, v in data.items():
+            try:
+                _orders.setdefault(k, _order_from_json(v))
+            except Exception:
+                _log_orders.warning("skipped unreadable order")
+    _gc_orders()
+
+
+_load_orders()
 
 
 @app.get("/")
@@ -1309,6 +1370,7 @@ def run():
     with _orders_lock:
         _orders[order_id] = {"owner": _owner(), "state": "unpaid", "amount": amount, "created": time.time(),
                              "job": job, "arguments": arguments, "transfer_key": transfer_key}
+    _persist_orders()
     return jsonify(order=order_id, amount=amount, breakdown=[{"label": l, "count": n, "unit": p} for l, n, p in rows])
 
 
@@ -1345,6 +1407,13 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
 
 @app.post("/api/orders/<order_id>/pay")
 def pay_order(order_id: str):
+    try:
+        return _pay_order(order_id)
+    finally:
+        _persist_orders()
+
+
+def _pay_order(order_id: str):
     """PayPay送金リンクを受け取り、確認できたら実行を開始する。支払い済みなら再送不要で開始だけ再試行。"""
     data = request.get_json(silent=True) or {}
     with _orders_lock:
@@ -1369,6 +1438,7 @@ def pay_order(order_id: str):
             if mode == "link":
                 raw = str(data.get("link", ""))
                 order["link_code"] = paypay_gateway._normalize_link(raw) or order.get("link_code")
+                _persist_orders()  # 送金リンクを受け取る前に保存（途中で再起動しても同じリンクを再確認できる）
                 asyncio.run(paypay_gateway.receive_payment(raw, order["amount"], order_id))
             else:
                 asyncio.run(paypay_gateway.confirm_received(order.get("link_code"), order_id))

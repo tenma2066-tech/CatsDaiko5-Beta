@@ -110,5 +110,38 @@ class OrderFlow(unittest.TestCase):
         rp.assert_awaited_once()
 
 
+
+class OrderPersistence(unittest.TestCase):
+    def test_roundtrip_survives_restart_and_resumes_hold(self):
+        import os, tempfile
+        from pathlib import Path
+        from cryptography.fernet import Fernet
+        with tempfile.TemporaryDirectory() as d, \
+             patch.dict(os.environ, {"PAYPAY_ENCRYPTION_KEY": Fernet.generate_key().decode(), "RUNTIME_GITHUB_REPO": ""}), \
+             patch.object(G, "_ROOT", Path(d)), patch.object(G, "_ORDERS_FILE", Path(d) / "orders.enc"), \
+             patch.object(A, "PAYMENTS_ENABLED", True), patch.dict(A._orders, {}, clear=True):
+            c = A.app.test_client()
+            j = c.post("/run", json={"transfer": "abcd1234", "confirm": "1234", "qty": {"XP": "5"}, "chars": "1", "cat_settings": {"1": {"form": 2}}}).get_json()
+            link = "https://pay.paypay.ne.jp/abcDEF123456"
+            with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("temporary_hold", "保留"))):
+                self.assertTrue(c.post(f"/api/orders/{j['order']}/pay", json={"link": link}).get_json()["hold"])
+            self.assertNotIn(b"abcd1234", (Path(d) / "orders.enc").read_bytes())  # 暗号化されている
+            # 再起動をシミュレート
+            A._orders.clear()
+            A._load_orders()
+            self.assertEqual(A._orders[j["order"]]["state"], "hold")
+            self.assertEqual(A._orders[j["order"]]["arguments"][7], {0: {"form": 2}})
+            with patch.object(G, "confirm_received", AsyncMock(return_value="d")), \
+                 patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="J9")):
+                r = c.post(f"/api/orders/{j['order']}/pay", json={})
+            self.assertEqual(r.get_json()["job"], "J9")
+
+    def test_paying_at_crash_becomes_hold(self):
+        o = {"state": "paying", "link_code": "abcdef", "arguments": None, "transfer_key": None}
+        self.assertEqual(A._order_from_json(o)["state"], "hold")
+        o["link_code"] = None
+        self.assertEqual(A._order_from_json(o)["state"], "unpaid")
+
+
 if __name__ == "__main__":
     unittest.main()

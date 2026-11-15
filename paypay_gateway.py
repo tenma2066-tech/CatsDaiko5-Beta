@@ -454,3 +454,41 @@ async def confirm_received(code: str, purchase_id: str):
     if status == "PENDING":
         raise PayPayError("still_pending", "まだ受け取りが完了していません。PayPayアプリで該当の送金を受け取って（保留の解除）から、もう一度押してください。")
     raise PayPayError("hold_failed", "このリンクは受け取れない状態になっています（取り消し・期限切れなど）。管理者に連絡してください。")
+
+
+# ---------------------------------------------------------------- 注文の永続化（再起動しても支払い済み・保留の注文を失わない）
+_ORDERS_FILE = _ROOT / "orders.enc"
+
+def save_orders(data: dict):
+    raw = _cipher().encrypt(json.dumps(data, ensure_ascii=False).encode())
+    if github_runtime_store.enabled():
+        try:
+            github_runtime_store.write_blob("paypay/orders.enc", raw)
+        except github_runtime_store.RuntimeStoreError as exc:
+            raise PayPayError("runtime_store", str(exc)) from exc
+        return
+    _ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, temp = tempfile.mkstemp(prefix=".orders-", dir=_ROOT)
+    try:
+        os.chmod(temp, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw); f.flush(); os.fsync(f.fileno())
+        os.replace(temp, _ORDERS_FILE)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+def load_orders() -> dict:
+    try:
+        raw = github_runtime_store.read_blob("paypay/orders.enc", _ORDERS_FILE)
+    except github_runtime_store.RuntimeStoreError as exc:
+        raise PayPayError("runtime_store", str(exc)) from exc
+    if not raw:
+        return {}
+    try:
+        data = json.loads(_cipher().decrypt(raw))
+        return data if isinstance(data, dict) else {}
+    except PayPayError:
+        raise
+    except Exception:
+        raise PayPayError("orders_unreadable", "保存済みの注文を読み取れません。") from None
