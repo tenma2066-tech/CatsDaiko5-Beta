@@ -11,6 +11,8 @@ from pathlib import Path
 
 from bcsfe import core
 
+import item_catalog
+
 
 def _safe_server_error(key, result):
     """Keep transport diagnostics without writing arbitrary server/account data."""
@@ -111,8 +113,10 @@ QUANTITY_ITEM_LIMITS: dict[str, int] = {
     "にゃんチケ":   2999,
     "レアチケ":     999,
     "プラチケ":     99,
+    "プラチナのかけら": 99,
     "レジェチケ":   99,
     "イベチケ&福チケ": 9999,
+    "1億DL記念チケット": 9999,
     "バトルアイテム": 9999,
     "ネコビタン":    9999,
     "城素材":        9999,
@@ -122,6 +126,92 @@ QUANTITY_ITEM_LIMITS: dict[str, int] = {
     "リーダーシップ": 9999,
     "地底メダル":    9999,
 }
+
+
+# 種類ごとに個数を指定できる項目。キー表記は「項目名#番号」（番号は1始まり）。
+# 名前の並びはセーブ内の配列の並びどおり（item_catalog.py 参照）。
+ITEM_TYPE_NAMES: dict[str, list[str]] = {
+    "キャッツアイ": item_catalog.CATSEYE_NAMES,
+    "マタタビ": item_catalog.CATFRUIT_NAMES,
+    "バトルアイテム": item_catalog.BATTLE_ITEM_NAMES,
+    "ネコビタン": item_catalog.CATAMIN_NAMES,
+    "城素材": item_catalog.BASE_MATERIAL_NAMES,
+    "地底メダル": item_catalog.LABYRINTH_MEDAL_NAMES,
+    "本能玉": item_catalog.ORB_NAMES,
+    "イベチケ&福チケ": item_catalog.EVENT_TICKET_TYPE_NAMES,
+}
+ITEM_TYPE_COUNTS: dict[str, int] = {k: len(v) for k, v in ITEM_TYPE_NAMES.items()}
+# 単純な整数リストとして保存されている項目
+_ITEM_TYPE_LIST_ATTRS = {
+    "キャッツアイ": "catseyes", "マタタビ": "catfruit",
+    "ネコビタン": "catamins", "地底メダル": "labyrinth_medals",
+}
+
+
+def split_type_key(key: str):
+    """「マタタビ#3」→ ("マタタビ", 3)。種類指定でなければ None。"""
+    base, sep, num = str(key).partition("#")
+    if not sep or base not in ITEM_TYPE_COUNTS or not (num.isascii() and num.isdigit()):
+        return None
+    n = int(num)
+    return (base, n) if 1 <= n <= ITEM_TYPE_COUNTS[base] else None
+
+
+def type_label(key: str) -> str:
+    """「マタタビ#29」→「虹獣石」。種類指定でなければそのまま返す。"""
+    typed = split_type_key(key)
+    return ITEM_TYPE_NAMES[typed[0]][typed[1] - 1] if typed else str(key)
+
+
+def _base_materials(save):
+    return save.ototo.base_materials.materials
+
+
+def _set_typed_amount(save, base: str, num: int, value: int) -> None:
+    """1種類だけ個数を設定する。セーブにその種類の枠が無ければ IndexError。"""
+    index = num - 1
+    if base in _ITEM_TYPE_LIST_ATTRS:
+        values = getattr(save, _ITEM_TYPE_LIST_ATTRS[base])
+        if index >= len(values):
+            raise IndexError(base)
+        values[index] = value
+    elif base == "バトルアイテム":
+        save.battle_items.items[index].amount = value
+    elif base == "城素材":
+        _base_materials(save)[index].amount = value
+    elif base == "本能玉":
+        save.talent_orbs.set_orb(index, value)
+    elif base == "イベチケ&福チケ":
+        if index == 0:
+            save.event_capsules = [value] * len(save.event_capsules)
+            if hasattr(save, "event_capsules_2"):
+                save.event_capsules_2 = [value] * len(save.event_capsules_2)
+        else:
+            if not save.lucky_tickets:
+                raise IndexError(base)
+            save.lucky_tickets = [value] * len(save.lucky_tickets)
+    else:
+        raise KeyError(base)
+
+
+def all_orb_ids(save) -> list[int]:
+    """付与できる本能玉のID一覧。ゲームデータから読めればそれを使い、
+    読めなければ同梱の一覧（item_catalog）を使う。セーブにある既存のIDも必ず含める。"""
+    ids: set[int] = set()
+    try:
+        from bcsfe.core.game.catbase.talent_orbs import OrbInfoList
+        info = OrbInfoList.create(save)
+        if info is not None:
+            ids.update(int(o.raw_orb_info.orb_id) for o in info.orb_info_list)
+    except Exception:
+        pass
+    if not ids:
+        ids.update(range(len(item_catalog.ORB_NAMES)))
+    try:
+        ids.update(int(k) for k in save.talent_orbs.orbs.keys())
+    except Exception:
+        pass
+    return sorted(ids)
 
 
 def apply_item_amounts(
@@ -137,10 +227,19 @@ def apply_item_amounts(
     以前は基本代行と代行全適応垢で別々に数値が書かれていて、
     全適応垢の方がにゃんチケ999枚（基本代行は2999枚）のように少ない、
     というズレが8項目で起きていた。ここ1か所に集約してズレを防ぐ。
+    失敗した項目は、種類指定なら「虹獣石」のような種類名で返す。
     """
     failures = []
+    # 種類ごとの指定は、項目全体の指定より後に適用して優先する
+    items = sorted(items, key=lambda x: split_type_key(x) is not None)
     for item in items:
         try:
+            typed = split_type_key(item)
+            if typed is not None:
+                base, num = typed
+                v = quantity_map.get(item) if quantity_map else None
+                _set_typed_amount(save, base, num, QUANTITY_ITEM_LIMITS[base] if v is None else v)
+                continue
             if quantity_map is not None:
                 qty = quantity_map.get(item)
             elif quantity_item == item and quantity_count is not None:
@@ -161,8 +260,12 @@ def apply_item_amounts(
                 save.rare_tickets = v
             elif item == 'プラチケ':
                 save.platinum_tickets = v
+            elif item == 'プラチナのかけら':
+                save.platinum_shards = v
             elif item == 'レジェチケ':
                 save.legend_tickets = v
+            elif item == '1億DL記念チケット':
+                save.hundred_million_ticket = v
             elif item == 'イベチケ&福チケ':
                 if hasattr(save, 'event_capsules'):
                     save.event_capsules = [v] * len(save.event_capsules)
@@ -190,16 +293,16 @@ def apply_item_amounts(
                 for i in range(len(save.catfruit)):
                     save.catfruit[i] = v
             elif item == '本能玉':
-                if hasattr(save, 'talent_orbs'):
-                    for orb_id in list(save.talent_orbs.orbs.keys()):
-                        save.talent_orbs.set_orb(orb_id, v)
+                # 既存の記録だけでなく、全種類の本能玉を付与する（初期アカウントは記録が0件のため）
+                for orb_id in all_orb_ids(save):
+                    save.talent_orbs.set_orb(orb_id, v)
             elif item == 'リーダーシップ':
                 save.leadership = v
             elif item == '地底メダル':
                 if hasattr(save, 'labyrinth_medals') and save.labyrinth_medals:
                     save.labyrinth_medals = [v] * len(save.labyrinth_medals)
         except Exception:
-            failures.append(item)
+            failures.append(type_label(item))
     return failures
 
 
@@ -294,9 +397,25 @@ def unlock_cats_by_ids(save, ids) -> dict:
 SNAPSHOT_FIELDS = [
     ("猫缶", "catfood"), ("XP", "xp"), ("NP", "np"),
     ("にゃんチケ", "normal_tickets"), ("レアチケ", "rare_tickets"),
-    ("プラチケ", "platinum_tickets"), ("レジェチケ", "legend_tickets"),
+    ("プラチケ", "platinum_tickets"), ("プラチナのかけら", "platinum_shards"),
+    ("レジェチケ", "legend_tickets"), ("1億DL記念チケット", "hundred_million_ticket"),
     ("リーダーシップ", "leadership"),
 ]
+
+
+def _typed_amounts(save, base: str) -> list[int]:
+    """種類ごとの個数を、名前一覧と同じ並びで返す（比較表用）。"""
+    if base in _ITEM_TYPE_LIST_ATTRS:
+        return [int(n) for n in getattr(save, _ITEM_TYPE_LIST_ATTRS[base])]
+    if base == "バトルアイテム":
+        return [int(i.amount) for i in save.battle_items.items]
+    if base == "城素材":
+        return [int(m.amount) for m in _base_materials(save)]
+    raise KeyError(base)
+
+
+# 比較表で種類ごとに表示する項目（本能玉は310種あるので合計と種類数だけにする）
+_SNAPSHOT_TYPED = ("キャッツアイ", "マタタビ", "バトルアイテム", "ネコビタン", "城素材", "地底メダル")
 
 
 def snapshot(save) -> dict:
@@ -317,15 +436,25 @@ def snapshot(save) -> dict:
         ("図鑑登録済みキャラ", lambda: sum(bool(c.catguide_collected) for c in save.cats.cats)),
         ("表示済みポップアップ", lambda: sum(bool(p.seen) for p in save.unlock_popups.popups.values())),
         ("未取得の設定アイテム", lambda: len(save.scheme_items.to_obtain)),
-        ("キャッツアイ合計", lambda: sum(int(n) for n in save.catseyes)),
-        ("マタタビ合計", lambda: sum(int(n) for n in save.catfruit)),
-        ("ネコビタン合計", lambda: sum(int(n) for n in save.catamins)),
-        ("バトルアイテム合計", lambda: sum(int(n.amount) for n in save.battle_items.items)),
+        ("本能玉合計", lambda: sum(int(o.value) for o in save.talent_orbs.orbs.values())),
+        ("本能玉の種類数", lambda: sum(1 for o in save.talent_orbs.orbs.values() if int(o.value) > 0)),
+        ("イベチケ合計", lambda: sum(int(n) for n in save.event_capsules)),
+        ("福引チケット合計", lambda: sum(int(n) for n in save.lucky_tickets)),
     ):
         try:
             out[label] = read()
         except (AttributeError, TypeError, ValueError):
             pass
+    for base in _SNAPSHOT_TYPED:
+        try:
+            amounts = _typed_amounts(save, base)
+        except (AttributeError, TypeError, ValueError, KeyError):
+            continue
+        out[f"{base}合計"] = sum(amounts)
+        names = ITEM_TYPE_NAMES[base]
+        for index, amount in enumerate(amounts):
+            name = names[index] if index < len(names) else f"{base} {index + 1}"
+            out[f"{base}：{name}"] = amount
     return out
 
 
@@ -470,10 +599,11 @@ def build_initial_account_handler(cc):
         return core.ServerHandler(save_obj)
 
 
-def claim_user_rank_rewards(save):
+def claim_user_rank_rewards(save) -> bool:
+    """ユーザーランク報酬をすべて受け取り済みにする。成功したら True。"""
     try:
         if not hasattr(save, 'user_rank_rewards') or not save.user_rank_rewards:
-            return
+            return False
         from bcsfe.core.game.catbase.user_rank_rewards import Reward as _Reward
         rewards_list = save.user_rank_rewards.rewards
 
@@ -490,8 +620,10 @@ def claim_user_rank_rewards(save):
 
         for reward in rewards_list:
             reward.claimed = True
+        return True
     except Exception as e:
         print(f"Error in claim_user_rank_rewards: {e}")
+        return False
 
 def clear_beacon_events(save):
     try:
@@ -642,6 +774,42 @@ def bcsfe_init(base_path: str = "/tmp/bcsfe_fukusei"):
     return core.CountryCode.from_code("jp"), core.GameVersion.from_string(GAME_DATA_VERSION)
 
 
+def max_cat_talents(save, cat, talent_data) -> bool:
+    """1体の本能・超本能をすべて最大にする。足りない本能の記録は追加する。
+
+    ゲームデータにそのキャラの本能が無ければ False（何も変更しない）。
+    """
+    cat_skill = talent_data.get_cat_skill(cat.id) if talent_data else None
+    if not cat_skill:
+        return False
+    from bcsfe.core.game.catbase.cat import Talent
+    original = list(cat.talents) if cat.talents is not None else None
+    fresh = cat.talents is None
+    if fresh:
+        cat.talents = []
+    existing = {getattr(talent, "id", None) for talent in cat.talents}
+    for skill in cat_skill.skills:
+        # ID 0 はゲームデータ上の空き枠。新規作成時は従来どおり作るが、
+        # 既存の記録へ補うときは空き枠を増やさない。
+        if skill.ability_id == 0 and not fresh:
+            continue
+        if skill.ability_id not in existing:
+            # あとから追加された本能（超本能など）も、既存の本能がある場合に補う
+            cat.talents.append(Talent(skill.ability_id, 0))
+            existing.add(skill.ability_id)
+    data = talent_data.get_cat_talents(cat)
+    if not data:
+        cat.talents = original
+        return False
+    _, max_levels, _, talent_ids = data
+    for index, talent_id in enumerate(talent_ids):
+        talent = cat.get_talent_from_id(talent_id)
+        if talent is None or index >= len(max_levels):
+            raise RuntimeError("talent record is unavailable")
+        talent.level = max_levels[index]
+    return True
+
+
 def apply_cat_customizations(save, settings_by_id: dict) -> dict:
     """指定キャラだけを解放し、指定されたレベル・形態・本能を適用する。"""
     result = {"unlocked": [], "already": [], "missing": [], "error_chars": [],
@@ -718,39 +886,20 @@ def apply_cat_customizations(save, settings_by_id: dict) -> dict:
                 total_forms = int(getattr(pb_cat, "total_forms", 0) or 0) if pb_cat else 0
                 if not pb_cat or form > total_forms:
                     result["unsupported"].append(cid)
+                elif form == 4:
+                    cat.set_form_true(save, 4, fourth_form=True)
+                    result["formed"].append(cid)
                 else:
                     cat.set_form_true(save, form, fourth_form=False)
+                    if form < 4 and getattr(cat, "fourth_form", 0):
+                        cat.fourth_form = 0
                     result["formed"].append(cid)
             if setting.get("talents_all"):
                 talent_data = save.cats.read_talent_data(save)
-                cat_skill = talent_data.get_cat_skill(cat.id) if talent_data else None
-                if not cat_skill:
-                    result["unsupported"].append(cid)
+                if max_cat_talents(save, cat, talent_data):
+                    result["talented"].append(cid)
                 else:
-                    from bcsfe.core.game.catbase.cat import Talent
-                    if cat.talents is None:
-                        cat.talents = []
-                    existing_talent_ids = {
-                        getattr(talent, "id", None) for talent in cat.talents
-                    }
-                    for skill in cat_skill.skills:
-                        if skill.ability_id not in existing_talent_ids:
-                            cat.talents.append(Talent(skill.ability_id, 0))
-                            existing_talent_ids.add(skill.ability_id)
-                    data = talent_data.get_cat_talents(cat)
-                    if data:
-                        _, max_levels, _, talent_ids = data
-                        for index, talent_id in enumerate(talent_ids):
-                            talent = cat.get_talent_from_id(talent_id)
-                            if talent is None or index >= len(max_levels):
-                                raise RuntimeError("talent record is unavailable")
-                            talent.level = max_levels[index]
-                        result["talented"].append(cid)
-                    else:
-                        # Do not leave empty talent records behind when the
-                        # current game data cannot describe this character's talents.
-                        cat.talents = list(original["talents"]) if original["talents"] is not None else None
-                        result["unsupported"].append(cid)
+                    result["unsupported"].append(cid)
         except Exception:
             for result_key in ("leveled", "formed", "talented"):
                 if cid in result[result_key]:
@@ -782,6 +931,9 @@ def apply_cat_customizations(save, settings_by_id: dict) -> dict:
     for key in result:
         result[key] = sorted(set(result[key]))
     return result
+
+
+_FIX_OTHERS = ("ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正")
 
 
 def apply_subs_and_others(save, subs_to_apply, others_to_apply):
@@ -884,22 +1036,13 @@ def apply_subs_and_others(save, subs_to_apply, others_to_apply):
             elif sub == '全キャラ本能解放':
                 try:
                     td = save.cats.read_talent_data(save)
-                    if td:
-                        from bcsfe.core.game.catbase.cat import Talent as _T
-                        for cat in [c for c in save.cats.cats if c.unlocked]:
-                            cat_skill = td.get_cat_skill(cat.id)
-                            if not cat_skill:
-                                continue
-                            if cat.talents is None:
-                                cat.talents = [_T(sk.ability_id, 0) for sk in cat_skill.skills]
-                            data = td.get_cat_talents(cat)
-                            if not data:
-                                continue
-                            _, mxl, _, ids = data
-                            for i, tid in enumerate(ids):
-                                t = cat.get_talent_from_id(tid)
-                                if t:
-                                    t.level = mxl[i]
+                    if not td:
+                        raise RuntimeError("talent data unavailable")
+                    for cat in [c for c in save.cats.cats if c.unlocked]:
+                        try:
+                            max_cat_talents(save, cat, td)
+                        except Exception:
+                            failures.append(sub)
                 except Exception as e:
                     failures.append(sub)
 
@@ -1100,9 +1243,21 @@ def apply_subs_and_others(save, subs_to_apply, others_to_apply):
         except Exception as _e:
             failures.append(sub)
 
+    # 砲台のクラッシュ修正は砲台を初期化するので、「施設全強化」より先に行う
+    others_to_apply = sorted(others_to_apply, key=lambda x: 0 if x in _FIX_OTHERS else 1)
     for other in others_to_apply:
         try:
-            if other == 'プレイ時間カンスト':
+            if other == 'ガマトトのクラッシュ修正':
+                save.gamatoto.skin = 2
+            elif other == 'オトート砲台のクラッシュ修正':
+                from bcsfe.core.game.gamoto.ototo import Cannons
+                save.ototo.cannons = Cannons.init(save.game_version)
+            elif other == 'チュートリアルクリア':
+                core.StoryChapters.clear_tutorial(save)
+            elif other == 'ユーザーランク報酬全受け取り':
+                if not claim_user_rank_rewards(save):
+                    failures.append(other)
+            elif other == 'プレイ時間カンスト':
                 if hasattr(save, 'officer_pass') and save.officer_pass and hasattr(save.officer_pass, 'play_time'):
                     save.officer_pass.play_time = 2147483647
             elif other == 'ゴールド会員化':
@@ -1183,8 +1338,9 @@ def apply_subs_and_others(save, subs_to_apply, others_to_apply):
                                         continue
                                     cannon.levels[part_id] = max_lv - 1 if part_id == 0 else max_lv
                         if hasattr(save.ototo, 'base_materials'):
+                            # 「城素材」で指定した個数を減らさない（999未満のときだけ補充する）
                             for material in save.ototo.base_materials.materials:
-                                material.amount = 999
+                                material.amount = max(int(material.amount), 999)
                 except Exception as e:
                     failures.append(other)
 

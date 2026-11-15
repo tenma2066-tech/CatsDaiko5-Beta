@@ -8,6 +8,7 @@ on:
       - "auth_store.py"
       - "github_auth_store.py"
       - "engine.py"
+      - "item_catalog.py"
       - "selftest.py"
       - "save_audit.py"
       - "save_repair.py"
@@ -81,6 +82,9 @@ jobs:
 
       - name: キャラ個別カスタマイズテスト
         run: python -m unittest -v test_cat_customization.py
+
+      - name: 種類ごとの数量指定テスト
+        run: python -m unittest -v test_item_types.py
 
       - name: GitHubパスワード保存テスト
         run: python -m unittest -v test_github_auth_store.py

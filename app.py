@@ -1,9 +1,9 @@
-"""にゃんこ代行 Web版（ベータ）
-公開ショップ・PayPay決済と、管理者向けセーブデータ処理画面を提供します。
+"""にゃんこ代行 Web版（個人用・無料）
+ブラウザから引継ぎコードを入力して、セーブデータを書き換えます。
+課金・PayPay・Discordは一切ありません。
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import importlib.metadata
@@ -26,28 +26,24 @@ from types import SimpleNamespace
 from flask import Flask, jsonify, redirect, render_template_string, request, session
 
 import engine
+import item_catalog
 from auth_store import PasswordStore
 from github_auth_store import GitHubPasswordStore, PasswordStoreUnavailable
 import save_audit
 import save_repair
-import paypay_gateway
-import shop_store
 
 APP_VERSION = "1.15"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
-# APP_PASSWORD is optional: the public storefront must not require a site password.
-# When omitted, create an unguessable seed for the legacy /console password store.
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "") or secrets.token_urlsafe(32)
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+if not APP_PASSWORD:
+    raise RuntimeError("環境変数 APP_PASSWORD が空です。Renderの Environment で設定してください。")
 
 app = Flask(__name__)
-_secret_key = os.environ.get("SECRET_KEY")
-if not _secret_key:
-    # Spawned worker processes must derive the same session and transfer-lock key.
-    _secret_key = secrets.token_hex(32)
-    os.environ["SECRET_KEY"] = _secret_key
-app.secret_key = _secret_key
+app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
+    ("nyanko-web:" + APP_PASSWORD + ":" + os.environ.get("ADMIN_PASSWORD", "")).encode()
+).hexdigest()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 if os.environ.get("AUTH_GITHUB_REPO") or os.environ.get("AUTH_GITHUB_TOKEN"):
     password_store = GitHubPasswordStore(
@@ -64,8 +60,8 @@ def _password_store_unavailable(exc):
     return jsonify(error=str(exc)), 503
 
 ITEMS = [
-    "猫缶", "XP", "NP", "にゃんチケ", "レアチケ", "プラチケ", "レジェチケ",
-    "イベチケ&福チケ", "バトルアイテム", "ネコビタン", "城素材", "キャッツアイ",
+    "猫缶", "XP", "NP", "にゃんチケ", "レアチケ", "プラチケ", "プラチナのかけら", "レジェチケ",
+    "イベチケ&福チケ", "1億DL記念チケット", "バトルアイテム", "ネコビタン", "城素材", "キャッツアイ",
     "マタタビ", "本能玉", "リーダーシップ", "地底メダル",
 ]
 SUBS = [
@@ -82,6 +78,8 @@ SUBS = [
 OTHERS = [
     "プレイ時間カンスト", "ゴールド会員化", "編成スロット最大",
     "にゃんこメダル全解放", "敵キャラ図鑑全埋め", "施設全強化", "ミッション全クリア",
+    "ユーザーランク報酬全受け取り", "チュートリアルクリア",
+    "ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正",
     "未所持キャラのガチャ・図鑑記録を整理",
 ]
 _SUB_PRIORITY = {
@@ -92,7 +90,8 @@ _SUB_PRIORITY = {
 
 # bcsfe の配布元（PyPI / GitHub）の説明に「BANされることがある」と書かれている項目。
 # これ以外が安全という意味ではない（公開情報が無いだけ）。
-HIGH_RISK_ITEMS = ["猫缶", "レアチケ", "プラチケ", "レジェチケ"]
+# プラチナのかけらは10個でプラチケ1枚になるため、プラチケと同じ扱いにする。
+HIGH_RISK_ITEMS = ["猫缶", "レアチケ", "プラチケ", "プラチナのかけら", "レジェチケ"]
 
 # ---------------------------------------------------------------- キャラ番号
 # にゃんこDBの番号は1始まり（ネコ=1）。セーブ内部のIDは0始まり（ネコ=0）なので1引く。
@@ -235,60 +234,6 @@ def _snap(save) -> dict:
         return engine.snapshot(save)
     except Exception:  # noqa: BLE001
         return {}
-
-
-def _combo_progress_debug(save) -> str:
-    """調査用: コンボ・NEW/通知関連の保存項目を各処理段階で比較する。"""
-    fields = (
-        "combo_unlocks",
-        "combo_unlocked_10k_ur",
-        "new_dialogs_2",
-        "unlock_popups_0",
-        "unlock_popups_6",
-        "unlock_popups_8",
-        "unlock_popups_11",
-    )
-    parts = []
-    for field in fields:
-        try:
-            value = getattr(save, field, "<なし>")
-            if isinstance(value, (list, tuple)):
-                rendered = f"len={len(value)}, value={list(value)[:24]!r}"
-            else:
-                rendered = repr(value)
-            parts.append(f"{field}={rendered}")
-        except Exception:  # noqa: BLE001
-            parts.append(f"{field}=<取得失敗>")
-    try:
-        popup_obj = getattr(save, "unlock_popups", None)
-        popups = getattr(popup_obj, "popups", None)
-        if isinstance(popups, dict):
-            pairs = sorted(
-                (key, getattr(value, "seen", value))
-                for key, value in popups.items()
-            )
-            parts.append(f"unlock_popups=count:{len(pairs)}, first:{pairs[:24]!r}")
-        else:
-            parts.append(f"unlock_popups={popup_obj!r}")
-    except Exception:  # noqa: BLE001
-        parts.append("unlock_popups=<取得失敗>")
-    try:
-        cats_obj = getattr(save, "cats", None)
-        flags = getattr(cats_obj, "chara_new_flags", None)
-        if isinstance(flags, dict):
-            pairs = sorted(flags.items(), key=lambda item: str(item[0]))
-            parts.append(f"chara_new_flags=count:{len(pairs)}, first:{pairs[:12]!r}")
-        else:
-            parts.append(f"chara_new_flags={flags!r}")
-        cats = getattr(cats_obj, "cats", None)
-        if isinstance(cats, (list, tuple)):
-            ids = [getattr(cat, "id", None) for cat in cats]
-            parts.append(
-                f"cat_roster=count:{len(ids)}, first_ids:{ids[:8]!r}, last_ids:{ids[-8:]!r}"
-            )
-    except Exception:  # noqa: BLE001
-        parts.append("cat_state=<取得失敗>")
-    return "; ".join(parts)
 
 
 def _harvest_names(save) -> None:
@@ -1044,7 +989,8 @@ def _run_job(job: dict, transfer: str, confirm: str, items, subs, others, qty=No
             _step(job, 4, "試運転のため、サーバー登録はしません")
             job["dry"] = True
             job["status"] = "done"
-            _log(job, "試運転完了。複製データの独立インスタンス化を確認しました。サーバー登録・コード発行はしていません。")
+            _log(job, "試運転完了。複製データの独立インスタンス化を確認しました。サーバー登録・コード発行はしていません。"
+                 if clone else "試運転完了。変更内容を確認しました。サーバー登録・コード発行はしていません。")
             return
 
         if clone:
@@ -1113,7 +1059,7 @@ def login():
             session["password_id"] = ident
             session["job_owner"] = secrets.token_urlsafe(32)
             session.permanent = False
-            return redirect("/console")
+            return redirect("/")
         else:
             _fail.setdefault(ip, []).append(time.time())
             msg = "パスワードが違います。"
@@ -1128,7 +1074,8 @@ def logout():
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
-    # The admin area has its own ADMIN_PASSWORD gate; no customer/site login is needed.
+    if not _logged_in():
+        return redirect("/login")
     msg = ""
     token = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
     if request.method == "POST":
@@ -1175,359 +1122,7 @@ def admin():
                                   passwords=password_store.list() if session.get("admin") else [])
 
 
-
-
-# ---------------------------------------------------------------- 公開ショップ・注文・PayPay
-def _shop_page(title, body):
-    return render_template_string("""<!doctype html><html lang="ja"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
-<title>{{ title }} | にゃんこ代行</title>
-<style>
-:root{color-scheme:light dark;--bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--accent:#ffc42e;--bad:#d93636;--soft:#f1f4f8}
-@media(prefers-color-scheme:dark){:root{--bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,"Noto Sans JP",sans-serif;line-height:1.55}
-main{max-width:620px;margin:0 auto;padding:24px 15px 60px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
-h1{font-size:23px;margin:0}h2{font-size:18px;margin:0 0 10px}.muted{color:var(--muted);font-size:13px}
-.card{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 3px 0 var(--line)}
-input,button,select{font:inherit;width:100%;padding:12px;border:2px solid var(--line);border-radius:10px;background:var(--soft);color:var(--ink);margin:5px 0}
-button{background:var(--accent);color:#17181c;font-weight:800;cursor:pointer}
-label{display:block;font-weight:700;font-size:14px;margin-top:10px}
-.price{font-size:21px;font-weight:900}.error{color:var(--bad);font-weight:700;white-space:pre-wrap}.row{display:flex;justify-content:space-between;gap:10px;align-items:center}
-a{color:inherit}.hidden{display:none!important}
-</style></head><body><main><header><h1>にゃんこ代行</h1><a href="/admin">管理者</a></header>{{ body|safe }}</main></body></html>""", title=title, body=body)
-
 @app.get("/")
-def storefront_root():
-    # Public customers use the original full-featured interface; only checkout
-    # and customer identity are different from the legacy console.
-    groups = [
-        ("items", "アイテム", "選んだものを最大値まで付与します", ITEMS),
-        ("qty", "数量指定", "個数を決めて付与します。空欄は変更しません", ITEMS),
-        ("chars", "キャラ管理", "キャラを選択し、レベル・形態・本能を1体ずつ設定します", []),
-        ("subs", "サブ", "キャラ・ステージなどをまとめて解放・強化します", SUBS),
-        ("others", "その他", "会員状態やミッションなどを設定します", OTHERS),
-    ]
-    return render_template_string(
-        MAIN_HTML, groups=groups, totals={k: len(v) for k, _, _, v in groups},
-        version=APP_VERSION, limits=engine.QUANTITY_ITEM_LIMITS,
-        high=HIGH_RISK_ITEMS, error_nums=sorted(i + DB_OFFSET for i in engine.ERROR_CAT_IDS),
-        public_checkout=True,
-    )
-
-@app.get("/shop")
-def shop_home():
-    # Historical storefront URL now opens the original full customer interface.
-    return redirect("/")
-
-
-@app.post("/api/shop/operation-orders")
-def shop_create_operation_order():
-    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
-        return jsonify(error="現在は注文受付を停止しています。"), 503
-    ip = request.remote_addr or ""
-    rate_key = "orders:" + ip
-    if _too_many_fails(rate_key):
-        return jsonify(error="注文作成が続いています。10分ほど待ってからお試しください。"), 429
-    _fail.setdefault(rate_key, []).append(time.time())
-    data = request.get_json(silent=True) or {}
-    try:
-        order = shop_store.create_operation_order(
-            data.get("operation"), data.get("quantity")
-        )
-        return jsonify(order), 201
-    except shop_store.ShopError as exc:
-        return jsonify(error=str(exc)), 400
-
-
-@app.post("/api/shop/orders")
-def shop_create_order():
-    return jsonify(error="旧商品カタログ方式の注文受付は終了しました。トップ画面から注文してください。"), 410
-
-
-@app.get("/shop/order/<order_id>")
-def shop_order_page(order_id):
-    key = request.args.get("key", "")
-    order = shop_store.public_order(order_id, key)
-    if not order:
-        return _shop_page("注文確認", '<div class="card"><h2>注文が見つかりません</h2><p>注文URLを確認してください。</p></div>'), 404
-    body = r"""<div class="card"><h2>注文内容</h2><p>注文番号：<b>__ID__</b></p><p>商品：<b>__TITLE__</b></p><p>__QUANTITY__体 × __UNIT_PRICE__円</p><p class="price">合計 __AMOUNT__円</p>
-<p id="status">決済待ち</p><p class="muted">まずPayPayでお支払いください。受取確認後、この画面で引継ぎコードと暗証番号を入力できます。</p>
-<div id="payment">
-<label>PayPay送金リンク<input id="paypay-link" maxlength="2048" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off"></label>
-<button id="pay">PayPayで支払う</button></div>
-<div id="credentials" hidden><h2>引継ぎ情報の入力</h2><p class="muted">新規アカウントの場合は両方空欄でOKです。既存セーブの複製・保全チェックでは両方入力してください。</p>
-<label>引継ぎコード<input id="transfer" maxlength="128" autocomplete="off" autocapitalize="off"></label>
-<label>暗証番号<input id="pin" maxlength="32" inputmode="numeric" autocomplete="off"></label>
-<button id="send-credentials">引継ぎ情報を送信</button></div>
-<p id="error" class="error"></p>
-<div id="job-progress" hidden><h2>処理状況</h2><p id="job-state" class="muted"></p><button id="cancel-order-job" hidden>待機中の処理を取り消す</button><pre id="job-log" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto"></pre><h3 id="job-result-title" hidden>処理結果</h3><pre id="job-result" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto"></pre></div>
-<p class="muted">受取処理中に通信が途切れた場合、二重受取を避けるため自動再試行しません。画面の案内に従って管理者へお問い合わせください。</p></div>
-<script>
-const id="__ID__",key=new URLSearchParams(location.search).get('key')||'';
-async function refresh(){
- try{
-  const r=await fetch('/api/shop/order/'+id+'?key='+encodeURIComponent(key));if(!r.ok)return;
-  const o=await r.json();
-  const names={awaiting_payment:'決済待ち',payment_processing:'決済処理中',paid:'決済確認済み',review:'管理者による確認中',fulfilling:'作業中',completed:'完了',cancelled:'キャンセル'};
-  const status=document.getElementById('status'),payment=document.getElementById('payment'),credentials=document.getElementById('credentials');
-  status.textContent=names[o.status]||o.status;
-  if(o.status==='awaiting_payment'){payment.hidden=false;credentials.hidden=true;}
-  else if(o.status==='paid'&&!o.credentials_submitted){payment.hidden=true;credentials.hidden=false;status.textContent='決済確認済み。引継ぎ情報を入力してください。';}
-  else{payment.hidden=true;credentials.hidden=true;if(o.status==='paid')status.textContent='引継ぎ情報送信済み。作業待ちです。';}
-  if(o.job_id && o.job_id!=='starting') await refreshProgress();
- }catch(e){}
-}
-async function refreshProgress(){
- try{
-  const r=await fetch('/api/shop/order/'+id+'/progress?key='+encodeURIComponent(key),{cache:'no-store'});
-  if(!r.ok)return;
-  const j=await r.json(),box=document.getElementById('job-progress');
-  box.hidden=false;
-  document.getElementById('job-state').textContent='処理状態：'+(j.status||j.job_status||'確認中')+(j.queue_position?'（待機 '+j.queue_position+' 番目）':'')+(j.step?'・工程 '+j.step+'/'+j.total:'');
-  document.getElementById('job-log').textContent=(j.log||[]).join(String.fromCharCode(10))+(j.error?String.fromCharCode(10)+j.error:'');
-  const cancel=document.getElementById('cancel-order-job');
-  cancel.hidden=j.status!=='queued';
-  const resultTitle=document.getElementById('job-result-title'),result=document.getElementById('job-result');
-  resultTitle.hidden=!j.result; result.textContent=j.result?JSON.stringify(j.result,null,2):'';
-  if(j.status==='done')document.getElementById('status').textContent='処理完了';
-  if(j.status==='error')document.getElementById('status').textContent='処理エラー：管理者へお問い合わせください';
- }catch(e){}
-}
-document.getElementById('pay').addEventListener('click',async()=>{
- const b=document.getElementById('pay'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='PayPay受取を確認中…';
- try{
-  const r=await fetch('/api/shop/order/'+id+'/paypay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,link:document.getElementById('paypay-link').value})});
-  const d=await r.json();if(!r.ok)throw Error(d.error||'決済を確認できませんでした。');e.textContent=d.message||'決済を確認しました。';await refresh();
- }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='PayPayで支払う';}
-});
-document.getElementById('cancel-order-job').addEventListener('click',async()=>{
- const b=document.getElementById('cancel-order-job');b.disabled=true;
- try{
-  const r=await fetch('/api/shop/order/'+id+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});
-  const d=await r.json();if(!r.ok)throw Error(d.error||'取り消せませんでした。');
-  await refresh();
- }catch(e){document.getElementById('error').textContent=e.message;}
- finally{b.disabled=false;}
-});
-document.getElementById('send-credentials').addEventListener('click',async()=>{
- const b=document.getElementById('send-credentials'),e=document.getElementById('error');e.textContent='';b.disabled=true;b.textContent='送信中…';
- try{
-  const r=await fetch('/api/shop/order/'+id+'/credentials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,transfer_code:document.getElementById('transfer').value,pin:document.getElementById('pin').value})});
-  const d=await r.json();if(!r.ok)throw Error(d.error||'引継ぎ情報を送信できませんでした。');e.textContent=d.message||'引継ぎ情報を送信しました。';await refresh();
- }catch(x){e.textContent=x.message;b.disabled=false;}finally{b.textContent='引継ぎ情報を送信';}
-});
-refresh();
-setInterval(refresh,5000);
-</script>""".replaceAll("__ID__", order.id).replace("__TITLE__", order.title).replace("__QUANTITY__", String(order.quantity)).replace("__UNIT_PRICE__", String(order.unit_price_yen)).replace("__AMOUNT__", String(order.amount))
-    return _shop_page("注文確認", body)
-
-@app.get("/api/shop/order/<order_id>")
-def shop_order_status(order_id):
-    order = shop_store.public_order(order_id, request.args.get("key", ""))
-    if not order:
-        return jsonify(error="注文が見つかりません。"), 404
-    return jsonify(order)
-
-@app.post("/api/shop/order/<order_id>/credentials")
-def shop_submit_credentials(order_id):
-    data = request.get_json(silent=True) or {}
-    key = data.get("key", "")
-    claimed = False
-    try:
-        order = shop_store.public_order(order_id, key)
-        if not order:
-            return jsonify(error="注文が見つかりません。"), 404
-        if order.get("job_id"):
-            return jsonify(error="この注文は既に処理開始済みです。"), 409
-        stored_operation = shop_store.operation_payload(order_id, key)
-        if not stored_operation:
-            return jsonify(error="注文が見つかりません。"), 404
-        transfer_code = data.get("transfer_code", "")
-        pin = data.get("pin", "")
-        if (stored_operation.get("clone") or stored_operation.get("integrity_only")) and not (transfer_code and pin):
-            return jsonify(error="複製・保全チェックには既存セーブの引継ぎコードと暗証番号が必要です。"), 400
-        shop_store.save_credentials(order_id, key, transfer_code, pin)
-        shop_store.claim_execution(order_id, key)
-        claimed = True
-        operation = shop_store.operation_for_execution(order_id, key)
-        # Reuse the original /run validation, queue and worker path. The internal
-        # request is scoped to this order and never exposes /run to customers.
-        with app.test_request_context("/run", method="POST", json=operation):
-            session["_order_execution"] = True
-            session["job_owner"] = "order:" + order_id
-            response = run()
-            response_status = 200
-            if isinstance(response, tuple):
-                response, response_status = response
-            result = response.get_json(silent=True) or {}
-            if response_status >= 400 or not result.get("job"):
-                shop_store.release_execution(order_id)
-                claimed = False
-                return jsonify(error=result.get("error", "処理を開始できませんでした。")), response_status
-        shop_store.bind_job(order_id, result["job"])
-        shop_store.set_status(order_id, "fulfilling", note="決済確認済み・処理開始")
-        return jsonify(ok=True, job=result["job"], message="引継ぎ情報を受け付け、処理を開始しました。")
-    except shop_store.ShopError as exc:
-        if claimed:
-            shop_store.release_execution(order_id)
-        return jsonify(error=str(exc)), 400
-    except Exception:
-        if claimed:
-            shop_store.release_execution(order_id)
-        app.logger.exception("Could not start paid order %s", order_id)
-        return jsonify(error="処理を開始できませんでした。管理者による確認が必要です。"), 500
-
-
-@app.get("/api/shop/order/<order_id>/progress")
-def shop_order_progress(order_id):
-    key = request.args.get("key", "")
-    order = shop_store.public_order(order_id, key)
-    if not order:
-        return jsonify(error="注文が見つかりません。"), 404
-    job_id = order.get("job_id")
-    if not job_id or job_id == "starting":
-        return jsonify(status=order["status"], job_status="not_started")
-    with app.test_request_context("/status/" + job_id, method="GET"):
-        session["_order_execution"] = True
-        session["job_owner"] = "order:" + order_id
-        response = status(job_id)
-        if isinstance(response, tuple):
-            body, code = response
-            if code == 404:
-                try:
-                    shop_store.set_status(order_id, "review", note="サーバー再起動等で処理状況を復元できません")
-                except shop_store.ShopError:
-                    pass
-                return jsonify(status="error", error="サーバー再起動等により処理状況を復元できません。管理者へお問い合わせください。")
-            return body, code
-        job_data = response.get_json(silent=True) if hasattr(response, "get_json") else None
-    if isinstance(job_data, dict) and job_data.get("status") == "done":
-        try:
-            shop_store.set_status(order_id, "completed", note="処理完了")
-        except shop_store.ShopError:
-            pass
-    elif isinstance(job_data, dict) and job_data.get("status") == "error":
-        try:
-            shop_store.set_status(order_id, "review", note="処理エラー・管理者確認待ち")
-        except shop_store.ShopError:
-            pass
-    return response
-
-
-@app.post("/api/shop/order/<order_id>/cancel")
-def shop_order_cancel(order_id):
-    data = request.get_json(silent=True) or {}
-    order = shop_store.public_order(order_id, data.get("key", ""))
-    if not order:
-        return jsonify(error="注文が見つかりません。"), 404
-    job_id = order.get("job_id")
-    if not job_id or job_id == "starting":
-        return jsonify(error="待機中の処理が見つかりません。"), 404
-    with app.test_request_context("/cancel/" + job_id, method="POST"):
-        session["_order_execution"] = True
-        session["job_owner"] = "order:" + order_id
-        response = cancel_job(job_id)
-        if isinstance(response, tuple):
-            body, code = response
-            return body, code
-        return response
-
-
-@app.post("/api/shop/order/<order_id>/paypay")
-def shop_paypay_submit(order_id):
-    if os.environ.get("SHOP_LIVE_ORDERS_ENABLED") != "1":
-        return jsonify(error="現在は決済受付を停止しています。"), 503
-    data = request.get_json(silent=True) or {}
-    order = shop_store.public_order(order_id, data.get("key", ""))
-    if not order:
-        return jsonify(error="注文が見つかりません。"), 404
-    if order["status"] != "awaiting_payment":
-        return jsonify(error="この注文は決済処理中、または決済受付状態ではありません。"), 409
-    if _too_many_fails("paypay:" + order_id):
-        return jsonify(error="決済確認の試行回数が上限に達しました。管理者へお問い合わせください。"), 429
-    _fail.setdefault("paypay:" + order_id, []).append(time.time())
-    if not shop_store.claim_payment(order_id):
-        return jsonify(error="別の決済リクエストを処理中です。画面を更新してください。"), 409
-    try:
-        digest = asyncio.run(paypay_gateway.receive_payment(data.get("link", ""), order["amount"], order_id))
-        shop_store.complete_payment(order_id, digest)
-        return jsonify(ok=True, status="paid", message="PayPayの受取を確認しました。引継ぎ情報を入力できます。")
-    except paypay_gateway.PayPayError as exc:
-        uncertain = exc.code in {"accept_uncertain", "accept_unconfirmed", "temporary_hold", "duplicate", "runtime_store"}
-        shop_store.release_payment(order_id, review=uncertain, note=exc.code)
-        return jsonify(error=exc.message), 400
-    except shop_store.ShopError as exc:
-        shop_store.release_payment(order_id, review=True, note="payment_state_error")
-        return jsonify(error=str(exc)), 409
-    except Exception:
-        shop_store.release_payment(order_id, review=True, note="unexpected_payment_error")
-        app.logger.exception("Unexpected payment processing error for order %s", order_id)
-        return jsonify(error="決済結果を確定できません。管理者による確認が必要です。"), 500
-
-@app.get("/admin/paypay")
-def admin_paypay_page():
-    if not session.get("admin"): return redirect("/admin")
-    try: pp_status = paypay_gateway.status()
-    except paypay_gateway.PayPayError as exc: pp_status = {"connected":False,"ready":False,"error":exc.message}
-    csrf = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
-    otp_waiting = bool(paypay_gateway._pending_otp)
-    body = """<div class="card"><h2>PayPay接続</h2><p>接続状態：<b>"""+("受取可能" if pp_status.get("ready") else "未接続・再認証が必要")+"""</b></p>
-<p class="muted">SMS認証はPayPayが要求した場合のみです。認証情報は暗号化して保存されます。</p>
-<form method="post" action="/admin/paypay/connect"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label>電話番号<input name="phone" type="tel" required autocomplete="off"></label><label>PayPayパスワード<input name="password" type="password" required autocomplete="off"></label><button>PayPayに接続</button></form>
-"""+("""<form method="post" action="/admin/paypay/otp"><input type="hidden" name="csrf" value="{{ csrf }}"><label>SMS認証コード<input name="otp" inputmode="numeric" maxlength="4" required></label><button>SMS認証</button></form>""" if otp_waiting else "")+"""<p class="error">{{ msg }}</p></div><p><a href="/admin/orders">注文管理</a> ・ <a href="/console">代行ツール</a></p>"""
-    return render_template_string(_shop_page("PayPay設定", body), csrf=csrf, msg=request.args.get("msg",""))
-
-@app.post("/admin/paypay/connect")
-def admin_paypay_connect():
-    if not session.get("admin"): return "管理者モードが必要です。", 403
-    # PayPay account setup is safe while customer order intake is disabled.
-    token=session.get("admin_csrf","")
-    if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
-    try:
-        result=asyncio.run(paypay_gateway.begin_login(request.form.get("phone",""),request.form.get("password","")))
-        return redirect("/admin/paypay?msg="+("SMS認証コードを入力してください。" if result.get("otp_required") else "PayPayに接続しました。"))
-    except paypay_gateway.PayPayError as exc:
-        return redirect("/admin/paypay?msg="+__import__("urllib.parse",fromlist=["quote"]).quote(exc.message))
-
-@app.post("/admin/paypay/otp")
-def admin_paypay_otp():
-    if not session.get("admin"): return "管理者モードが必要です。", 403
-    token=session.get("admin_csrf","")
-    if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
-    try:
-        asyncio.run(paypay_gateway.finish_login(request.form.get("otp","")))
-        return redirect("/admin/paypay?msg=PayPayに接続しました。")
-    except paypay_gateway.PayPayError as exc:
-        return redirect("/admin/paypay?msg="+__import__("urllib.parse",fromlist=["quote"]).quote(exc.message))
-
-@app.get("/admin/orders")
-def admin_orders_page():
-    if not session.get("admin"): return redirect("/admin")
-    rows=shop_store.admin_orders()
-    csrf=session.setdefault("admin_csrf",secrets.token_urlsafe(32))
-    order_body=render_template_string("""{% for o in rows %}<div class="card"><b>{{ o.id }} / {{ o.title }} / {{ o.quantity }}体 × {{ o.unit_price_yen }}円 = {{ o.amount }}円</b><p>状態：{{ o.status }}</p>
-{% if o.credentials_submitted %}<p>引継ぎコード：<code>{{ o.credentials.transfer_code or o.credentials.error or '' }}</code><br>暗証番号：<code>{{ o.credentials.pin or '' }}</code></p>{% else %}<p>引継ぎ情報：購入者の入力待ち</p>{% endif %}
-<form method="post" action="/admin/orders/{{ o.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}">
-<select name="status">{% for st in transitions[o.status] %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select><button>状態を更新</button></form></div>{% else %}<p>注文はありません。</p>{% endfor %}""", rows=rows, csrf=csrf,
-        transitions={"awaiting_payment":["review","cancelled"],"payment_processing":["review"],"paid":["fulfilling","cancelled"],"review":["paid","cancelled"],"fulfilling":["completed","review"],"completed":[],"cancelled":[]})
-    return _shop_page("注文管理", '<div class="card"><h2>注文管理</h2><p><a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin">管理者</a></p>'+order_body+'</div>')
-
-@app.post("/admin/orders/<order_id>/status")
-def admin_order_status(order_id):
-    if not session.get("admin"): return "管理者モードが必要です。",403
-    token=session.get("admin_csrf","")
-    if not hmac.compare_digest(request.form.get("csrf","").encode(),token.encode()): return "不正なリクエストです。",403
-    try:
-        status=request.form.get("status","")
-        # Review -> paid is an explicit manual confirmation after checking PayPay.
-        shop_store.set_status(order_id,status,note="管理者による状態更新")
-    except shop_store.ShopError as exc:
-        return str(exc),400
-    return redirect("/admin/orders")
-
-
-@app.get("/console")
 def index():
     if not _logged_in():
         return redirect("/login")
@@ -1542,6 +1137,8 @@ def index():
     return render_template_string(
         MAIN_HTML, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
+        type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
+        orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
         error_nums=sorted(i + DB_OFFSET for i in engine.ERROR_CAT_IDS),
     )
 
@@ -1549,6 +1146,8 @@ def index():
 @app.get("/api/state")
 def api_state():
     """画面の接続表示用。軽い処理だけを返す。"""
+    if not _logged_in():
+        return jsonify(error="ログインしてください"), 401
     with _jobs_lock:
         parallel = _parallel_state_locked()
     return jsonify(
@@ -1581,6 +1180,8 @@ def api_state():
 @app.post("/api/warmup")
 def api_warmup():
     """ゲームデータを先に準備しておく（実行ボタンを押す前に待ち時間を済ませる）。"""
+    if not _logged_in():
+        return jsonify(error="ログインしてください"), 401
     if _warm_cache_lock.acquire(blocking=False):
         _warm_cache.update(status="loading", prepared=0, error=None)
         threading.Thread(target=_warmup_thread, daemon=True).start()
@@ -1590,6 +1191,8 @@ def api_warmup():
 @app.get("/api/cats")
 def api_cats():
     """キャラ名の一覧（検索用）。未取得なら裏で取りにいく。"""
+    if not _logged_in():
+        return jsonify(error="ログインしてください"), 401
     _start_names()
     return jsonify(version=_names.get("version"), updated=_names.get("updated"), state=_names["state"], count=len(_names["items"]), method=_names["method"],
                    error=_names["error"], items=_names["items"] if _names["state"] == "ready" else [])
@@ -1597,10 +1200,8 @@ def api_cats():
 
 @app.post("/api/cats/latest")
 def api_cats_latest():
-    rate_key = "catalog:" + (request.remote_addr or "")
-    if _too_many_fails(rate_key):
-        return jsonify(error="カタログ更新が続いています。10分ほど待ってからお試しください。"), 429
-    _fail.setdefault(rate_key, []).append(time.time())
+    if not _logged_in():
+        return jsonify(error="ログインしてください"), 401
     if not _run_lock.acquire(blocking=False):
         return jsonify(error="データを準備中です。完了してからもう一度押してください。"), 409
     _catalog_update.update(status="loading", error=None)
@@ -1615,10 +1216,8 @@ def api_cats_latest():
 
 @app.post("/api/cats/refresh")
 def api_cats_refresh():
-    rate_key = "catalog-refresh:" + (request.remote_addr or "")
-    if _too_many_fails(rate_key):
-        return jsonify(error="キャラ一覧の再取得が続いています。10分ほど待ってからお試しください。"), 429
-    _fail.setdefault(rate_key, []).append(time.time())
+    if not _logged_in():
+        return jsonify(error="ログインしてください"), 401
     if _names["state"] in ("ready", "error", "none"):
         _names.update(state="none", items=[], method=None, error=None)
         _start_names()
@@ -1627,7 +1226,7 @@ def api_cats_refresh():
 
 @app.post("/run")
 def run():
-    if not _logged_in() and not session.get("_order_execution"):
+    if not _logged_in():
         return jsonify(error="ログインしてください"), 401
     _gc_jobs()
     data = request.get_json(silent=True) or {}
@@ -1672,7 +1271,7 @@ def run():
         if unknown_fields:
             return jsonify(error=f"{number}番の個別設定に未対応の項目があります。"), 400
         setting = {}
-        for field, low, high in (("base_level", 1, 100), ("plus_level", 0, 999), ("form", 1, 3)):
+        for field, low, high in (("base_level", 1, 100), ("plus_level", 0, 999), ("form", 1, 4)):
             value = raw_setting.get(field)
             if value is None or str(value).strip() == "":
                 continue
@@ -1691,17 +1290,18 @@ def run():
     raw_qty = data.get("qty") or {}
     if isinstance(raw_qty, dict):
         for k, v in raw_qty.items():
-            if k not in ITEMS:
+            typed = engine.split_type_key(k)
+            if k not in ITEMS and typed is None:
                 continue
             sv = str(v).strip()
             if sv == "":
                 continue
             if not (sv.isascii() and sv.isdigit()):
-                return jsonify(error=f"「{k}」の数量は0以上の整数で入力してください。"), 400
+                return jsonify(error=f"「{engine.type_label(k)}」の数量は0以上の整数で入力してください。"), 400
             n = int(sv)
-            lim = engine.QUANTITY_ITEM_LIMITS.get(k, 999)
+            lim = engine.QUANTITY_ITEM_LIMITS.get(typed[0] if typed else k, 999)
             if n > lim:
-                return jsonify(error=f"「{k}」の上限は {lim:,} です。"), 400
+                return jsonify(error=f"「{engine.type_label(k)}」の上限は {lim:,} です。"), 400
             qty[k] = n
     skipped: list[str] = []
     if safe:  # 安全モード：高リスク項目を外す
@@ -1752,7 +1352,7 @@ def run():
 
 @app.get("/status/<job_id>")
 def status(job_id: str):
-    if not _logged_in() and not session.get("_order_execution"):
+    if not _logged_in():
         return jsonify(error="ログインしてください"), 401
     _gc_jobs()
     with _jobs_lock:
@@ -1784,7 +1384,7 @@ def status(job_id: str):
 
 @app.post("/cancel/<job_id>")
 def cancel_job(job_id: str):
-    if not _logged_in() and not session.get("_order_execution"):
+    if not _logged_in():
         return jsonify(error="ログインしてください"), 401
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -1804,7 +1404,7 @@ def cancel_job(job_id: str):
 ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>管理者</title>
 <style>body{font-family:system-ui;max-width:38rem;margin:2rem auto;padding:0 1rem}input,button{font:inherit;padding:.5rem;margin:.25rem 0}form{margin:1rem 0}.msg{color:#a23}</style></head><body>
-<a href="/console">戻る</a> ・ <a href="/admin/paypay">PayPay設定</a> ・ <a href="/admin/orders">注文管理</a><h1>管理者モード</h1><p class="msg">{{ msg }}</p>
+<a href="/">戻る</a><h1>管理者モード</h1><p class="msg">{{ msg }}</p>
 {% if github_storage %}<p>パスワードのハッシュを非公開GitHubリポジトリに保存しています。</p>
 {% if github_bootstrap %}<p class="msg">初期化が済んだら、Renderの AUTH_GITHUB_BOOTSTRAP を削除してください。</p>{% endif %}
 {% elif ephemeral %}<p class="msg">保存先は一時領域です。再起動や再デプロイでパスワードの変更が失われる場合があります。</p>
@@ -1997,6 +1597,7 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
 
 /* 数量指定 */
 .qrow{display:flex;align-items:center;gap:8px;padding:8px;border-top:1px solid var(--soft);border-radius:8px}
+.qtypes{margin-top:10px}.qtypes summary{cursor:pointer;padding:8px;font-weight:700}
 .qrow.has{background:var(--hit)}
 .qname{flex:1;min-width:0;font-size:15px;line-height:1.35}
 .qname small{display:block;font-size:12px;color:var(--muted)}
@@ -2007,6 +1608,15 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
 .qrow .qmax{flex:none;min-height:40px;padding:0 10px}
 .qrow.over input.q{border-color:var(--bad);background:var(--badbg)}
 .qrow.over .qname small{color:var(--bad);font-weight:700}
+.qtcount{margin-left:6px;font-size:12px;color:var(--ok)}
+input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important}
+.orbrow{flex-wrap:wrap}
+.orbrow .qname{flex:1 1 100%}
+.orbgrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;flex:1;min-width:0}
+.orbgrid label{display:block;text-align:center;font-size:11px;font-weight:800;color:var(--muted)}
+.orbrow .orbgrid input{width:100%;min-width:0;font-size:15px;padding:7px 4px;text-align:right;border:2px solid var(--line);border-radius:8px;background:var(--soft);font-variant-numeric:tabular-nums}
+.orbbulk{margin-top:8px;background:var(--soft)}
+.orbrow.orbbulk .orbgrid input{background:var(--panel)}
 
 /* 状況 */
 .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:14px 0 4px;padding:0;list-style:none}
@@ -2037,6 +1647,17 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
 .srv{margin-top:12px;font-size:13px;color:var(--muted)}
 .srv .row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--soft)}
 .srv .row b{color:var(--ink);font-weight:700;text-align:right}
+
+/* 組み合わせ・保存した結果 */
+.preset-save input{flex:1;min-width:0;font-size:16px;padding:9px 11px}
+.presets{margin-top:8px}
+.preset,.hrow{display:flex;align-items:center;gap:8px;padding:8px;border-top:1px solid var(--soft)}
+.preset .pn,.hrow .hn{flex:1;min-width:0;font-size:14px;line-height:1.4;word-break:break-all}
+.preset small,.hrow small{display:block;font-size:12px;color:var(--muted)}
+.hrow .hn b{font-size:17px;letter-spacing:.03em;font-variant-numeric:tabular-nums}
+.keepnote{margin:10px 0 0;font-size:13px;font-weight:700;color:var(--ok)}
+.keepnote:empty{display:none}
+.keepnote.warn{color:var(--warn)}
 
 /* 下部バー */
 .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:2px solid var(--line);
@@ -2077,21 +1698,36 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
 
   <section class="view" id="v-input" role="tabpanel" aria-labelledby="t-input">
     <div class="panel">
-      <h2>決済・引継ぎ情報</h2>
-      <p class="sub">選択内容を確定すると注文画面へ進みます。PayPay決済の確認後に、引継ぎコードと暗証番号を入力してください。お客様ログインは不要です。</p>
+      <h2>引継ぎ情報</h2>
+      <p class="sub">両方空欄にすると、初期アカウントから作ります。</p>
+      <label class="field"><span>引継ぎコード</span>
+        <input type="text" id="transfer" placeholder="例：aBcD1234e" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+      <label class="field"><span>暗証番号</span>
+        <input type="text" id="confirm" placeholder="例：1234" autocomplete="off" inputmode="numeric"></label>
       <div class="mode" id="mode"></div>
       <div class="err" id="inputErr" role="alert"></div>
     </div>
     <div class="panel">
       <h2>実行モード</h2>
       <label class="sw"><input type="checkbox" id="safe" checked>
-        <span><b>安全モード</b><small>bcsfeの配布元に「BANされることがある」と書かれている項目（猫缶・レアチケ・プラチケ・レジェチケ）を、今回の実行から自動で外します。</small></span></label>
+        <span><b>安全モード</b><small>bcsfeの配布元に「BANされることがある」と書かれている項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
       <label class="sw"><input type="checkbox" id="dry">
         <span><b>試運転（コードを発行しない）</b><small>書き換えまで行い、変更内容だけ見せます。アップロードはしません。</small></span></label>
       <label class="sw"><input type="checkbox" id="clone">
         <span><b>独立アカウント複製（実験機能）</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。PONOS非公式の方法で、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
+      <label class="sw"><input type="checkbox" id="keepResults" checked>
+        <span><b>発行したコードをこの端末に残す</b><small>完了時の引継ぎコードと暗証番号を、このブラウザに最大10件まで保存します。画面を閉じたり、サーバーの表示期限（30分）が過ぎたりしても「状況」タブで確認できます。共用の端末ではオフにしてください。</small></span></label>
       <label class="sw"><input type="checkbox" id="integrity">
         <span><b>セーブ保全チェック（既知異常の自動修復）</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
+    </div>
+    <div class="panel">
+      <h2>よく使う組み合わせ</h2>
+      <p class="sub">いま選んでいる項目・数量・キャラ設定・実行モードを名前を付けて保存し、あとで呼び出せます。引継ぎコードと暗証番号は保存しません。保存先はこの端末のブラウザです。</p>
+      <div class="tools preset-save">
+        <input type="text" id="presetName" maxlength="30" placeholder="名前（例：いつもの）" autocomplete="off" aria-label="組み合わせの名前">
+        <button type="button" class="btn" id="presetSave">保存</button>
+      </div>
+      <div class="presets" id="presets"></div>
     </div>
     <div class="panel">
       <h2>実行前チェック</h2>
@@ -2118,14 +1754,51 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
         <button type="button" class="btn" id="qclear">クリア</button>
         <span class="count" id="n-qty">0 / {{ totals[key] }}</span>
       </div>
+      <p class="note">「すべて最大値」は上の一覧（項目全体）だけに入ります。種類ごとの欄は、開いて個別に入力してください。種類ごとの指定は、同じ項目全体の指定より優先します。</p>
       <div class="list">
         {% for x in lst %}{% set mx = limits.get(x, 999) %}
         <div class="qrow" data-item="{{ x }}">
           <div class="qname">{{ x }}<small>上限 {{ "{:,}".format(mx) }}</small><em class="dupnote">MAX選択より優先</em></div>
-          <input class="q" type="text" inputmode="numeric" autocomplete="off" placeholder="未指定" data-item="{{ x }}" data-max="{{ mx }}" aria-label="{{ x }}の数量">
+          <input class="q top" type="text" inputmode="numeric" autocomplete="off" placeholder="未指定" data-item="{{ x }}" data-label="{{ x }}" data-max="{{ mx }}" aria-label="{{ x }}の数量">
           <button type="button" class="btn qmax" data-item="{{ x }}">最大</button>
         </div>
         {% endfor %}
+        {% for base, names in type_names.items() %}{% set mx = limits.get(base, 999) %}
+        <details class="qtypes">
+          <summary>{{ 'マタタビ・獣石' if base == 'マタタビ' else base }}を種類ごとに指定（{{ names|length }}種）<span class="qtcount" data-base="{{ base }}"></span></summary>
+          {% for name in names %}{% set k = base ~ '#' ~ loop.index %}
+          <div class="qrow" data-item="{{ k }}">
+            <div class="qname">{{ name }}<small>上限 {{ "{:,}".format(mx) }}</small></div>
+            <input class="q" type="text" inputmode="numeric" autocomplete="off" placeholder="未指定" data-item="{{ k }}" data-label="{{ name }}" data-max="{{ mx }}" aria-label="{{ name }}の数量">
+            <button type="button" class="btn qmax" data-item="{{ k }}">最大</button>
+          </div>
+          {% endfor %}
+        </details>
+        {% endfor %}
+        {% set mx = limits.get('本能玉', 998) %}
+        <details class="qtypes" id="orbs">
+          <summary>本能玉を種類・等級ごとに指定（{{ orb_kinds|length }}種 × {{ orb_grades|length }}等級）<span class="qtcount" data-base="本能玉"></span></summary>
+          <p class="note">上限は各 {{ "{:,}".format(mx) }} 個です。下の「まとめて入力」に数を入れて「全種類に入れる」を押すと、その等級の欄にまとめて入ります（空欄の等級は変えません）。</p>
+          <div class="orbrow orbbulk">
+            <div class="qname">まとめて入力</div>
+            <div class="orbgrid">
+              {% for g in orb_grades %}<label><span>{{ g }}</span><input class="ob" type="text" inputmode="numeric" autocomplete="off" data-grade="{{ loop.index0 }}" aria-label="全種類の{{ g }}等級"></label>{% endfor %}
+            </div>
+            <button type="button" class="btn" id="orbApply">全種類に入れる</button>
+          </div>
+          <input type="search" class="search" id="orbSearch" placeholder="効果や属性で絞り込み（例：赤、烈波）" autocomplete="off" aria-label="本能玉の絞り込み">
+          {% for kind in orb_kinds %}{% set kind_index = loop.index0 %}
+          <div class="qrow orbrow" data-kind="{{ kind }}">
+            <div class="qname">{{ kind }}</div>
+            <div class="orbgrid">
+              {% for g in orb_grades %}{% set k = '本能玉#' ~ (kind_index * 5 + loop.index) %}
+              <label><span>{{ g }}</span><input class="q" type="text" inputmode="numeric" autocomplete="off" placeholder="-" data-item="{{ k }}" data-label="{{ kind }} {{ g }}" data-max="{{ mx }}" aria-label="{{ kind }} {{ g }}の数量"></label>
+              {% endfor %}
+            </div>
+            <button type="button" class="btn qrowmax">最大</button>
+          </div>
+          {% endfor %}
+        </details>
       </div>
       {% elif key == 'chars' %}
       <input type="search" class="search" id="cs" placeholder="名前か番号で検索（例：ネコ、155）" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="キャラ検索">
@@ -2191,9 +1864,17 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
           <div class="code"><div><small>引継ぎコード</small><strong id="r-copy-transfer"></strong></div><button class="btn" type="button" data-copy="r-copy-transfer">コピー</button></div>
           <div class="code"><div><small>暗証番号</small><strong id="r-copy-confirm"></strong></div><button class="btn" type="button" data-copy="r-copy-confirm">コピー</button></div>
         </div>
-        <p class="note">この表示は30分で消えます。保存するファイルには引継ぎコードが含まれます。厳重に管理してください。</p>
+        <p class="keepnote" id="keepNote"></p>
+        <p class="note">サーバー側の表示は30分で消えます。引継ぎコードは今すぐコピーするか、スクリーンショットで控えてください。保存するファイルには引継ぎコードが含まれます。厳重に管理してください。</p>
         <button class="btn" id="download-result" type="button">結果を保存</button>
       </div>
+    </div>
+
+    <div class="panel" id="histPanel" hidden>
+      <h2>この端末に残した結果</h2>
+      <p class="sub">新しい順に最大10件です。ゲームで引継ぎを済ませたものは削除してください。</p>
+      <div id="hist"></div>
+      <div class="tools"><button type="button" class="btn" id="histClear">すべて削除</button></div>
     </div>
 
     <div class="panel">
@@ -2290,6 +1971,8 @@ function compress(n){
   const out=[]; for(let i=0;i<n.length;){ let j=i; while(j+1<n.length&&n[j+1]===n[j]+1) j++; out.push(i===j?String(n[i]):n[i]+'-'+n[j]); i=j+1; }
   return out.join(', ');
 }
+function isOver(e){ return e.value!==''&&Number(e.value)>Number(e.dataset.max); }
+function overInputs(){ return $$('input.q').filter(isOver); }
 function qtyMap(){
   const m={}; $$('input.q').forEach(e=>{ if(e.value!=='') m[e.dataset.item]=e.value; }); return m;
 }
@@ -2304,13 +1987,18 @@ function refresh(){
   else{ ci.innerHTML=''; const b=document.createElement('b'); b.textContent=cn+'体'; ci.append(b,'を解放します：'+compress(pc.nums)); }
   const qm=qtyMap(), qn=Object.keys(qm).length; total+=qn;
   $('#cnt-qty').textContent=qn; $('#cnt-qty').classList.toggle('on',qn>0);
-  $('#sel-qty').textContent=qn+' / '+TOTALS.qty; $('#n-qty').textContent=qn+' / '+TOTALS.qty;
+  $('#sel-qty').textContent=qn+'件'; $('#n-qty').textContent=qn+'件 指定中';
   const maxPicked=new Set(picked('items'));
+  $$('input.q').forEach(e=>e.classList.toggle('over',isOver(e)));
   $$('.qrow').forEach(r=>{
-    const e=r.querySelector('input.q'), v=e.value;
-    r.classList.toggle('has',v!=='');
-    r.classList.toggle('over',v!==''&&Number(v)>Number(e.dataset.max));
-    r.classList.toggle('dup',v!==''&&maxPicked.has(r.dataset.item));
+    const ins=[...r.querySelectorAll('input.q')];
+    r.classList.toggle('has',ins.some(e=>e.value!==''));
+    r.classList.toggle('over',ins.some(isOver));
+    r.classList.toggle('dup',ins.some(e=>e.value!=='')&&maxPicked.has(r.dataset.item));
+  });
+  $$('.qtcount').forEach(c=>{
+    const n=Object.keys(qm).filter(k=>k.startsWith(c.dataset.base+'#')).length;
+    c.textContent=n?'（'+n+'種 指定中）':'';
   });
   GROUPS.forEach(g=>{
     const n=picked(g).length; total+=n;
@@ -2318,10 +2006,14 @@ function refresh(){
     $('#sel-'+g).textContent=n+' / '+TOTALS[g];
     $('#n-'+g).textContent=n+' / '+TOTALS[g];
   });
-  const m='<b>注文内容</b>を確定するとPayPay決済画面へ進みます。決済確認後に引継ぎコードと暗証番号を入力します。';
-  const bm=$('#integrity').checked?'保全チェック（決済後に引継ぎ情報入力）':$('#clone').checked?'アカウント複製（決済後に引継ぎ情報入力）':'PayPay決済後に引継ぎ情報入力';
+  const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
+  let m, bm;
+  if(!t&&!c){m='<b>初期アカウント</b>から新しく作ります。'; bm='初期アカウントから作成';}
+  else if(t&&c){m=$('#integrity').checked?'<b>引継ぎコード</b>のセーブを保全チェックします。':$('#clone').checked?'<b>引継ぎコード</b>のデータから、元・複製の2アカウントを別々に作成します。':'<b>引継ぎコード</b>のデータを取得して書き換えます。'; bm=$('#integrity').checked?'既存セーブの保全チェック':'引継ぎコードから取得';}
+  else{m='<b>片方だけ入力されています。</b>両方入力するか、両方空欄にしてください。'; bm='入力を確認してください';}
   $('#mode').innerHTML=m; $('#barmode').textContent=bm;
   $('#total').textContent='選択 '+total+'件';
+  if(!t===!c) $('#inputErr').textContent='';
   renderExtras(pc,qm,total,bm);
   return total;
 }
@@ -2330,14 +2022,33 @@ function normDigits(v){
   v=v.replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/\D/g,'');
   return v.replace(/^0+(?=\d)/,'');
 }
-$$('input.q').forEach(e=>e.addEventListener('input',()=>{const n=normDigits(e.value); if(n!==e.value)e.value=n; refresh();}));
+$$('input.q,input.ob').forEach(e=>e.addEventListener('input',()=>{const n=normDigits(e.value); if(n!==e.value)e.value=n; refresh();}));
+$$('.qrowmax').forEach(b=>b.addEventListener('click',()=>{
+  b.closest('.qrow').querySelectorAll('input.q').forEach(e=>e.value=e.dataset.max); refresh();
+}));
+$('#orbApply').addEventListener('click',()=>{
+  let n=0;
+  $$('.orbbulk input.ob').forEach(b=>{
+    if(b.value==='') return;
+    const g=Number(b.dataset.grade);
+    $$('.orbrow[data-kind]').forEach(r=>{ const e=r.querySelectorAll('input.q')[g]; if(e){ e.value=b.value; n++; } });
+  });
+  toast(n?'本能玉 '+n+'個の欄に入れました':'まとめて入力の欄に数を入れてください'); refresh();
+});
+$('#orbSearch').addEventListener('input',()=>{
+  const q=kana($('#orbSearch').value.trim());
+  $$('.orbrow[data-kind]').forEach(r=>r.hidden=!!q&&!kana(r.dataset.kind).includes(q));
+});
+$('#orbSearch').addEventListener('keydown',e=>{ if(e.key==='Enter') e.preventDefault(); });
 $$('.qmax').forEach(b=>b.addEventListener('click',()=>{
   const e=document.querySelector('input.q[data-item="'+b.dataset.item+'"]'); e.value=e.dataset.max; refresh();
 }));
 $('#chars').addEventListener('input',refresh);
 $('#charClear').addEventListener('click',()=>{$('#chars').value=''; refresh();});
-$('#qfill').addEventListener('click',()=>{$$('input.q').forEach(e=>e.value=e.dataset.max); refresh();});
-$('#qclear').addEventListener('click',()=>{$$('input.q').forEach(e=>e.value=''); refresh();});
+$('#qfill').addEventListener('click',()=>{$$('input.q.top').forEach(e=>e.value=e.dataset.max); refresh();});
+$('#qclear').addEventListener('click',()=>{$$('input.q,input.ob').forEach(e=>e.value=''); refresh();});
+$('#transfer').addEventListener('input',refresh);
+$('#confirm').addEventListener('input',refresh);
 $$('[data-all]').forEach(b=>b.addEventListener('click',()=>{
   $$('input[name='+b.dataset.all+']').forEach(e=>e.checked=b.dataset.v==='1'); refresh();
 }));
@@ -2408,7 +2119,7 @@ function renderChips(nums){
     const pi=el('input'); pi.type='number'; pi.min='0'; pi.max='999'; pi.inputMode='numeric'; pi.placeholder='例 70'; pi.value=cfg.plus_level;
     pi.addEventListener('input',()=>{cfg.plus_level=pi.value; refresh();}); plus.append(pi);
     const form=el('label','cat-setting'); form.append(el('span',null,'形態'));
-    const fs=el('select'); [['','変更なし'],['1','第1形態'],['2','第2形態'],['3','第3形態']].forEach(([v,t])=>{const o=el('option',null,t);o.value=v;fs.append(o);}); fs.value=cfg.form;
+    const fs=el('select'); [['','変更なし'],['1','第1形態'],['2','第2形態'],['3','第3形態'],['4','第4形態']].forEach(([v,t])=>{const o=el('option',null,t);o.value=v;fs.append(o);}); fs.value=cfg.form;
     fs.addEventListener('change',()=>{cfg.form=fs.value; refresh();}); form.append(fs);
     levels.append(base,plus,form); card.append(levels);
     const talent=el('label','cat-talent'); const ti=el('input'); ti.type='checkbox'; ti.checked=!!cfg.talents_all;
@@ -2454,10 +2165,12 @@ $('#cRetry').addEventListener('click',async()=>{
 });
 
 /* ---------- 実行前チェック・モード ---------- */
-function goLabel(){ return 'PayPay決済へ進む'; }
+function goLabel(){ return $('#integrity').checked?($('#dry').checked?'保全チェック（試運転）':'保全チェック'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
 function renderChecks(pc,qm,total){
   const L=[]; const add=(lv,t)=>L.push([lv,t]);
   if($('#clone').checked){
+    const t0=$('#transfer').value.trim(), c0=$('#confirm').value.trim();
+    if(!t0||!c0) add('bad','複製には、引継ぎコードと暗証番号の両方が必要です。');
     add('ok','複製モード：元セーブを別インスタンスに読み込み、複製側に新しい問い合わせコードを割り当てます。');
     if($('#dry').checked) add('ok','試運転：取得できるかだけ確認します。コードは発行しません。');
     const ul0=$('#checks'); ul0.textContent='';
@@ -2466,7 +2179,8 @@ function renderChecks(pc,qm,total){
     return;
   }
   if($('#integrity').checked){
-    add('ok','決済確認後に引継ぎコードと暗証番号を入力してから実行します。');
+    const t0=$('#transfer').value.trim(), c0=$('#confirm').value.trim();
+    if(!t0||!c0) add('bad','保全チェックには、既存セーブの引継ぎコードと暗証番号が必要です。');
     add('warn','選択した編集項目は実行せず、セーブ構造検査と既知のエラーキャラ・参照の確認だけを行います。');
     add('warn','修復対象が見つかった場合だけ保存データを修復・再検査して再登録し、新しい引継ぎコードを発行します。');
     if($('#dry').checked) add('ok','試運転：修復と再検査まで行いますが、アップロード・コード発行はしません。');
@@ -2482,7 +2196,7 @@ function renderChecks(pc,qm,total){
     if(safe) add('warn','安全モードのため、'+risky.join('・')+' は今回スキップします。');
     else add('warn',risky.join('・')+' は、bcsfeの配布元に「BANされることがある」と書かれている項目です。安全モードをオンにすると外せます。');
   }
-  const over=[...document.querySelectorAll('.qrow.over')].map(r=>r.dataset.item);
+  const over=overInputs().map(e=>e.dataset.label||e.dataset.item);
   if(over.length) add('bad','数量が上限を超えています：'+over.join('・'));
   if(pc.err) add('bad','キャラ番号：'+pc.err);
   else if(pc.nums.length){
@@ -2496,6 +2210,8 @@ function renderChecks(pc,qm,total){
     const ex=pc.nums.filter(n=>ERRNUMS.includes(n));
     if(ex.length) add('warn','エラーキャラになる番号は自動で除外します：'+compress(ex));
   }
+  const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
+  if(!t!==!c) add('bad','引継ぎコードと暗証番号が片方だけです。');
   if(total===0&&!pc.err) add('warn','まだ項目が選ばれていません。');
   if($('#dry').checked) add('ok','試運転：コードは発行せず、変更内容だけ確認します。');
   if(!L.some(x=>x[0]!=='ok')) add('ok','問題は見つかりませんでした。');
@@ -2692,6 +2408,7 @@ async function poll(){
     if(j.status!=='running'&&j.status!=='queued'){
       stopJob();
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
+      if(j.status==='done'&&j.result&&!j.dry) keepResult(curJob,j);
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'保全チェック完了'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
   }catch(e){fails++; renderState();} /* 一時的な通信エラーは次回に再試行 */
@@ -2712,6 +2429,93 @@ $('#download-result').addEventListener('click',async()=>{
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }catch(e){toast('結果を保存できませんでした');}
 });
+/* ---------- 発行したコードを端末に残す ---------- */
+const HKEY='nyanko-results';
+function loadHist(){ try{ const v=JSON.parse(localStorage.getItem(HKEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function saveHist(list){ try{ localStorage.setItem(HKEY,JSON.stringify(list.slice(0,10))); return true; }catch(e){ return false; } }
+function resultPairs(r){
+  if(!r) return [];
+  if(r.original||r.copy) return [['元アカウント',r.original],['複製アカウント',r.copy]].filter(x=>x[1]&&x[1].transfer);
+  return r.transfer?[['',r]]:[];
+}
+function keepResult(id,j){
+  const note=$('#keepNote');
+  if(!$('#keepResults').checked){ note.className='keepnote warn'; note.textContent='この端末には保存していません。今すぐ控えてください。'; return; }
+  const list=loadHist().filter(x=>x.id!==id);
+  list.unshift({id, at:Date.now(), clone:!!j.clone, result:j.result});
+  const ok=saveHist(list);
+  note.className='keepnote'+(ok?'':' warn');
+  note.textContent=ok?'このコードはこの端末に保存しました（「この端末に残した結果」から確認できます）。':'端末への保存に失敗しました。今すぐ控えてください。';
+  renderHist();
+}
+function renderHist(){
+  const list=loadHist(), box=$('#hist'); box.textContent='';
+  $('#histPanel').hidden=!list.length;
+  list.forEach(h=>{
+    resultPairs(h.result).forEach(([label,r])=>{
+      const row=el('div','hrow'), info=el('div','hn');
+      const d=new Date(h.at);
+      info.append(el('small',null,d.getMonth()+1+'/'+d.getDate()+' '+clock(d)+(label?'・'+label:'')));
+      info.append(el('b',null,r.transfer),el('span',null,'　暗証番号 '),el('b',null,r.confirm));
+      const cp=el('button','btn','コピー'); cp.type='button';
+      cp.addEventListener('click',async()=>{ const ok=await copyText(r.transfer+' '+r.confirm); toast(ok?'コードと暗証番号をコピーしました':'コピーできませんでした'); });
+      row.append(info,cp); box.append(row);
+    });
+    const del=el('button','btn','この結果を削除'); del.type='button';
+    del.addEventListener('click',()=>{ if(!window.confirm('この結果を端末から削除しますか？')) return; saveHist(loadHist().filter(x=>x.id!==h.id)); renderHist(); });
+    const wrap=el('div','tools'); wrap.append(del); box.append(wrap);
+  });
+}
+$('#histClear').addEventListener('click',()=>{ if(!window.confirm('この端末に残した結果をすべて削除しますか？')) return; try{localStorage.removeItem(HKEY)}catch(e){} renderHist(); });
+try{ if(localStorage.getItem('nyanko-keep')==='0') $('#keepResults').checked=false; }catch(e){}
+$('#keepResults').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-keep',$('#keepResults').checked?'1':'0')}catch(e){} });
+
+/* ---------- よく使う組み合わせ ---------- */
+const PKEY='nyanko-presets';
+function loadPresets(){ try{ const v=JSON.parse(localStorage.getItem(PKEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function currentPreset(name){
+  const nums=parseNums($('#chars').value).nums, cats={};
+  nums.forEach(n=>{ if(catSettings[n]) cats[n]=catSettings[n]; });
+  return {name, items:picked('items'), subs:picked('subs'), others:picked('others'), qty:qtyMap(),
+          chars:$('#chars').value, cats, safe:$('#safe').checked, dry:$('#dry').checked};
+}
+function applyPreset(p){
+  ['items','subs','others'].forEach(g=>$$('input[name='+g+']').forEach(e=>e.checked=(p[g]||[]).includes(e.value)));
+  $$('input.q').forEach(e=>e.value=(p.qty&&p.qty[e.dataset.item]!=null)?String(p.qty[e.dataset.item]):'');
+  $('#chars').value=p.chars||'';
+  Object.keys(catSettings).forEach(k=>delete catSettings[k]);
+  Object.entries(p.cats||{}).forEach(([n,c])=>catSettings[n]=Object.assign({base_level:'',plus_level:'',form:'',talents_all:false},c));
+  $('#safe').checked=p.safe!==false; $('#dry').checked=!!p.dry;
+  $('#clone').checked=false; $('#integrity').checked=false;
+  chipSig=null; refresh();
+  toast('「'+p.name+'」を呼び出しました');
+}
+function renderPresets(){
+  const box=$('#presets'); box.textContent='';
+  const list=loadPresets();
+  if(!list.length){ box.append(el('div','cmore','まだ保存していません。')); return; }
+  list.forEach((p,i)=>{
+    const row=el('div','preset'), info=el('div','pn',p.name);
+    const n=(p.items||[]).length+(p.subs||[]).length+(p.others||[]).length+Object.keys(p.qty||{}).length;
+    info.append(el('small',null,'項目 '+n+'件'+(p.chars?'・キャラ '+parseNums(p.chars).nums.length+'体':'')));
+    const use=el('button','btn','呼び出す'); use.type='button'; use.addEventListener('click',()=>applyPreset(p));
+    const del=el('button','btn','削除'); del.type='button';
+    del.addEventListener('click',()=>{ if(!window.confirm('「'+p.name+'」を削除しますか？')) return; const l=loadPresets(); l.splice(i,1); try{localStorage.setItem(PKEY,JSON.stringify(l))}catch(e){} renderPresets(); });
+    row.append(info,use,del); box.append(row);
+  });
+}
+$('#presetSave').addEventListener('click',()=>{
+  const name=$('#presetName').value.trim();
+  if(!name){ toast('名前を入れてください'); $('#presetName').focus(); return; }
+  const list=loadPresets().filter(p=>p.name!==name);
+  list.unshift(currentPreset(name));
+  if(list.length>20){ toast('保存できるのは20件までです。不要なものを削除してください'); return; }
+  try{ localStorage.setItem(PKEY,JSON.stringify(list)); toast('「'+name+'」を保存しました'); $('#presetName').value=''; }
+  catch(e){ toast('保存できませんでした（ブラウザの設定を確認してください）'); }
+  renderPresets();
+});
+$('#presetName').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#presetSave').click(); } });
+
 function watch(id){
   curJob=id; sessionStorage.setItem('job',id);
   setRunning(true);
@@ -2721,41 +2525,48 @@ function watch(id){
   poll();
 }
 async function start(){
-  if($('#integrity').checked && $('#clone').checked){
-    toast('保全チェックとアカウント複製は同時に実行できません'); return;
+  const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
+  if(!t!==!c){
+    show('input'); $('#inputErr').textContent='引継ぎコードと暗証番号は「両方入力」か「両方空欄」にしてください。'; return;
   }
-  const parsed=parseNums($('#chars').value);
-  if(parsed.err){ show('chars'); toast('キャラ番号を確認してください'); return; }
-  if(!$('#integrity').checked && !$('#clone').checked){
-    if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('items'); return; }
-    const bad=document.querySelector('.qrow.over');
-    if(bad){ show('qty'); toast('「'+bad.dataset.item+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
+  if($('#integrity').checked){
+    if(!t||!c){ show('input'); $('#inputErr').textContent='保全チェックには、既存セーブの引継ぎコードと暗証番号の両方が必要です。'; return; }
+    if(!$('#dry').checked){
+      const accepted=window.confirm('既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復対象が見つかった場合は保存データを再登録し、新しい引継ぎコードを発行します。修復対象がなければ再登録しません。BAN回避や安全性を保証する機能ではありません。続行しますか？');
+      if(!accepted) return;
+    }
+  } else if($('#clone').checked){
+    if(!t||!c){ show('input'); $('#inputErr').textContent='複製には、引継ぎコードと暗証番号の両方が必要です。'; return; }
+    if(!$('#dry').checked){
+      const accepted=window.confirm('【実験機能・本番サーバー接続】元アカウントと複製アカウントの2つを別々に登録します。PONOS非公式の方法で、独立プレイや継続利用は保証されません。引継ぎコードは1回限りで、ゲーム内で引継ぎを完了すると元端末のデータが初期化されます。失敗時は元アカウントのコードだけが発行される場合もあります。理解したうえで続行しますか？');
+      if(!accepted) return;
+    }
+  } else {
+  if(parseNums($('#chars').value).err){ show('chars'); toast('キャラ番号を確認してください'); return; }
+  if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('items'); return; }
+  const bad=overInputs()[0];
+  if(bad){ show('qty'); const d=bad.closest('details'); if(d) d.open=true; toast('「'+(bad.dataset.label||bad.dataset.item)+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
   }
-  // 個別キャラ指定がある場合は選択されたキャラ数を使用する。
-  // キャラ指定がないサービス注文は1件として扱い、追加の体数入力は求めない。
-  const quantity=parsed.nums.length>0?parsed.nums.length:1;
-  if(quantity>100){toast('一度に注文できるのは100体までです');return;}
-  if($('#integrity').checked && !window.confirm('決済確認後、入力した引継ぎ情報を使って既存セーブの保全チェックを実行します。続行しますか？'))return;
-  if($('#clone').checked && !window.confirm('決済確認後、入力した引継ぎ情報を使ってアカウント複製を実行します。続行しますか？'))return;
-  const operation={
-    safe:$('#safe').checked,dry:$('#dry').checked,clone:$('#clone').checked,
-    integrity_only:$('#integrity').checked,items:picked('items'),qty:qtyMap(),
-    chars:$('#chars').value,cat_settings:catSettingsPayload(),
-    subs:picked('subs'),others:picked('others')
-  };
-  $('#go').disabled=true;$('#go').textContent='注文を作成中…';
+  $('#fail').hidden=true; $('#res').hidden=true; $('#warn').hidden=true; $('#rep').hidden=true; $('#log').textContent=''; $('#keepNote').textContent='';
+  renderSteps(null); $('#elapsed').textContent='00:00'; $('#updated').textContent='--:--:--';
+  setRunning(true); show('status');
+  $('#log').textContent='開始しました。サーバーが休止していた場合は、最初に1分ほどかかります。';
   try{
-    const r=await fetch('/api/shop/operation-orders',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({quantity,operation})});
-    const data=await r.json();
-    if(!r.ok)throw Error(data.error||'注文を作成できませんでした。');
-    location.href='/shop/order/'+encodeURIComponent(data.id)+'?key='+encodeURIComponent(data.access_token);
-  }catch(e){toast(e.message);$('#go').disabled=false;$('#go').textContent='PayPay決済へ進む';}
+    const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c, items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')})});
+    const j=await r.json();
+    if(r.status===401){location.href='/login'; return;}
+    if(!r.ok){ setRunning(false); $('#log').textContent=''; $('#fail').hidden=false; $('#fail').textContent=j.error||'エラー'; return; }
+    jobStart=Date.now(); watch(j.job);
+  }catch(e){
+    setRunning(false); $('#log').textContent='';
+    $('#fail').hidden=false; $('#fail').textContent='サーバーに接続できませんでした。少し待ってからもう一度お試しください。';
+  }
 }
 $('#go').addEventListener('click',start);
 
 /* ---------- 起動時 ---------- */
-refresh(); ping(); tabMore();
+refresh(); ping(); tabMore(); renderPresets(); renderHist();
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
 </script></body></html>"""

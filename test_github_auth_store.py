@@ -155,8 +155,7 @@ class GitHubAuthTests(unittest.TestCase):
             self.assertIn('追加しました', response.get_data(as_text=True))
             original = self.store.authenticate('initial-password')
             client.post('/admin', data={'action': 'delete', 'csrf': csrf, 'id': original})
-            self.assertEqual(client.get('/api/state').status_code, 200)
-            self.assertEqual(client.get('/console').status_code, 302)
+            self.assertEqual(client.get('/api/state').status_code, 401)
             self.assertEqual(client.post('/login', data={'password': 'another-password'}).status_code, 302)
 
 

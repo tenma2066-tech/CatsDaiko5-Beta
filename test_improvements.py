@@ -44,8 +44,7 @@ class ImprovementTests(unittest.TestCase):
             self.assertIn('追加しました', response.get_data(as_text=True))
             ident = self.store.authenticate('original-password')
             self.client.post('/admin', data={'action': 'delete', 'csrf': csrf, 'id': ident})
-            self.assertEqual(self.client.get('/api/state').status_code, 200)
-            self.assertEqual(self.client.get('/console').status_code, 302)
+            self.assertEqual(self.client.get('/api/state').status_code, 401)
             self.assertEqual(self.login('original-password').status_code, 200)
             self.assertEqual(self.login('second-password').status_code, 302)
             reopened = PasswordStore(self.store.path, 'original-password')
@@ -293,10 +292,9 @@ class DeliveryTests(unittest.TestCase):
             self.assertNotIn('SECRET_RESPONSE', A._catalog_update['error'])
             self.assertFalse(A._run_lock.locked())
 
-    def test_latest_endpoint_is_public_but_respects_busy_lock(self):
-        with patch.object(A, '_latest_catalog_thread', lambda: A._run_lock.release()):
-            response = self.client.post('/api/cats/latest')
-            self.assertEqual(response.status_code, 202)
+    def test_latest_endpoint_auth_and_busy(self):
+        self.assertEqual(self.client.post('/api/cats/latest').status_code, 401)
+        self.login()
         A._run_lock.acquire()
         try:
             self.assertEqual(self.client.post('/api/cats/latest').status_code, 409)

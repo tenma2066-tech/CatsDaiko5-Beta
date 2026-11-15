@@ -24,7 +24,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.8"
+          cache: pip
 
       - name: Install dependencies
         run: |
@@ -37,29 +38,12 @@ jobs:
       - name: Application self-test
         run: python selftest.py
 
-      - name: Save audit tests
-        run: python -m unittest -v test_save_audit.py
-
-      - name: Save repair tests
-        run: python -m unittest -v test_save_repair.py
-
-      - name: Parallel execution tests
-        run: python -m unittest -v test_parallel.py
-
-      - name: Improvement regression tests
-        run: python -m unittest -v test_improvements.py
-
-      - name: Character customization tests
-        run: python -m unittest -v test_cat_customization.py
-
-      - name: GitHub auth store tests
-        run: python -m unittest -v test_github_auth_store.py
-
-      - name: GitHub runtime store tests
-        run: python -m unittest -v test_github_runtime_store.py
-
-      - name: PayPay gateway tests
-        run: python -m unittest -v test_paypay_gateway.py
-
-      - name: Shop store tests
-        run: python -m unittest -v test_shop_store.py
+      - name: Unit tests
+        run: |
+          python -m unittest -v test_save_audit.py
+          python -m unittest -v test_save_repair.py
+          python -m unittest -v test_parallel.py
+          python -m unittest -v test_improvements.py
+          python -m unittest -v test_cat_customization.py
+          python -m unittest -v test_github_auth_store.py
+          python -m unittest -v test_item_types.py

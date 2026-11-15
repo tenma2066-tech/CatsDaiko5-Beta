@@ -33,7 +33,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.8"
+          cache: pip
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -46,26 +47,8 @@ jobs:
         run: python -m unittest -v test_save_audit.py
       - name: Save repair tests
         run: python -m unittest -v test_save_repair.py
-      - name: Parallel regression 1
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_default_and_configured_limits
-      - name: Parallel regression 2
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_distinct_jobs_overlap_and_keep_their_results_separate
-      - name: Parallel regression 3
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_worker_crash_releases_its_slot_and_transfer
-      - name: Parallel regression 4
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_queued_job_can_be_cancelled_and_code_reused
-      - name: Parallel regression 5
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_waiting_and_completed_jobs_expire
-      - name: Parallel regression 6
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_real_job_flow_runs_in_parallel_with_fake_server
-      - name: Parallel regression 7
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_transfer_lock_prevents_overlap_with_another_server_process
-      - name: Parallel regression 8
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_running_job_is_not_expired
-      - name: Parallel regression 9
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_state_separates_running_jobs_from_warmup_slots
-      - name: Parallel regression 10
-        run: python -m unittest -v test_parallel.ParallelJobTests.test_job_status_reports_its_real_slot_and_global_usage
+      - name: Parallel execution tests
+        run: python -m unittest -v test_parallel.py
       - name: Improvement regression tests
         run: python -m unittest -v test_improvements.py
       - name: GitHub auth store tests

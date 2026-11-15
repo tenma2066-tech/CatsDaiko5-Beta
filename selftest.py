@@ -7,13 +7,11 @@
 本物の bcsfe やゲームサーバーは使わず、ダミーに差し替えて
 「画面とAPIの流れ」「キャラ解放」「安全モード」「試運転」「キャラ名検索」を確認します。
 """
-import json
 import os
 import sys
 import threading
 import time
 import types
-from cryptography.fernet import Fernet
 
 # ---- bcsfe のダミー ----------------------------------------------------------
 sys.modules["bcsfe"] = types.ModuleType("bcsfe")
@@ -28,14 +26,6 @@ _cat_mod = types.ModuleType("bcsfe.core.game.catbase.cat")
 _cat_mod.Cat = types.SimpleNamespace(init=lambda i: Cat(i), unlock=lambda *a, **k: None)
 sys.modules["bcsfe.core.game.catbase.cat"] = _cat_mod
 os.environ["APP_PASSWORD"] = "pw"
-os.environ["PAYPAY_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
-os.environ["SHOP_DB_PATH"] = "/tmp/catsdaiko-selftest-shop.sqlite3"
-os.environ["SHOP_LIVE_ORDERS_ENABLED"] = "1"
-os.environ["SHOP_CATALOG_JSON"] = json.dumps([{"id": "sample", "title": "テスト商品", "price_yen": 500}], ensure_ascii=False)
-try:
-    os.remove(os.environ["SHOP_DB_PATH"])
-except OSError:
-    pass
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 for _f in ("/tmp/bcsfe_game_version.json", "/tmp/bcsfe_cat_names.json"):
@@ -189,42 +179,11 @@ def run(body, wait=6.0):
 
 
 print("\n[1] ログインと画面")
-root = c.get("/")
-check("未ログインでも / に元の全機能UIが表示される", root.status_code == 200 and 'role="tab"' in root.get_data(as_text=True))
-check("旧 /shop URL は元のUIへ転送", c.get("/shop").status_code == 302 and c.get("/shop").headers.get("Location", "").endswith("/"))
-check("未ログインは /console がログインへ", c.get("/console").status_code == 302)
-operation = {
-    "safe": False, "dry": False, "clone": False, "integrity_only": False,
-    "items": ["XP"], "qty": {}, "chars": "", "cat_settings": {},
-    "subs": [], "others": [],
-}
-shop_order = c.post("/api/shop/operation-orders", json={"quantity": 1, "operation": operation})
-check("未ログインで元UIの注文を作成できる", shop_order.status_code == 201, shop_order.get_json())
-if shop_order.status_code == 201:
-    order_data = shop_order.get_json()
-    order_url = "/api/shop/order/"+order_data["id"]+"?key="+order_data["access_token"]
-    public_order = c.get(order_url)
-    check("注文作成直後は引継ぎ情報を要求しない", public_order.status_code == 200 and not public_order.get_json()["credentials_submitted"])
-    before_payment = c.post("/api/shop/order/"+order_data["id"]+"/credentials", json={"key":order_data["access_token"],"transfer_code":"transfer-test","pin":"9876"})
-    check("決済前の引継ぎ情報送信は拒否", before_payment.status_code == 400)
-    A.shop_store.claim_payment(order_data["id"])
-    A.shop_store.complete_payment(order_data["id"], "selftest-payment")
-    submitted = c.post("/api/shop/order/"+order_data["id"]+"/credentials", json={"key":order_data["access_token"],"transfer_code":"transfer-test","pin":"9876"})
-    check("決済後に引継ぎ情報を送信して元の処理を開始できる", submitted.status_code == 200, submitted.get_json())
-    progress_url = "/api/shop/order/"+order_data["id"]+"/progress?key="+order_data["access_token"]
-    progress = c.get(progress_url)
-    for _ in range(100):
-        if progress.status_code == 200 and progress.get_json().get("status") in ("done", "error"):
-            break
-        time.sleep(0.05)
-        progress = c.get(progress_url)
-    check("注文トークンで元ワーカーの進捗を確認できる", progress.status_code == 200 and progress.get_json().get("status") == "done", progress.get_json())
-    public_after = c.get(order_url)
-    check("公開注文照会に引継ぎ情報を含めない", public_after.status_code == 200 and "transfer-test" not in public_after.get_data(as_text=True) and public_after.get_json()["credentials_submitted"])
-check("キャラ一覧APIは未ログインでも利用できる", c.get("/api/cats").status_code == 200)
+check("未ログインは / がログインへ", c.get("/").status_code == 302)
+check("未ログインは API が401", c.get("/api/cats").status_code == 401)
 check("パスワード違いは入れない", c.post("/login", data={"password": "x"}).status_code == 200)
 check("ログインできる", c.post("/login", data={"password": "pw"}).status_code == 302)
-html = c.get("/console").get_data(as_text=True)
+html = c.get("/").get_data(as_text=True)
 check("7つのタブ+状況が出る", html.count('role="tab"') == 7, html.count('role="tab"'))
 for needle in ('id="safe"', 'id="dry"', 'id="clone"', 'id="integrity"', 'id="checks"', 'id="cs"', 'id="chars"', 'id="rep"', 'window.confirm'):
     check("画面に " + needle, needle in html)
@@ -367,6 +326,8 @@ engine.snapshot = orig_snap
 
 print("\n[8] 入力チェック")
 check("片方だけの引継ぎは400", run({"transfer": "a", "items": ["XP"]})[0] == 400)
+check("種類ごとの数量が通る", run({"qty": {"マタタビ#3": "5", "キャッツアイ#2": "7"}, "safe": False})[0] == 200)
+check("種類ごとの数量が上限超えは400", run({"qty": {"マタタビ#3": "999"}, "safe": False})[0] == 400)
 check("数量が上限超えは400", run({"qty": {"プラチケ": "100"}, "safe": False})[0] == 400)
 check("キャラ番号エラーは400", run({"chars": "abc"})[0] == 400)
 check("何も選ばないと400", run({})[0] == 400)
