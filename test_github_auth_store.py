@@ -106,15 +106,6 @@ class GitHubAuthTests(unittest.TestCase):
             with self.assertRaises(PasswordStoreUnavailable):
                 self.store.authenticate('initial-password')
 
-    def test_unavailable_github_returns_503_at_login(self):
-        os.environ.setdefault('APP_PASSWORD', 'test-password')
-        import app
-        with patch.object(app, 'password_store', self.store), \
-             patch.object(self.store, '_request', side_effect=PasswordStoreUnavailable('offline')):
-            response = app.app.test_client().post('/login', data={'password': 'initial-password'})
-            self.assertEqual(response.status_code, 503)
-            self.assertNotIn('fake-token', response.get_data(as_text=True))
-
     def test_http_requests_use_contents_api_and_never_send_plaintext_passwords(self):
         store = GitHubPasswordStore('test/private-repo', 'fake-token', 'main', 'auth/passwords.json',
                                     'initial-password', bootstrap=True)
@@ -138,26 +129,6 @@ class GitHubAuthTests(unittest.TestCase):
         self.assertNotIn('initial-password', json.dumps(puts))
         self.assertNotIn('another-password', json.dumps(puts))
         self.assertNotIn(b'another-password', base64.b64decode(puts[1]['content']))
-
-    def test_flask_admin_uses_github_store(self):
-        os.environ.setdefault('APP_PASSWORD', 'test-password')
-        import app
-        client = app.app.test_client()
-        with patch.object(app, 'password_store', self.store), patch.dict(os.environ, {'ADMIN_PASSWORD': 'admin-test'}):
-            self.assertEqual(client.post('/login', data={'password': 'initial-password'}).status_code, 302)
-            client.get('/admin')
-            with client.session_transaction() as session:
-                csrf = session['admin_csrf']
-            self.assertEqual(client.post('/admin', data={'action': 'unlock', 'csrf': csrf, 'passcode': 'admin-test'}).status_code, 302)
-            with client.session_transaction() as session:
-                csrf = session['admin_csrf']
-            response = client.post('/admin', data={'action': 'add', 'csrf': csrf, 'label': 'second', 'password': 'another-password'})
-            self.assertIn('追加しました', response.get_data(as_text=True))
-            original = self.store.authenticate('initial-password')
-            client.post('/admin', data={'action': 'delete', 'csrf': csrf, 'id': original})
-            self.assertEqual(client.get('/api/state').status_code, 401)
-            self.assertEqual(client.post('/login', data={'password': 'another-password'}).status_code, 302)
-
 
 if __name__ == '__main__':
     unittest.main()

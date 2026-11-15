@@ -25,7 +25,7 @@ for _name in ("bcsfe.core", "bcsfe.core.game", "bcsfe.core.game.catbase"):
 _cat_mod = types.ModuleType("bcsfe.core.game.catbase.cat")
 _cat_mod.Cat = types.SimpleNamespace(init=lambda i: Cat(i), unlock=lambda *a, **k: None)
 sys.modules["bcsfe.core.game.catbase.cat"] = _cat_mod
-os.environ["APP_PASSWORD"] = "pw"
+os.environ["RUN_PRICE_JPY"] = "0"  # selftest は決済なしで実行
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 for _f in ("/tmp/bcsfe_game_version.json", "/tmp/bcsfe_cat_names.json"):
@@ -179,10 +179,8 @@ def run(body, wait=6.0):
 
 
 print("\n[1] ログインと画面")
-check("未ログインは / がログインへ", c.get("/").status_code == 302)
-check("未ログインは API が401", c.get("/api/cats").status_code == 401)
-check("パスワード違いは入れない", c.post("/login", data={"password": "x"}).status_code == 200)
-check("ログインできる", c.post("/login", data={"password": "pw"}).status_code == 302)
+check("ログインなしで / が開く", c.get("/").status_code == 200)
+check("ログイン画面は廃止", c.get("/login").status_code == 404)
 html = c.get("/").get_data(as_text=True)
 check("7つのタブ+状況が出る", html.count('role="tab"') == 7, html.count('role="tab"'))
 for needle in ('id="safe"', 'id="dry"', 'id="clone"', 'id="integrity"', 'id="checks"', 'id="cs"', 'id="chars"', 'id="rep"', 'window.confirm'):

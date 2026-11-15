@@ -4,7 +4,7 @@ import types
 import unittest
 from unittest import mock
 
-os.environ.setdefault("APP_PASSWORD", "test-password")
+
 
 import engine
 import item_catalog
@@ -159,7 +159,7 @@ class AppTests(unittest.TestCase):
         import app
         self.app = app
         self.client = app.app.test_client()
-        self.patch = mock.patch.object(app, "_logged_in", lambda: True)
+        self.patch = mock.patch.object(app, "RUN_PRICE_JPY", 0)
         self.patch.start()
 
     def tearDown(self):

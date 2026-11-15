@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-os.environ.setdefault("APP_PASSWORD", "parallel-test-password")
+
 import app as A
 
 
@@ -79,7 +79,7 @@ class ParallelJobTests(unittest.TestCase):
             "BCSFE_PARALLEL_ROOT": str(Path(self.temp.name) / "workers"),
         })
         self.env.start()
-        self.auth_store = patch.object(A, "password_store", A.PasswordStore(str(Path(self.temp.name) / "auth.db"), os.environ["APP_PASSWORD"]))
+        self.auth_store = patch.object(A, "RUN_PRICE_JPY", 0)
         self.auth_store.start()
         self.max_jobs = patch.object(A, "MAX_CONCURRENT_JOBS", 4)
         self.slots = patch.object(A, "_slots", [None] * 4)
@@ -95,9 +95,6 @@ class ParallelJobTests(unittest.TestCase):
         A._names.update(state="none", items=[], version=None, updated=0)
         A._learned["version"] = None
         self.client = A.app.test_client()
-        with self.client.session_transaction() as session:
-            session["ok"] = True
-            session["password_id"] = A.password_store.authenticate(os.environ["APP_PASSWORD"])
 
     def tearDown(self):
         self.gate.touch()

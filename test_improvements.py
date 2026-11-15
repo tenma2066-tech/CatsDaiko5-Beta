@@ -7,17 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-os.environ.setdefault('APP_PASSWORD', 'test-login-password')
 import app as A
 import engine
-from auth_store import PasswordStore
 
 
 class ImprovementTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.store = PasswordStore(Path(self.tmp.name) / 'auth.db', 'original-password')
-        self.store_patch = patch.object(A, 'password_store', self.store)
+        self.store_patch = patch.object(A, 'RUN_PRICE_JPY', 0)
         self.store_patch.start()
         self.client = A.app.test_client()
 
@@ -25,34 +22,21 @@ class ImprovementTests(unittest.TestCase):
         self.store_patch.stop()
         self.tmp.cleanup()
 
-    def login(self, password='original-password'):
-        return self.client.post('/login', data={'password': password})
+    def login(self, password=None):
+        return None  # ログインは廃止（互換用の何もしない関数）
 
-    def test_admin_password_management_persists_and_revokes_sessions(self):
-        self.assertEqual(self.login().status_code, 302)
+    def test_admin_requires_passcode_and_no_login_page(self):
+        self.assertEqual(self.client.get('/login').status_code, 404)
+        self.assertEqual(self.client.get('/').status_code, 200)
         self.assertEqual(self.client.get('/admin').headers['Cache-Control'], 'no-store')
-        with patch.dict(os.environ, {'ADMIN_PASSWORD': 'admin-test-secret'}):
-            self.assertEqual(self.client.post('/admin', data={'action': 'add'}).status_code, 403)
+        with patch.object(A, 'ADMIN_PASSWORD', 'admin-test-secret'):
+            self.assertEqual(self.client.post('/admin', data={'action': 'pp_login'}).status_code, 403)
             self.client.get('/admin')
             with self.client.session_transaction() as session:
                 csrf = session['admin_csrf']
+            self.assertEqual(self.client.post('/admin', data={'action': 'pp_login', 'csrf': csrf, 'phone': '09000000000', 'password': 'x'}).status_code, 403)
             response = self.client.post('/admin', data={'action': 'unlock', 'csrf': csrf, 'passcode': 'admin-test-secret'})
             self.assertEqual(response.status_code, 302)
-            with self.client.session_transaction() as session:
-                csrf = session['admin_csrf']
-            response = self.client.post('/admin', data={'action': 'add', 'csrf': csrf, 'label': '予備', 'password': 'second-password'})
-            self.assertIn('追加しました', response.get_data(as_text=True))
-            ident = self.store.authenticate('original-password')
-            self.client.post('/admin', data={'action': 'delete', 'csrf': csrf, 'id': ident})
-            self.assertEqual(self.client.get('/api/state').status_code, 401)
-            self.assertEqual(self.login('original-password').status_code, 200)
-            self.assertEqual(self.login('second-password').status_code, 302)
-            reopened = PasswordStore(self.store.path, 'original-password')
-            self.assertIsNone(reopened.authenticate('original-password'))
-            self.assertIsNotNone(reopened.authenticate('second-password'))
-            with self.assertRaises(ValueError):
-                reopened.delete(reopened.authenticate('second-password'))
-            self.assertNotIn(b'second-password', self.store.path.read_bytes())
 
     def test_save_audit_hides_advisory_findings_outside_integrity_mode(self):
         from types import SimpleNamespace
@@ -211,7 +195,6 @@ class DeliveryTests(unittest.TestCase):
         from collections import deque
         self.login()
         other = A.app.test_client()
-        other.post('/login', data={'password': 'original-password'})
         with patch.object(A, '_slots', ['busy']), patch.object(A, '_jobs', {}), \
              patch.object(A, '_pending_jobs', deque()), patch.object(A, '_active_transfers', set()):
             jid = self.client.post('/run', json={'items': ['XP']}).get_json()['job']
@@ -220,9 +203,8 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(other.post('/cancel/' + jid).status_code, 404)
             self.assertEqual(len(A._pending_jobs), 1)
             self.assertEqual(self.client.post('/cancel/' + jid).status_code, 200)
-            self.client.get('/logout')
-            self.login()
-            self.assertEqual(self.client.get('/status/' + jid).status_code, 404)
+            fresh = A.app.test_client()
+            self.assertEqual(fresh.get('/status/' + jid).status_code, 404)
 
     def test_error_log_omits_all_untrusted_fields(self):
         from unittest.mock import Mock
@@ -293,8 +275,6 @@ class DeliveryTests(unittest.TestCase):
             self.assertFalse(A._run_lock.locked())
 
     def test_latest_endpoint_auth_and_busy(self):
-        self.assertEqual(self.client.post('/api/cats/latest').status_code, 401)
-        self.login()
         A._run_lock.acquire()
         try:
             self.assertEqual(self.client.post('/api/cats/latest').status_code, 409)

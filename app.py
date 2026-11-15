@@ -27,8 +27,8 @@ from flask import Flask, jsonify, redirect, render_template_string, request, ses
 
 import engine
 import item_catalog
-from auth_store import PasswordStore
-from github_auth_store import GitHubPasswordStore, PasswordStoreUnavailable
+import asyncio
+import paypay_gateway
 import save_audit
 import save_repair
 
@@ -36,28 +36,15 @@ APP_VERSION = "1.15"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
-if not APP_PASSWORD:
-    raise RuntimeError("環境変数 APP_PASSWORD が空です。Renderの Environment で設定してください。")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+RUN_PRICE_JPY = int(os.environ.get("RUN_PRICE_JPY", "100") or 0)  # 0 = 決済なし
+ORDER_TTL = 1800
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
-    ("nyanko-web:" + APP_PASSWORD + ":" + os.environ.get("ADMIN_PASSWORD", "")).encode()
+    ("nyanko-web:" + ADMIN_PASSWORD).encode()  # ワーカープロセス間でも同じ値になるよう固定（本番は SECRET_KEY を設定）
 ).hexdigest()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
-if os.environ.get("AUTH_GITHUB_REPO") or os.environ.get("AUTH_GITHUB_TOKEN"):
-    password_store = GitHubPasswordStore(
-        os.environ.get("AUTH_GITHUB_REPO"), os.environ.get("AUTH_GITHUB_TOKEN"),
-        os.environ.get("AUTH_GITHUB_BRANCH", "main"), os.environ.get("AUTH_GITHUB_PATH", "auth/passwords.json"),
-        APP_PASSWORD, bootstrap=os.environ.get("AUTH_GITHUB_BOOTSTRAP") == "1",
-    )
-else:
-    password_store = PasswordStore(os.environ.get("AUTH_DB_PATH", "/tmp/catsdaiko-auth/passwords.sqlite3"), APP_PASSWORD)
-
-
-@app.errorhandler(PasswordStoreUnavailable)
-def _password_store_unavailable(exc):
-    return jsonify(error=str(exc)), 503
 
 ITEMS = [
     "猫缶", "XP", "NP", "にゃんチケ", "レアチケ", "プラチケ", "プラチナのかけら", "レジェチケ",
@@ -455,7 +442,7 @@ def _ensure_cleanup() -> None:
 
 @app.after_request
 def _private_response(response):
-    if request.path.startswith("/status/") or request.path in ("/admin", "/login"):
+    if request.path.startswith("/status/") or request.path in ("/admin",) or request.path.startswith("/api/orders/"):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -1036,9 +1023,8 @@ def _too_many_fails(ip: str) -> bool:
     return len(recent) >= 5
 
 
-def _logged_in() -> bool:
-    ident = session.get("password_id")
-    return session.get("ok") is True and isinstance(ident, int) and password_store.contains(ident)
+def _owner() -> str:
+    return session.setdefault("job_owner", secrets.token_urlsafe(32))
 
 
 @app.get("/health")
@@ -1046,36 +1032,16 @@ def health():
     return "ok"
 
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    msg = ""
-    if request.method == "POST":
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
-        if _too_many_fails(ip):
-            msg = "失敗が続いたので、10分ほど待ってください。"
-        elif (ident := password_store.authenticate(request.form.get("password", ""))) is not None:
-            session.clear()
-            session["ok"] = True
-            session["password_id"] = ident
-            session["job_owner"] = secrets.token_urlsafe(32)
-            session.permanent = False
-            return redirect("/")
-        else:
-            _fail.setdefault(ip, []).append(time.time())
-            msg = "パスワードが違います。"
-    return render_template_string(LOGIN_HTML, msg=msg)
-
-
-@app.get("/logout")
-def logout():
-    session.clear()
-    return redirect("/login")
+def _pp(coro):
+    """PayPay gateway coroutine を同期実行し (結果, エラーメッセージ) を返す。"""
+    try:
+        return asyncio.run(coro), ""
+    except paypay_gateway.PayPayError as exc:
+        return None, exc.message
 
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
-    if not _logged_in():
-        return redirect("/login")
     msg = ""
     token = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
     if request.method == "POST":
@@ -1084,11 +1050,10 @@ def admin():
             return "不正なリクエストです。", 403
         action = request.form.get("action")
         if action == "unlock":
-            admin_password = os.environ.get("ADMIN_PASSWORD", "")
             ip = request.remote_addr or ""
             if _too_many_fails("admin:" + ip):
                 msg = "失敗が続いたので、10分ほど待ってください。"
-            elif admin_password and hmac.compare_digest(request.form.get("passcode", "").encode(), admin_password.encode()):
+            elif ADMIN_PASSWORD and hmac.compare_digest(request.form.get("passcode", "").encode(), ADMIN_PASSWORD.encode()):
                 session["admin"] = True
                 session["admin_csrf"] = secrets.token_urlsafe(32)
                 return redirect("/admin")
@@ -1097,35 +1062,40 @@ def admin():
                 msg = "管理者パスコードが違うか、設定されていません。"
         elif not session.get("admin"):
             return "管理者モードが必要です。", 403
-        elif action == "add":
-            try:
-                password_store.add(request.form.get("label", "").strip(), request.form.get("password", ""))
-                msg = "パスワードを追加しました。"
-            except ValueError as exc:
-                msg = str(exc)
-        elif action == "delete":
-            try:
-                password_store.delete(int(request.form.get("id", "")))
-                msg = "パスワードを削除しました。"
-            except ValueError as exc:
-                msg = str(exc) or "指定が正しくありません。"
+        elif action == "pp_login":
+            res, err = _pp(paypay_gateway.begin_login(request.form.get("phone", "").strip(), request.form.get("password", "")))
+            msg = err or ("SMSの認証コードを入力してください。" if res["otp_required"] else "PayPayに接続しました。")
+        elif action == "pp_otp":
+            res, err = _pp(paypay_gateway.finish_login(request.form.get("otp", "").strip()))
+            msg = err or "PayPayに接続しました。"
         elif action == "lock":
             session.pop("admin", None)
             return redirect("/admin")
-    return render_template_string(ADMIN_HTML, msg=msg, csrf=session["admin_csrf"],
-                                  unlocked=bool(session.get("admin")),
-                                  github_storage=isinstance(password_store, GitHubPasswordStore),
-                                  github_bootstrap=(isinstance(password_store, GitHubPasswordStore) and password_store.bootstrap),
-                                  ephemeral=(isinstance(password_store, PasswordStore) and
-                                             (not os.environ.get("AUTH_DB_PATH") or
-                                              os.path.abspath(str(password_store.path)).startswith("/tmp/"))),
-                                  passwords=password_store.list() if session.get("admin") else [])
+    unlocked = bool(session.get("admin"))
+    pp = {}
+    if unlocked:
+        try:
+            pp = paypay_gateway.status()
+        except paypay_gateway.PayPayError as exc:
+            msg = msg or exc.message
+    return render_template_string(ADMIN_HTML, msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp,
+                                  price=RUN_PRICE_JPY)
+
+
+# ---------------------------------------------------------------- 注文（決済してから実行）
+_orders: dict[str, dict] = {}
+_orders_lock = threading.Lock()
+
+
+def _gc_orders() -> None:
+    now = time.time()
+    with _orders_lock:
+        for k in [k for k, v in _orders.items() if now - v["created"] > ORDER_TTL and v["state"] != "paying"]:
+            del _orders[k]
 
 
 @app.get("/")
 def index():
-    if not _logged_in():
-        return redirect("/login")
     groups = [
         ("items", "アイテム", "選んだものを最大値まで付与します", ITEMS),
         ("qty", "数量指定", "個数を決めて付与します。空欄は変更しません", ITEMS),
@@ -1135,7 +1105,7 @@ def index():
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
-        MAIN_HTML, groups=groups, totals=totals, version=APP_VERSION,
+        MAIN_HTML, price=RUN_PRICE_JPY, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
@@ -1146,8 +1116,6 @@ def index():
 @app.get("/api/state")
 def api_state():
     """画面の接続表示用。軽い処理だけを返す。"""
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     with _jobs_lock:
         parallel = _parallel_state_locked()
     return jsonify(
@@ -1180,8 +1148,6 @@ def api_state():
 @app.post("/api/warmup")
 def api_warmup():
     """ゲームデータを先に準備しておく（実行ボタンを押す前に待ち時間を済ませる）。"""
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     if _warm_cache_lock.acquire(blocking=False):
         _warm_cache.update(status="loading", prepared=0, error=None)
         threading.Thread(target=_warmup_thread, daemon=True).start()
@@ -1191,8 +1157,6 @@ def api_warmup():
 @app.get("/api/cats")
 def api_cats():
     """キャラ名の一覧（検索用）。未取得なら裏で取りにいく。"""
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     _start_names()
     return jsonify(version=_names.get("version"), updated=_names.get("updated"), state=_names["state"], count=len(_names["items"]), method=_names["method"],
                    error=_names["error"], items=_names["items"] if _names["state"] == "ready" else [])
@@ -1200,8 +1164,6 @@ def api_cats():
 
 @app.post("/api/cats/latest")
 def api_cats_latest():
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     if not _run_lock.acquire(blocking=False):
         return jsonify(error="データを準備中です。完了してからもう一度押してください。"), 409
     _catalog_update.update(status="loading", error=None)
@@ -1216,8 +1178,6 @@ def api_cats_latest():
 
 @app.post("/api/cats/refresh")
 def api_cats_refresh():
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     if _names["state"] in ("ready", "error", "none"):
         _names.update(state="none", items=[], method=None, error=None)
         _start_names()
@@ -1226,8 +1186,6 @@ def api_cats_refresh():
 
 @app.post("/run")
 def run():
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     _gc_jobs()
     data = request.get_json(silent=True) or {}
     transfer = str(data.get("transfer", "")).strip()
@@ -1312,16 +1270,32 @@ def run():
         if skipped:
             return jsonify(error="安全モードで高リスク項目（" + "、".join(skipped) + "）を外した結果、実行する項目が残りませんでした。"), 400
         return jsonify(error="項目を選ぶか、数量・キャラ番号を入力してください。"), 400
-    job_id = uuid.uuid4().hex
     job = {
         "status": "running", "step": 0, "log": [], "warn": [], "report": [], "skipped": skipped, "dry": dry, "clone": clone, "integrity_only": integrity_only,
         "result": None, "error": None,
-        "created": time.time(), "finished": None, "owner": session.setdefault("job_owner", secrets.token_urlsafe(32)),
+        "created": time.time(), "finished": None, "owner": _owner(),
         "mode": "integrity" if integrity_only else ("download" if confirm else "new"),
         "count": len(items) + len(subs) + len(others) + len(qty) + len(cat_nums),
     }
     transfer_key = hmac.new(app.secret_key.encode(), transfer.encode(), hashlib.sha256).digest() if transfer else None
     arguments = (transfer, confirm, items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only)
+    if transfer_key is not None:
+        with _jobs_lock:
+            if transfer_key in _active_transfers:
+                return jsonify(error="この引継ぎコードの処理はすでに実行中です。完了までお待ちください。"), 409
+    if RUN_PRICE_JPY <= 0:
+        return _start_job(job, arguments, transfer_key)
+    _gc_orders()
+    order_id = secrets.token_urlsafe(16)
+    with _orders_lock:
+        _orders[order_id] = {"owner": _owner(), "state": "unpaid", "amount": RUN_PRICE_JPY, "created": time.time(),
+                             "job": job, "arguments": arguments, "transfer_key": transfer_key}
+    return jsonify(order=order_id, amount=RUN_PRICE_JPY)
+
+
+def _start_job(job: dict, arguments: tuple, transfer_key):
+    job_id = uuid.uuid4().hex
+    job["created"] = time.time()
     with _jobs_lock:
         if transfer_key is not None and transfer_key in _active_transfers:
             return jsonify(error="この引継ぎコードの処理はすでに実行中です。完了までお待ちください。"), 409
@@ -1329,7 +1303,7 @@ def run():
             slot = _slots.index(None)
         except ValueError:
             if len(_pending_jobs) >= MAX_QUEUED_JOBS:
-                return jsonify(error="待機枠がいっぱいです。完了後にもう一度お試しください。"), 429
+                return jsonify(error="待機枠がいっぱいです。しばらくしてからもう一度お試しください。"), 429
             job["status"] = "queued"
             _jobs[job_id] = job
             if transfer_key is not None:
@@ -1350,10 +1324,58 @@ def run():
     return jsonify(job=job_id)
 
 
+@app.post("/api/orders/<order_id>/pay")
+def pay_order(order_id: str):
+    """PayPay送金リンクを受け取り、確認できたら実行を開始する。支払い済みなら再送不要で開始だけ再試行。"""
+    data = request.get_json(silent=True) or {}
+    with _orders_lock:
+        order = _orders.get(order_id)
+        if not order or order["owner"] != _owner():
+            return jsonify(error="注文が見つかりません。もう一度「実行」から始めてください。"), 404
+        if order["state"] == "paying":
+            return jsonify(error="決済確認中です。少しお待ちください。"), 409
+        if order["state"] == "started":
+            return jsonify(error="この注文はすでに開始済みです。"), 409
+        if order["state"] == "unpaid":
+            if _too_many_fails("paypay:" + order_id):
+                return jsonify(error="失敗が続いたので、10分ほど待ってください。"), 429
+            order["state"] = "paying"
+            need_pay = True
+        else:
+            need_pay = False
+    if need_pay:
+        try:
+            asyncio.run(paypay_gateway.receive_payment(str(data.get("link", "")), order["amount"], order_id))
+        except paypay_gateway.PayPayError as exc:
+            _fail.setdefault("paypay:" + order_id, []).append(time.time())
+            # 結果が不明・保留の場合は再送を防ぐため注文を使用不可にする
+            uncertain = exc.code in ("accept_uncertain", "accept_unconfirmed", "temporary_hold")
+            with _orders_lock:
+                order["state"] = "dead" if uncertain else "unpaid"
+            return jsonify(error=exc.message, uncertain=uncertain), 402
+        except Exception:
+            with _orders_lock:
+                order["state"] = "dead"
+            return jsonify(error="決済確認中に予期しないエラーが発生しました。PayPayアプリで送金状況を確認してください。", uncertain=True), 500
+        with _orders_lock:
+            order["state"] = "paid"
+    with _orders_lock:
+        if order["state"] == "dead":
+            return jsonify(error="この注文は使用できません。"), 409
+    resp = _start_job(order["job"], order["arguments"], order["transfer_key"])
+    body, code = (resp if isinstance(resp, tuple) else (resp, 200))
+    if code == 200:
+        with _orders_lock:
+            order["state"] = "started"
+            order["arguments"] = None
+        return body
+    out = body.get_json()
+    out["paid"] = True
+    return jsonify(out), code
+
+
 @app.get("/status/<job_id>")
 def status(job_id: str):
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     _gc_jobs()
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -1363,7 +1385,7 @@ def status(job_id: str):
         # Copy the mutable fields used below while holding the same lock as
         # worker updates and slot transitions.
         job = dict(job) if job else None
-    if not job or not session.get("job_owner") or job.get("owner") != session.get("job_owner"):
+    if not job or job.get("owner") != _owner():
         return jsonify(error="見つかりません（時間切れ、またはサーバーが再起動した可能性）"), 404
     end = job["finished"] or time.time()
     return jsonify(
@@ -1384,11 +1406,9 @@ def status(job_id: str):
 
 @app.post("/cancel/<job_id>")
 def cancel_job(job_id: str):
-    if not _logged_in():
-        return jsonify(error="ログインしてください"), 401
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job or not session.get("job_owner") or job.get("owner") != session.get("job_owner"):
+        if not job or job.get("owner") != _owner():
             return jsonify(error="待機中の処理が見つかりません。"), 404
         for entry in _pending_jobs:
             if entry[0] == job_id:
@@ -1405,45 +1425,23 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>管理者</title>
 <style>body{font-family:system-ui;max-width:38rem;margin:2rem auto;padding:0 1rem}input,button{font:inherit;padding:.5rem;margin:.25rem 0}form{margin:1rem 0}.msg{color:#a23}</style></head><body>
 <a href="/">戻る</a><h1>管理者モード</h1><p class="msg">{{ msg }}</p>
-{% if github_storage %}<p>パスワードのハッシュを非公開GitHubリポジトリに保存しています。</p>
-{% if github_bootstrap %}<p class="msg">初期化が済んだら、Renderの AUTH_GITHUB_BOOTSTRAP を削除してください。</p>{% endif %}
-{% elif ephemeral %}<p class="msg">保存先は一時領域です。再起動や再デプロイでパスワードの変更が失われる場合があります。</p>
-{% else %}<p>パスワードのハッシュを設定したファイルに保存しています。</p>{% endif %}
 {% if not unlocked %}
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="unlock">
 <label>管理者パスコード <input name="passcode" type="password" autocomplete="current-password" required></label><button>入る</button></form>
 {% else %}
-<h2>ログイン用パスワード</h2><p>値は表示できません。削除するとそのパスワードでログインしたセッションも終了します。</p>
-{% for id, label in passwords %}<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ id }}">{{ label }} <button>削除</button></form>{% endfor %}
-<h2>追加</h2><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="add">
-<label>名前 <input name="label" maxlength="80" required></label><br><label>パスワード <input name="password" type="password" minlength="8" maxlength="256" autocomplete="new-password" required></label><br><button>追加</button></form>
+<h2>PayPay受取アカウント</h2>
+<p>料金: 1回 {{ price }} 円（RUN_PRICE_JPY で変更。0で決済なし）</p>
+<p>状態: {% if pp.ready %}接続済み（有効）{% elif pp.connected %}接続済み（セッション期限切れ。次の決済時に再認証）{% else %}未接続{% endif %}</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_login">
+<label>電話番号 <input name="phone" inputmode="tel" autocomplete="off" required></label><br>
+<label>パスワード <input name="password" type="password" autocomplete="off" required></label><br><button>PayPayにログイン</button></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_otp">
+<label>SMS認証コード(4桁) <input name="otp" inputmode="numeric" maxlength="4" autocomplete="off"></label><button>認証</button></form>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button>管理者モードを終了</button></form>
-{% endif %}</body></html>"""
+{% endif %}
+</body></html>"""
 
-LOGIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
-<title>ログイン | にゃんこ代行</title>
-<style>
-:root{--bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--accent:#ffc42e;--bad:#d93636}
-@media (prefers-color-scheme:dark){:root{--bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57}}
-*{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
-main{max-width:420px;margin:0 auto;padding:max(12vh,24px) 18px 24px}
-.card{background:var(--panel);border:2px solid var(--line);border-radius:16px;box-shadow:0 4px 0 var(--line);padding:22px 18px}
-h1{margin:0 0 4px;font-size:22px;font-weight:800}
-p{margin:0 0 16px;color:var(--muted);font-size:14px}
-input,button{font:inherit;font-size:18px;width:100%;padding:13px 14px;border-radius:12px;border:2px solid var(--line)}
-input{background:var(--bg);color:var(--ink)}
-input:focus-visible,button:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
-button{margin-top:12px;background:var(--accent);color:#17181c;font-weight:800;box-shadow:0 3px 0 var(--line);cursor:pointer}
-button:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
-.msg{color:var(--bad);margin-top:12px;font-size:14px;min-height:1.2em}
-</style></head><body><main><div class="card">
-<h1>にゃんこ代行</h1><p>パスワードを入力してください。</p>
-<form method="post"><input type="password" name="password" placeholder="パスワード" autocomplete="current-password" autofocus>
-<button>ログイン</button></form><div class="msg" role="alert">{{ msg }}</div>
-</div></main></body></html>"""
+
 
 MAIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -1675,7 +1673,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 </style></head><body>
 
 <div class="wrap"><header>
-  <div class="top"><h1>にゃんこ代行</h1><a href="/admin">管理者</a><a href="/logout">ログアウト</a></div>
+  <div class="top"><h1>にゃんこ代行</h1><a href="/admin">管理者</a></div>
   <div class="pills" aria-live="polite">
     <span class="pill" id="p-conn" data-s="wait"><i class="dot"></i><span>接続を確認中</span></span>
     <span class="pill" id="p-data" data-s="idle"><i class="dot"></i><span>ゲームデータ</span></span>
@@ -1904,7 +1902,15 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 
 <div class="bar"><div class="in">
   <div class="info"><b id="total">選択 0件</b><span id="barmode">初期アカウントから作成</span></div>
-  <button id="go" type="button">実行</button>
+  <div class="panel" id="payPanel" hidden>
+    <b>PayPayでお支払い</b>
+    <p id="payInfo"></p>
+    <input id="payLink" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off" maxlength="2048" style="width:100%;font-size:16px;padding:10px;box-sizing:border-box">
+    <div class="err" id="payErr" role="alert"></div>
+    <button class="btn" id="payGo" type="button">送金リンクを送って実行</button>
+    <button class="btn" id="payCancel" type="button">やめる</button>
+  </div>
+  <button id="go" type="button">{% if price %}決済して実行{% else %}実行{% endif %}</button>
 </div></div>
 <div class="toast" id="toast" hidden></div>
 
@@ -2140,7 +2146,6 @@ async function loadCats(){
   catsAsked=true;
   try{
     const r=await fetch('/api/cats',{cache:'no-store'});
-    if(r.status===401){location.href='/login'; return;}
     const j=await r.json(); CATSTATE=j.state; CATSERR=j.error||'';
     if(j.state==='ready'&&catalogSignature!==JSON.stringify([j.version,j.updated,j.items])){
       catalogSignature=JSON.stringify([j.version,j.updated,j.items]);
@@ -2301,7 +2306,6 @@ async function ping(){
   if(document.hidden) return;
   try{
     const r=await fetch('/api/state',{cache:'no-store'});
-    if(r.status===401){location.href='/login'; return;}
     state=await r.json(); lastOk=Date.now(); fails=0;
   }catch(e){fails++;}
   renderState();
@@ -2312,7 +2316,6 @@ $('#latestCats').addEventListener('click',async()=>{
   $('#latestCats').disabled=true;
   try{
     const r=await fetch('/api/cats/latest',{method:'POST'});
-    if(r.status===401){location.href='/login'; return;}
     const j=await r.json();
     toast(r.ok?'最新の日本版データを確認しています。状況タブで確認できます。':j.error||'更新を開始できませんでした');
     if(r.ok){ catalogSignature=null; catsTries=0; }
@@ -2396,7 +2399,6 @@ async function poll(){
   if(!curJob) return;
   try{
     const r=await fetch('/status/'+curJob,{cache:'no-store'});
-    if(r.status===401){location.href='/login'; return;}
     const j=await r.json();
     if(!r.ok){
       sessionStorage.removeItem('job'); curJob=null; stopJob();
@@ -2555,8 +2557,8 @@ async function start(){
     const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c, items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')})});
     const j=await r.json();
-    if(r.status===401){location.href='/login'; return;}
     if(!r.ok){ setRunning(false); $('#log').textContent=''; $('#fail').hidden=false; $('#fail').textContent=j.error||'エラー'; return; }
+    if(j.order){ setRunning(false); $('#log').textContent=''; openPay(j.order,j.amount); return; }
     jobStart=Date.now(); watch(j.job);
   }catch(e){
     setRunning(false); $('#log').textContent='';
@@ -2564,6 +2566,32 @@ async function start(){
   }
 }
 $('#go').addEventListener('click',start);
+
+/* ---------- PayPay決済 ---------- */
+let payOrder=null;
+function openPay(id,amount){
+  payOrder=id; $('#payPanel').hidden=false; $('#payErr').textContent=''; $('#payLink').value='';
+  $('#payInfo').textContent='PayPayで '+amount+' 円の「送金リンク」を作り、下に貼り付けてください。確認でき次第、自動で実行します。';
+  $('#payPanel').scrollIntoView({block:'center'}); $('#payLink').focus();
+}
+function closePay(){ payOrder=null; $('#payPanel').hidden=true; }
+$('#payCancel').addEventListener('click',()=>{ closePay(); show('input'); });
+$('#payGo').addEventListener('click',async()=>{
+  if(!payOrder) return;
+  const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…';
+  try{
+    const r=await fetch('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:$('#payLink').value})});
+    const j=await r.json();
+    if(!r.ok){
+      $('#payErr').textContent=j.error||'決済を確認できませんでした';
+      if(j.uncertain) closePayLater();
+      return;
+    }
+    closePay(); setRunning(true); show('status'); jobStart=Date.now(); watch(j.job);
+  }catch(e){ $('#payErr').textContent='サーバーに接続できませんでした。送金済みの場合は再送せず、もう一度このボタンを押さずに管理者へ連絡してください。'; }
+  finally{ btn.disabled=false; }
+});
+function closePayLater(){ payOrder=null; $('#payGo').disabled=true; setTimeout(()=>{$('#payGo').disabled=false;},0); }
 
 /* ---------- 起動時 ---------- */
 refresh(); ping(); tabMore(); renderPresets(); renderHist();
