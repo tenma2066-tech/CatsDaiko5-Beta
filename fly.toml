@@ -1,4 +1,4 @@
-app = "catsdaiko5-beta"   # 変更可（fly launch --copy-config --name <名前>） # deploy via GitHub Actions
+app = "catsdaiko5-beta"   # 変更可（fly launch --copy-config --name <名前>） # retry deploy
 primary_region = "nrt"
 
 [build]
