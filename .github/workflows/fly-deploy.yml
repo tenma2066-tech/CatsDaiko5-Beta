@@ -1,0 +1,33 @@
+name: Deploy to Fly.io
+on:
+  push:
+    branches: [claude/zealous-ritchie-5o2epn]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+concurrency: fly-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Create app / volume / secrets (first run only)
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          set -eu
+          APP=$(sed -n 's/^app *= *"\([^"]*\)".*/\1/p' fly.toml | head -1)
+          flyctl apps list | awk '{print $1}' | grep -qx "$APP" || flyctl apps create "$APP"
+          flyctl volumes list -a "$APP" | grep -qw data || flyctl volumes create data --size 1 --region nrt -a "$APP" -y
+          EXISTING=$(flyctl secrets list -a "$APP")
+          add() { echo "$EXISTING" | grep -qw "$1" || printf '%s' "$2" | flyctl secrets set "$1=$(cat)" -a "$APP" --stage; }
+          # 暗号化キー・セッション鍵は初回だけ自動生成（値は表示されない）。再実行しても上書きしない
+          add SECRET_KEY "$(openssl rand -hex 32)"
+          add PAYPAY_ENCRYPTION_KEY "$(openssl rand 32 | base64 | tr '+/' '-_')"
+          [ -z "$ADMIN_PASSWORD" ] || printf '%s' "$ADMIN_PASSWORD" | flyctl secrets set "ADMIN_PASSWORD=$(cat)" -a "$APP" --stage
+      - name: Deploy
+        run: flyctl deploy --ha=false --remote-only
