@@ -1350,14 +1350,14 @@ def pay_order(order_id: str):
     with _orders_lock:
         order = _orders.get(order_id)
         if not order or order["owner"] != _owner():
-            return jsonify(error="注文が見つかりません。もう一度「実行」から始めてください。"), 404
+            return jsonify(error="注文が見つかりません（30分で期限切れになります）。もう一度「実行」から始めてください。", code="order_missing"), 404
         if order["state"] == "paying":
-            return jsonify(error="決済確認中です。少しお待ちください。"), 409
+            return jsonify(error="決済確認中です。少しお待ちください。", code="paying"), 409
         if order["state"] == "started":
-            return jsonify(error="この注文はすでに開始済みです。"), 409
+            return jsonify(error="この注文はすでに開始済みです。「状況」タブを確認してください。", code="started"), 409
         if order["state"] == "unpaid":
             if _too_many_fails("paypay:" + order_id):
-                return jsonify(error="失敗が続いたので、10分ほど待ってください。"), 429
+                return jsonify(error="失敗が続いたので、10分ほど待ってください。", code="too_many_fails"), 429
             order["state"] = "paying"
             need_pay = True
         else:
@@ -1371,16 +1371,16 @@ def pay_order(order_id: str):
             uncertain = exc.code in ("accept_uncertain", "accept_unconfirmed", "temporary_hold")
             with _orders_lock:
                 order["state"] = "dead" if uncertain else "unpaid"
-            return jsonify(error=exc.message, uncertain=uncertain), 402
+            return jsonify(error=exc.message, code=exc.code, uncertain=uncertain), 402
         except Exception:
             with _orders_lock:
                 order["state"] = "dead"
-            return jsonify(error="決済確認中に予期しないエラーが発生しました。PayPayアプリで送金状況を確認してください。", uncertain=True), 500
+            return jsonify(error="決済確認中に予期しないエラーが発生しました。PayPayアプリで送金状況を確認してください。", code="internal", uncertain=True), 500
         with _orders_lock:
             order["state"] = "paid"
     with _orders_lock:
         if order["state"] == "dead":
-            return jsonify(error="この注文は使用できません。"), 409
+            return jsonify(error="この注文は使用できません。PayPayアプリで送金状況を確認してください。", code="dead"), 409
     resp = _start_job(order["job"], order["arguments"], order["transfer_key"])
     body, code = (resp if isinstance(resp, tuple) else (resp, 200))
     if code == 200:
@@ -1390,6 +1390,7 @@ def pay_order(order_id: str):
         return body
     out = body.get_json()
     out["paid"] = True
+    out["code"] = "busy" if code == 429 else "start_failed"
     return jsonify(out), code
 
 
@@ -1677,6 +1678,23 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .keepnote.warn{color:var(--warn)}
 
 /* 下部バー */
+
+.modal{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:max(16px,env(safe-area-inset-top,0px)) 14px 24px;-webkit-overflow-scrolling:touch}
+.modal[hidden]{display:none}
+.mbox{background:var(--panel);color:var(--ink);border:2px solid var(--line);border-radius:16px;box-shadow:0 4px 0 var(--line);width:100%;max-width:460px;margin:auto;padding:18px 16px}
+.mbox h2{margin:0 0 8px;font-size:19px}.mbox h3{margin:16px 0 6px;font-size:15px}
+.payamt{display:flex;align-items:baseline;gap:4px;justify-content:center;margin:6px 0}
+.payamt b{font-size:40px;font-weight:800;letter-spacing:.02em}.payamt span{font-weight:700}
+.paylist{margin:0 0 10px;padding-left:1.2em;font-size:14px;color:var(--muted);line-height:1.6}
+.mbox .field{display:block;margin:10px 0}.mbox .field span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.mbox input{width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:12px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.payerr{margin:8px 0;padding:10px 12px;border:2px solid var(--bad,#d93636);border-radius:10px;font-size:14px;line-height:1.5}
+.payerr b{display:block;color:var(--bad,#d93636)}
+.payerr[data-lv="wait"]{border-color:var(--line)}.payerr[data-lv="wait"] b{color:var(--ink)}
+.mbtns{display:flex;gap:8px;margin-top:12px}.mbtns .btn{flex:1;padding:12px 8px;font-size:15px}
+.mbtns .pri{background:var(--accent,#ffc42e);color:#17181c;font-weight:800;flex:2}
+.howto{margin:0 0 8px;padding-left:1.3em;font-size:14px;line-height:1.7}
+.mbox details{border-top:1px solid var(--line);padding:8px 0;font-size:14px}.mbox summary{cursor:pointer;font-weight:700}.mbox details p{margin:6px 0 0;color:var(--muted)}
 .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:2px solid var(--line);
   padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px))}
 .bar .in{max-width:640px;margin:0 auto;display:flex;align-items:center;gap:12px}
@@ -1692,7 +1710,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 </style></head><body>
 
 <div class="wrap"><header>
-  <div class="top"><h1>にゃんこ代行</h1><a href="/admin">管理者</a></div>
+  <div class="top"><h1>にゃんこ代行</h1><button type="button" class="btn" id="helpBtn">使い方</button><a href="/admin">管理者</a></div>
   <div class="pills" aria-live="polite">
     <span class="pill" id="p-conn" data-s="wait"><i class="dot"></i><span>接続を確認中</span></span>
     <span class="pill" id="p-data" data-s="idle"><i class="dot"></i><span>ゲームデータ</span></span>
@@ -1927,16 +1945,51 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 
 <div class="bar"><div class="in">
   <div class="info"><b id="total">選択 0件</b><span id="barmode">初期アカウントから作成</span></div>
-  <div class="panel" id="payPanel" hidden>
-    <b>PayPayでお支払い</b>
-    <p id="payInfo"></p>
-    <input id="payLink" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off" maxlength="2048" style="width:100%;font-size:16px;padding:10px;box-sizing:border-box">
-    <div class="err" id="payErr" role="alert"></div>
-    <button class="btn" id="payGo" type="button">送金リンクを送って実行</button>
-    <button class="btn" id="payCancel" type="button">やめる</button>
-  </div>
   <button id="go" type="button">{% if payments %}決済して実行{% else %}実行{% endif %}</button>
 </div></div>
+
+<div class="modal" id="payPanel" role="dialog" aria-modal="true" aria-labelledby="payTitle" hidden>
+  <div class="mbox">
+    <h2 id="payTitle">PayPayでお支払い</h2>
+    <div class="payamt"><b id="payAmount"></b><span>円</span></div>
+    <ul class="paylist" id="payList"></ul>
+    <p class="sub" id="payInfo"></p>
+    <label class="field"><span>送金リンク</span>
+      <input id="payLink" type="url" inputmode="url" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048"></label>
+    <div class="payerr" id="payErr" role="alert" hidden><b id="payErrTitle"></b><span id="payErrHint"></span></div>
+    <div class="mbtns">
+      <button class="btn" id="payCancel" type="button">やめる</button>
+      <button class="btn pri" id="payGo" type="button">送金リンクを送って実行</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="helpPanel" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
+  <div class="mbox">
+    <h2 id="helpTitle">使い方</h2>
+    <ol class="howto">
+      <li><b>引継ぎ情報を入れる</b>（新規アカウントなら空欄のまま）。</li>
+      <li><b>項目を選ぶ</b>：アイテム・数量・キャラ・サブ・その他のタブから選びます。下のバーに金額が出ます。</li>
+      <li><b>「決済して実行」</b>を押すと、お支払い画面が開きます。</li>
+      <li>PayPayアプリで<b>表示金額ちょうどの「送金リンク」</b>を作り（パスコードなし）、リンクを貼り付けて送信します。</li>
+      <li>決済が確認できたら<b>自動で実行</b>が始まります。「状況」タブで進み具合を見られます。完了すると引継ぎコードと暗証番号が出ます。</li>
+    </ol>
+    <h3>料金</h3>
+    <ul class="paylist">
+      <li>キャラ指定：1体 {{ prices.chara }}円</li>
+      <li>クラッシュ解除（ガマトト・オトート砲台）：1件 {{ prices.crash }}円</li>
+      <li>バン保証（サブ→特別メニュー）：{{ prices.ban_guarantee }}円</li>
+      <li>アカウント複製（サブ→特別メニュー）：{{ prices.clone }}円</li>
+      <li>それ以外の項目：1件 {{ prices.other }}円（試運転も同額）</li>
+    </ul>
+    <h3>よくある質問</h3>
+    <details><summary>リンクがエラーになる</summary><p>金額が違う・パスコード付き・期限切れ・受け取り済みのリンクは使えません。金額を確認して、新しいリンクを作り直してください。</p></details>
+    <details><summary>送金したのに実行されない</summary><p>結果が確認できない場合は、二重払いを防ぐため注文を止めます。同じリンクを送り直さず、PayPayアプリで送金の状態を確認し、管理者に連絡してください。</p></details>
+    <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
+    <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
+    <div class="mbtns"><button class="btn pri" id="helpClose" type="button">閉じる</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -2593,7 +2646,7 @@ async function start(){
       safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c, items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')})});
     const j=await r.json();
     if(!r.ok){ setRunning(false); $('#log').textContent=''; $('#fail').hidden=false; $('#fail').textContent=j.error||'エラー'; return; }
-    if(j.order){ setRunning(false); $('#log').textContent=''; openPay(j.order,j.amount); return; }
+    if(j.order){ setRunning(false); $('#log').textContent=''; openPay(j.order,j.amount,j.breakdown); return; }
     jobStart=Date.now(); watch(j.job);
   }catch(e){
     setRunning(false); $('#log').textContent='';
@@ -2603,30 +2656,85 @@ async function start(){
 $('#go').addEventListener('click',start);
 
 /* ---------- PayPay決済 ---------- */
-let payOrder=null;
-function openPay(id,amount){
-  payOrder=id; $('#payPanel').hidden=false; $('#payErr').textContent=''; $('#payLink').value='';
-  $('#payInfo').textContent='PayPayで '+amount+' 円の「送金リンク」を作り、下に貼り付けてください。確認でき次第、自動で実行します。';
-  $('#payPanel').scrollIntoView({block:'center'}); $('#payLink').focus();
+let payOrder=null, payDead=false;
+const PAY_MSG={
+  empty_link:['リンクが空です','PayPayで作った送金リンクを貼り付けてください。'],
+  not_paypay_link:['PayPayのリンクではありません','「https://pay.paypay.ne.jp/」で始まる送金リンクを貼ってください。'],
+  multiple_links:['リンクが複数あります','1件だけにして、もう一度貼り付けてください。'],
+  link_too_long:['入力が長すぎます','リンクだけを貼り付けてください。'],
+  bad_link:['リンクの形式が正しくありません','前後に余計な文字が入っていないか確認してください。'],
+  link_not_found:['リンクが見つかりません','リンクが間違っているか、取り消されています。新しく作り直してください。'],
+  amount_mismatch:['金額が違います','表示の金額ちょうどで、新しい送金リンクを作ってください（古いリンクは使えません）。'],
+  link_restricted:['このリンクは使えません','パスコードなしで、ブロックされていない送金リンクを作ってください。'],
+  expired:['リンクの期限切れ','新しい送金リンクを作り直してください。'],
+  already_received:['受け取り済みのリンクです','すでに使われたリンクです。新しいリンクを作ってください。'],
+  link_cancelled:['リンクが取り消されています','新しい送金リンクを作ってください。'],
+  not_pending:['受け取れない状態のリンクです','新しい送金リンクを作ってください。'],
+  duplicate:['使用済みのリンクです','同じリンクは使えません。新しいリンクを作ってください。'],
+  identity:['送金元を確認できません','自分宛て以外の、通常の送金リンクを使ってください。'],
+  order_mismatch:['リンクの内容を確認できません','新しい送金リンクを作り直してください。'],
+  link_incomplete:['リンク情報が不足しています','新しい送金リンクを作り直してください。'],
+  invalid_link:['リンクを確認できません','リンクが正しいか確認してください。'],
+  link_network:['通信エラー','少し待ってからもう一度送信してください（送金済みの場合は再送金しないでください）。'],
+  rate_limited:['PayPayが混み合っています','しばらく待ってから、もう一度送信してください。'],
+  paypay_unavailable:['PayPay側の一時エラー','しばらく待ってから、もう一度送信してください。'],
+  session_rejected:['受取側の接続が切れています','送金はせず、管理者に再接続を依頼してください。'],
+  login_required:['現在、決済を受け付けられません','受取側PayPayが未接続です。管理者にお知らせください。'],
+  otp_required:['現在、決済を受け付けられません','受取側PayPayが再認証待ちです。管理者にお知らせください。'],
+  cookie_missing:['現在、決済を受け付けられません','受取側の接続を確認できません。管理者にお知らせください。'],
+  accept_uncertain:['受け取り結果が不明です','同じリンクを送り直さず、PayPayアプリで送金状態を確認して管理者に連絡してください。'],
+  accept_unconfirmed:['受け取りを確定できません','再送金せず、PayPayアプリで状態を確認して管理者に連絡してください。'],
+  temporary_hold:['PayPay側で一時保留です','PayPayアプリで送金状態を確認し、解除操作が出たら解除してください。再送金はしないでください。'],
+  too_many_fails:['失敗が続いています','10分ほど待ってからお試しください。'],
+  order_missing:['注文の期限が切れました','もう一度「実行」から始めてください。'],
+  paying:['確認中です','数秒待ってください。'],
+  started:['すでに開始済みです','「状況」タブを確認してください。'],
+  busy:['支払いは完了しています','待機枠がいっぱいです。少し待って、もう一度ボタンを押してください（再送金は不要です）。'],
+  start_failed:['支払いは完了しています','開始に失敗しました。もう一度ボタンを押してください（再送金は不要です）。'],
+  dead:['この注文は使えません','PayPayアプリで送金状態を確認し、管理者に連絡してください。'],
+  internal:['予期しないエラー','PayPayアプリで送金状態を確認し、送金済みなら管理者に連絡してください。'],
+};
+function payError(j,fallback,lv){
+  const m=PAY_MSG[j&&j.code]||[(j&&j.error)||fallback,''];
+  $('#payErrTitle').textContent=m[0];
+  $('#payErrHint').textContent=(m[1]||'')+(()=>{ const m=(j&&j.code==='amount_mismatch'&&j.error)?j.error.match(/（(リンク[^）]*)）/):null; return m?' ['+m[1]+']':''; })();
+  $('#payErr').dataset.lv=lv||'bad'; $('#payErr').hidden=false;
 }
-function closePay(){ payOrder=null; $('#payPanel').hidden=true; }
+function openPay(id,amount,breakdown){
+  payOrder=id; payDead=false; $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
+  $('#payAmount').textContent=Number(amount).toLocaleString('ja-JP');
+  const ul=$('#payList'); ul.textContent='';
+  (breakdown||[]).forEach(r=>{ const li=document.createElement('li'); li.textContent=r.label+' '+r.count+'件 × '+r.unit+'円'; ul.append(li); });
+  $('#payInfo').textContent='PayPayアプリで上の金額ちょうどの「送金リンク」を作り（パスコードなし）、下に貼り付けて送信してください。確認でき次第、自動で実行します。';
+  $('#payGo').disabled=false; document.body.style.overflow='hidden';
+  setTimeout(()=>$('#payLink').focus(),50);
+}
+function closePay(){ payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
 $('#payCancel').addEventListener('click',()=>{ closePay(); show('input'); });
+$('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
 $('#payGo').addEventListener('click',async()=>{
-  if(!payOrder) return;
-  const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…';
+  if(!payOrder||payDead) return;
+  const btn=$('#payGo'); btn.disabled=true; payError({error:'決済を確認しています…',code:'x'},'決済を確認しています…','wait');
+  $('#payErrTitle').textContent='決済を確認しています…'; $('#payErrHint').textContent='画面を閉じずにお待ちください。';
   try{
     const r=await fetch('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:$('#payLink').value})});
     const j=await r.json();
     if(!r.ok){
-      $('#payErr').textContent=j.error||'決済を確認できませんでした';
-      if(j.uncertain) closePayLater();
-      return;
+      payError(j,'決済を確認できませんでした');
+      if(j.uncertain||['dead','order_missing','started'].includes(j.code)){ payDead=true; return; }
+      btn.disabled=false; return;
     }
     closePay(); setRunning(true); show('status'); jobStart=Date.now(); watch(j.job);
-  }catch(e){ $('#payErr').textContent='サーバーに接続できませんでした。送金済みの場合は再送せず、もう一度このボタンを押さずに管理者へ連絡してください。'; }
-  finally{ btn.disabled=false; }
+  }catch(e){
+    payError({code:'link_network'},'通信エラー'); btn.disabled=false;
+  }
 });
-function closePayLater(){ payOrder=null; $('#payGo').disabled=true; setTimeout(()=>{$('#payGo').disabled=false;},0); }
+function openHelp(){ $('#helpPanel').hidden=false; document.body.style.overflow='hidden'; }
+function closeHelp(){ $('#helpPanel').hidden=true; if($('#payPanel').hidden) document.body.style.overflow=''; }
+$('#helpBtn').addEventListener('click',openHelp);
+$('#helpClose').addEventListener('click',closeHelp);
+$('#helpPanel').addEventListener('click',e=>{ if(e.target.id==='helpPanel') closeHelp(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#helpPanel').hidden) closeHelp(); });
 
 /* ---------- 起動時 ---------- */
 refresh(); ping(); tabMore(); renderPresets(); renderHist();

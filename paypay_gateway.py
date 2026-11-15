@@ -245,6 +245,20 @@ def _normalize_link(raw: str):
             return None
     return urls[0]
 
+def _link_problem(raw):
+    """リンクが読み取れない理由を細かく返す。"""
+    text = raw.strip() if isinstance(raw, str) else ""
+    if not text:
+        return PayPayError("empty_link", "送金リンクが入力されていません。")
+    if len(text) > 2048:
+        return PayPayError("link_too_long", "入力が長すぎます。送金リンクだけを貼り付けてください。")
+    urls = LINK_RE.findall(text)
+    if not urls:
+        return PayPayError("not_paypay_link", "PayPayの送金リンク（https://pay.paypay.ne.jp/…）ではありません。")
+    if len(set(urls)) > 1:
+        return PayPayError("multiple_links", "リンクが複数含まれています。1件だけ貼り付けてください。")
+    return PayPayError("bad_link", "送金リンクの形式が正しくありません。リンクの前後に余計な文字がないか確認してください。")
+
 def _parse_time(value):
     if not isinstance(value, str): return None
     try:
@@ -257,19 +271,28 @@ def _verify_link(body, amount):
     if not isinstance(header, dict) or header.get("resultCode") != "S0000":
         raise PayPayError("invalid_link", "PayPayリンクを確認できませんでした。")
     p = body.get("payload")
-    if not isinstance(p, dict) or p.get("orderStatus") != "PENDING":
+    status = p.get("orderStatus") if isinstance(p, dict) else None
+    if status == "COMPLETED":
+        raise PayPayError("already_received", "このリンクはすでに受け取り済みです。新しい送金リンクを作ってください。")
+    if status in ("CANCELED", "CANCELLED", "REJECTED"):
+        raise PayPayError("link_cancelled", "このリンクは取り消し・辞退されています。新しい送金リンクを作ってください。")
+    if status == "EXPIRED":
+        raise PayPayError("expired", "このリンクは有効期限が切れています。新しい送金リンクを作ってください。")
+    if not isinstance(p, dict) or status != "PENDING":
         raise PayPayError("not_pending", "このPayPayリンクは未受取状態ではありません。")
     info, msg = p.get("pendingP2PInfo"), p.get("message")
-    if not isinstance(info, dict) or not isinstance(msg, dict) or type(info.get("amount")) is not int or info["amount"] != amount:
-        raise PayPayError("amount_mismatch", "PayPay送金金額と注文金額が一致しません。")
+    if not isinstance(info, dict) or not isinstance(msg, dict) or type(info.get("amount")) is not int:
+        raise PayPayError("link_incomplete", "送金リンクの金額を確認できません。")
+    if info["amount"] != amount:
+        raise PayPayError("amount_mismatch", f"金額が違います（リンク {info['amount']:,}円／必要 {amount:,}円）。{amount:,}円ちょうどの新しいリンクを作ってください。")
     if info.get("isLinkBlocked") is not False or info.get("isSetPasscode") is not False:
-        raise PayPayError("link_restricted", "ブロック中またはパスコード付きリンクは利用できません。")
+        raise PayPayError("link_restricted", "パスコード付き、またはブロック中のリンクは使えません。パスコードなしで作り直してください。")
     expiry = _parse_time(info.get("expiredAt"))
     if not expiry or expiry <= datetime.now(timezone.utc):
-        raise PayPayError("expired", "PayPayリンクの有効期限が切れているか確認できません。")
+        raise PayPayError("expired", "リンクの有効期限が切れているか、確認できません。新しいリンクを作ってください。")
     sender, receiver = p.get("sender"), p.get("receiver")
     if not isinstance(sender, dict) or not isinstance(receiver, dict) or not sender.get("externalId") or not receiver.get("externalId") or sender["externalId"] == receiver["externalId"]:
-        raise PayPayError("identity", "送金元・受取先を確認できません。")
+        raise PayPayError("identity", "送金元・受取先を確認できません。自分宛てのリンクは使えません。")
     data = msg.get("data")
     if (not isinstance(data, dict) or not isinstance(info.get("orderId"), str) or not info["orderId"]
             or data.get("orderId") != info.get("orderId") or data.get("amount") != amount or data.get("status") != "PENDING"):
@@ -316,11 +339,11 @@ def _ledger():
 
 async def receive_payment(raw_link: str, amount: int, purchase_id: str):
     code = _normalize_link(raw_link)
-    if not code: raise PayPayError("bad_link", "PayPay送金リンクの形式が正しくありません。")
+    if not code: raise _link_problem(raw_link)
     with _LOCK:
         account = _load_account()
         if not account:
-            raise PayPayError("login_required", "管理者のPayPay接続が必要です。")
+            raise PayPayError("login_required", "現在、決済を受け付けられません（受取側のPayPay未接続）。管理者にお知らせください。")
         if float(account.get("expires_at",0)) <= time.time()+60 or not account.get("session_cookie"):
             renewed = await _oauth({"scope":"SIGN_IN","client_uuid":account["uuid"],"grant_type":"password",
                                     "username":account["phone"],"password":account["password"],
@@ -331,7 +354,7 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
                 _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
                                     otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"],
                                     cookies=renewed.get("cookies", {}))
-                raise PayPayError("otp_required", "PayPayがSMS認証を要求しました。管理者画面で認証コードを入力してください。")
+                raise PayPayError("otp_required", "現在、決済を受け付けられません（受取側のPayPayが再認証待ち）。管理者にお知らせください。")
             if not renewed.get("session_cookie"):
                 raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
             account.update(access_token=renewed["access_token"],session_cookie=renewed["session_cookie"],
@@ -343,7 +366,16 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
         async with aiohttp.ClientSession(timeout=timeout,headers=headers,cookies={"token":account["session_cookie"]}) as session:
             try:
                 async with session.get(LINK_CHECK_ENDPOINT,params={"verificationCode":code,"client_uuid":account["uuid"]}) as r:
-                    if r.status != 200: raise PayPayError("link_check", "PayPayリンクを確認できませんでした。")
+                    if r.status == 404:
+                        raise PayPayError("link_not_found", "このPayPayリンクは見つかりません。リンクが間違っているか、取り消されています。")
+                    if r.status in (401, 403):
+                        raise PayPayError("session_rejected", "受取側のPayPay接続が切れています。管理者に再接続を依頼してください（送金はしないでください）。")
+                    if r.status == 429:
+                        raise PayPayError("rate_limited", "PayPayが混み合っています。しばらくしてからもう一度お試しください。")
+                    if r.status >= 500:
+                        raise PayPayError("paypay_unavailable", "PayPay側で一時的なエラーが起きています。しばらくしてからお試しください。")
+                    if r.status != 200:
+                        raise PayPayError("link_check", f"PayPayリンクを確認できませんでした（応答 {r.status}）。")
                     body=await r.json(content_type=None)
             except (aiohttp.ClientError,asyncio.TimeoutError,ValueError):
                 raise PayPayError("link_network", "PayPayリンク確認で通信エラーが発生しました。") from None
@@ -352,7 +384,7 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
             with _ledger() as db:
                 try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
                 except sqlite3.IntegrityError:
-                    raise PayPayError("duplicate","このPayPayリンクまたは注文は既に処理されています。") from None
+                    raise PayPayError("duplicate","このリンクまたは注文はすでに使用済みです。新しい送金リンクを作ってください。") from None
             payload={"requestAt":verified["request_at"],"orderId":verified["order_id"],"requestId":str(uuid4()),
                      "senderChannelUrl":verified["chat_id"],"senderMessageId":verified["message_id"],
                      "verificationCode":code,"client_uuid":account["uuid"],
