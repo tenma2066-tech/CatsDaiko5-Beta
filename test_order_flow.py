@@ -83,6 +83,28 @@ class OrderFlow(unittest.TestCase):
         cr.assert_awaited_once()
         rp.assert_not_awaited()
 
+    def test_mine_lists_only_own_resumable_orders(self):
+        j = self.order()
+        mine = self.c.get("/api/orders/mine").get_json()["orders"]
+        self.assertEqual([o["order"] for o in mine], [j["order"]])
+        self.assertEqual(mine[0]["state"], "unpaid")
+        self.assertTrue(mine[0]["breakdown"])
+        self.assertEqual(A.app.test_client().get("/api/orders/mine").get_json()["orders"], [])
+
+    def test_claim_by_order_number_moves_to_new_browser(self):
+        j = self.order()
+        other = A.app.test_client()
+        self.assertEqual(other.post("/api/orders/wrong-number/claim").status_code, 404)
+        r = other.post(f"/api/orders/{j['order']}/claim")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["amount"], 25)
+        with patch.object(G, "receive_payment", AsyncMock(return_value="d")), \
+             patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JX")):
+            self.assertEqual(self.c.post(f"/api/orders/{j['order']}/pay", json={"link": "x"}).status_code, 404)  # 元のブラウザは使えない
+            self.assertEqual(other.post(f"/api/orders/{j['order']}/pay", json={"link": "x"}).get_json()["job"], "JX")
+        # 開始済みは再開対象外
+        self.assertEqual(other.post(f"/api/orders/{j['order']}/claim").status_code, 404)
+
     def test_hold_failed_kills_order(self):
         j = self.order()
         with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("accept_uncertain", "不明"))):

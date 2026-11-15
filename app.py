@@ -1380,7 +1380,8 @@ def run():
     order_id = secrets.token_urlsafe(16)
     with _orders_lock:
         _orders[order_id] = {"owner": _owner(), "state": "unpaid", "amount": amount, "created": time.time(),
-                             "job": job, "arguments": arguments, "transfer_key": transfer_key}
+                             "job": job, "arguments": arguments, "transfer_key": transfer_key,
+                             "breakdown": [{"label": l, "count": n, "unit": p} for l, n, p in rows], "skipped": skipped}
     _persist_orders()
     return jsonify(order=order_id, amount=amount, skipped=skipped, breakdown=[{"label": l, "count": n, "unit": p} for l, n, p in rows])
 
@@ -1414,6 +1415,44 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
             del _jobs[job_id]
             return jsonify(error="処理を開始できませんでした。もう一度お試しください。"), 503
     return jsonify(job=job_id)
+
+
+RESUMABLE = ("unpaid", "hold", "paid")
+
+
+def _public_order(order_id: str, o: dict) -> dict:
+    return {"order": order_id, "amount": o["amount"], "state": o["state"], "created": int(o["created"]),
+            "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
+
+
+@app.get("/api/orders/mine")
+def my_orders():
+    """このブラウザの未完了の注文（支払い待ち・保留・支払い済み未開始）。"""
+    _gc_orders()
+    me = _owner()
+    with _orders_lock:
+        items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in RESUMABLE]
+    items.sort(key=lambda x: -x["created"])
+    return jsonify(orders=items)
+
+
+@app.post("/api/orders/<order_id>/claim")
+def claim_order(order_id: str):
+    """注文番号で再開（別のブラウザ・Cookie消去後でも）。注文番号は推測できない長さの秘密の値。"""
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    if _too_many_fails("claim:" + ip):
+        return jsonify(error="失敗が続いたので、10分ほど待ってください。", code="too_many_fails"), 429
+    order_id = (order_id or "").strip()
+    with _orders_lock:
+        o = _orders.get(order_id)
+        if not o or o["state"] not in RESUMABLE:
+            _fail.setdefault("claim:" + ip, []).append(time.time())
+            return jsonify(error="再開できる注文が見つかりません。番号を確認してください（実行開始済み・期限切れの注文は再開できません）。", code="order_missing"), 404
+        o["owner"] = _owner()
+        o["job"]["owner"] = o["owner"]
+        out = _public_order(order_id, o)
+    _persist_orders()
+    return jsonify(out)
 
 
 @app.post("/api/orders/<order_id>/pay")
@@ -1770,6 +1809,11 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 
 /* 下部バー */
 
+
+.ordno{font-size:13px;color:var(--muted);margin:0 0 6px;line-height:1.5}.ordno code{font-size:12px;word-break:break-all;color:var(--ink)}
+.btn.mini{padding:2px 8px;font-size:12px}
+.resume{border-color:var(--accent,#ffc42e)}.resume .rrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}.resume .rrow span{flex:1;font-size:14px}
+#claimNo{flex:1;min-width:0}
 .modal{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:max(16px,env(safe-area-inset-top,0px)) 14px 24px;-webkit-overflow-scrolling:touch}
 .modal[hidden]{display:none}
 .mbox{background:var(--panel);color:var(--ink);border:2px solid var(--line);border-radius:16px;box-shadow:0 4px 0 var(--line);width:100%;max-width:460px;margin:auto;padding:18px 16px}
@@ -1823,6 +1867,10 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 <main class="wrap">
 
   <section class="view" id="v-input" role="tabpanel" aria-labelledby="t-input">
+    <div class="panel resume" id="resumePanel" hidden>
+      <h2>未完了の注文があります</h2>
+      <div id="resumeList"></div>
+    </div>
     <div class="panel">
       <h2>引継ぎ情報</h2>
       <p class="sub">両方空欄にすると、初期アカウントから作ります。</p>
@@ -2042,6 +2090,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 <div class="modal" id="payPanel" role="dialog" aria-modal="true" aria-labelledby="payTitle" hidden>
   <div class="mbox">
     <h2 id="payTitle">PayPayでお支払い</h2>
+    <p class="ordno">注文番号 <code id="payOrderNo"></code> <button type="button" class="btn mini" id="payCopy">コピー</button><br><small>画面を閉じても、この番号で支払い・実行を再開できます。控えておいてください。</small></p>
     <div class="payamt"><b id="payAmount"></b><span>円</span></div>
     <ul class="paylist" id="payList"></ul>
     <div class="payerr" id="paySkip" data-lv="wait" hidden><b>安全モードのため実行されない項目</b><span id="paySkipList"></span><span>これらは料金に含まれません。実行したい場合は「やめる」→入力画面で安全モードをオフにしてください（BANの恐れがあります）。</span></div>
@@ -2079,6 +2128,8 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した側がPayPayアプリで保留を解除すると、画面を開いたままなら自動で受け取って実行します（「今すぐ確認する」でもOK）。同じリンクを送り直したり、再送金したりしないでください。</p></details>
     <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
     <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
+    <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、入力タブの上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
+      <div class="tools"><input type="text" id="claimNo" placeholder="注文番号" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn" id="claimGo">再開</button></div></details>
     <div class="mbtns"><button class="btn pri" id="helpClose" type="button">閉じる</button></div>
   </div>
 </div>
@@ -2797,15 +2848,17 @@ function payError(j,fallback,lv){
   $('#payErrHint').textContent=(m[1]||'')+(()=>{ const m=(j&&j.code==='amount_mismatch'&&j.error)?j.error.match(/（(リンク[^）]*)）/):null; return m?' ['+m[1]+']':''; })();
   $('#payErr').dataset.lv=lv||'bad'; $('#payErr').hidden=false;
 }
-function openPay(id,amount,breakdown,skipped){
-  payOrder=id; payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
+function openPay(id,amount,breakdown,skipped,state){
+  payOrder=id; $('#payOrderNo').textContent=id; payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
   $('#payAmount').textContent=Number(amount).toLocaleString('ja-JP');
   const ul=$('#payList'); ul.textContent='';
   (breakdown||[]).forEach(r=>{ const li=document.createElement('li'); li.textContent=r.label+' '+r.count+'件 × '+r.unit+'円'; ul.append(li); });
   $('#payInfo').textContent='PayPayアプリで上の金額ちょうどの「送金リンク」を作り（パスコードなし）、下に貼り付けて送信してください。確認でき次第、自動で実行します。';
   $('#paySkip').hidden=!(skipped&&skipped.length); $('#paySkipList').textContent=(skipped||[]).join('・');
   $('#payGo').disabled=false; document.body.style.overflow='hidden';
-  setTimeout(()=>$('#payLink').focus(),50);
+  if(state==='hold') setHold(true);
+  else if(state==='paid'){ $('#payLinkField').hidden=true; $('#payGo').textContent='支払い済み・実行を開始'; $('#payInfo').textContent='支払いは確認済みです。ボタンを押すと実行を開始します（再送金は不要です）。'; }
+  else setTimeout(()=>$('#payLink').focus(),50);
 }
 let holdTimer=null, holdTries=0;
 function setHold(on){
@@ -2814,7 +2867,7 @@ function setHold(on){
   clearInterval(holdTimer); holdTimer=null; holdTries=0;
   if(on) holdTimer=setInterval(()=>{ if(!payOrder||payDead||$('#payPanel').hidden||++holdTries>45){ clearInterval(holdTimer); holdTimer=null; return; } if(!$('#payGo').disabled) $('#payGo').click(); },20000);
 }
-function closePay(){ clearInterval(holdTimer); holdTimer=null; payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
+function closePay(){ setTimeout(loadResume,300); clearInterval(holdTimer); holdTimer=null; payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
 $('#payCancel').addEventListener('click',()=>{ closePay(); show('input'); });
 $('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
 $('#payGo').addEventListener('click',async()=>{
@@ -2843,7 +2896,33 @@ $('#helpPanel').addEventListener('click',e=>{ if(e.target.id==='helpPanel') clos
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#helpPanel').hidden) closeHelp(); });
 
 /* ---------- 起動時 ---------- */
-refresh(); ping(); tabMore(); renderPresets(); renderHist();
+
+/* ---------- 未完了の注文の再開 ---------- */
+const STATE_JA={unpaid:'支払い待ち',hold:'保留中（解除待ち）',paid:'支払い済み・未開始'};
+async function loadResume(){
+  try{
+    const r=await fetch('/api/orders/mine',{cache:'no-store'}); if(!r.ok) return;
+    const j=await r.json(); const list=j.orders||[]; const box=$('#resumeList'); box.textContent='';
+    $('#resumePanel').hidden=!list.length;
+    list.forEach(o=>{
+      const row=el('div','rrow'); const d=new Date(o.created*1000);
+      row.append(el('span',null,(d.getMonth()+1)+'/'+d.getDate()+' '+clock(d)+'　'+Number(o.amount).toLocaleString('ja-JP')+'円　'+(STATE_JA[o.state]||o.state)));
+      const b=el('button','btn','支払い画面を開く'); b.type='button';
+      b.addEventListener('click',()=>openPay(o.order,o.amount,o.breakdown,o.skipped,o.state));
+      row.append(b); box.append(row);
+    });
+  }catch(e){}
+}
+$('#payCopy').addEventListener('click',async()=>{ const ok=await copyText($('#payOrderNo').textContent); toast(ok?'注文番号をコピーしました':'コピーできませんでした'); });
+$('#claimGo').addEventListener('click',async()=>{
+  const no=$('#claimNo').value.trim(); if(!no){ toast('注文番号を入れてください'); return; }
+  try{
+    const r=await fetch('/api/orders/'+encodeURIComponent(no)+'/claim',{method:'POST'}); const j=await r.json();
+    if(!r.ok){ toast(j.error||'再開できませんでした'); return; }
+    closeHelp(); $('#claimNo').value=''; loadResume(); openPay(j.order,j.amount,j.breakdown,j.skipped,j.state);
+  }catch(e){ toast('接続できませんでした'); }
+});
+refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
 </script></body></html>"""
