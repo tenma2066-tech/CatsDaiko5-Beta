@@ -334,11 +334,14 @@ def _ledger():
                 digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL,
                 state TEXT NOT NULL, created REAL NOT NULL
             )""")
-            for column in ("receiver TEXT", "last_status TEXT"):
+            for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER"):
                 try:
                     db.execute("ALTER TABLE links ADD COLUMN " + column)
                 except sqlite3.OperationalError:
-                    pass  # 追加済み
+                    continue  # 追加済み
+                if column.startswith("used"):
+                    # この列ができる前に支払い済みになったリンクは「使用済み」とみなす（使い回し防止）
+                    db.execute("UPDATE links SET used=1 WHERE state='paid'")
             if not github_runtime_store.enabled():
                 os.chmod(_LEDGER_FILE, 0o600)
             yield db
@@ -428,7 +431,7 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
             verified=_verify_link(body,amount)
             digest=hashlib.sha256(code.encode()).hexdigest()
             with _ledger() as db:
-                try: db.execute("INSERT INTO links(digest,order_id,state,created,receiver) VALUES(?,?,?,?,?)",(digest,purchase_id,"attempted",time.time(),verified["receiver"]))
+                try: db.execute("INSERT INTO links(digest,order_id,state,created,receiver,amount) VALUES(?,?,?,?,?,?)",(digest,purchase_id,"attempted",time.time(),verified["receiver"],amount))
                 except sqlite3.IntegrityError:
                     raise PayPayError("duplicate","このリンクまたは注文はすでに使用済みです。新しい送金リンクを作ってください。") from None
             return await _accept(session, account, code, verified, digest)
@@ -483,7 +486,7 @@ async def confirm_received(code: str, purchase_id: str, amount: int | None = Non
                 if got and expected and str(got) != str(expected):
                     with _ledger() as db:
                         db.execute("UPDATE links SET state='review' WHERE digest=?", (digest,))
-                    raise PayPayError("hold_failed", "このリンクは別のアカウントで受け取られています。管理者に連絡してください。")
+                    raise PayPayError("receiver_mismatch", "このリンクは別のアカウントで受け取られている可能性があります。管理者に連絡してください。")
                 with _ledger() as db:
                     db.execute("UPDATE links SET state='paid' WHERE digest=?", (digest,))
                 return digest
@@ -494,6 +497,35 @@ async def confirm_received(code: str, purchase_id: str, amount: int | None = Non
                 raise PayPayError("hold_failed", "このリンクは受け取れない状態になっています（取り消し・期限切れなど）。管理者に連絡してください。")
     # PENDING（金額不明）や未知の状態は、注文を無効にせず保留のままにする
     raise PayPayError("still_pending", "まだ受け取りが完了していません。少し待ってからもう一度お試しください。")
+
+
+def mark_used(code: str):
+    """このリンクの支払いで実行を開始した（以後、別の注文では使えない）。"""
+    if isinstance(code, str) and CODE_RE.fullmatch(code):
+        with _ledger() as db:
+            db.execute("UPDATE links SET used=1 WHERE digest=?", (hashlib.sha256(code.encode()).hexdigest(),))
+
+
+def adopt_link(code: str, new_purchase_id: str, amount: int):
+    """以前の注文（保留・停止のまま実行されなかったもの）で送られたリンクを、同じ金額の新しい注文に付け替える。
+    実行に使われたリンク、金額の違うリンクは付け替えない。呼び出し側で古い注文を無効にしておくこと。"""
+    if not isinstance(code, str) or not CODE_RE.fullmatch(code):
+        raise PayPayError("not_found", "確認できる送金リンクがありません。")
+    digest = hashlib.sha256(code.encode()).hexdigest()
+    with _ledger() as db:
+        row = db.execute("SELECT state, amount, used FROM links WHERE digest=?", (digest,)).fetchone()
+        if not row:
+            raise PayPayError("not_found", "この送金リンクの記録が見つかりません。")
+        if row["used"]:
+            raise PayPayError("duplicate", "このリンクはすでに実行に使われています。新しい送金リンクを作ってください。")
+        if row["amount"] is None:
+            raise PayPayError("needs_admin", "このリンクは以前の注文で使われています。お支払い済みの場合は、注文番号を管理者に伝えてください。")
+        if int(row["amount"]) != int(amount):
+            raise PayPayError("amount_mismatch", f"金額が違います（リンク {int(row['amount']):,}円／必要 {int(amount):,}円）。このリンクは {int(row['amount']):,}円 の注文で使えます。")
+        try:
+            db.execute("UPDATE links SET order_id=? WHERE digest=?", (new_purchase_id, digest))
+        except sqlite3.IntegrityError:
+            raise PayPayError("duplicate", "この注文には別の送金リンクが記録されています。") from None
 
 
 def link_diag(code: str) -> str:

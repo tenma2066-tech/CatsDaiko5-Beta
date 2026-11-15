@@ -1498,6 +1498,20 @@ def pay_order(order_id: str):
         _persist_orders()
 
 
+def _adopt_existing_link(order_id: str, order: dict) -> None:
+    code = order["link_code"]
+    with _orders_lock:
+        others = [(k, o) for k, o in _orders.items() if k != order_id and o.get("link_code") == code]
+        if any(o["state"] in ("started", "paying") for _, o in others):
+            raise paypay_gateway.PayPayError("duplicate", "このリンクはすでに別の注文で使用されています。新しい送金リンクを作ってください。")
+    paypay_gateway.adopt_link(code, order_id, order["amount"])
+    with _orders_lock:  # 付け替えに成功したら、古い注文は無効にする（二重に実行させない）
+        for k, o in others:
+            o["state"] = "dead"
+            o["link_code"] = None
+            o["diag"] = f"superseded {time.strftime('%m/%d %H:%M')}"
+
+
 def _pay_order(order_id: str):
     """PayPay送金リンクを受け取り、確認できたら実行を開始する。支払い済みなら再送不要で開始だけ再試行。"""
     data = request.get_json(silent=True) or {}
@@ -1524,7 +1538,15 @@ def _pay_order(order_id: str):
                 raw = str(data.get("link", ""))
                 order["link_code"] = paypay_gateway._normalize_link(raw) or order.get("link_code")
                 _persist_orders()  # 送金リンクを受け取る前に保存（途中で再起動しても同じリンクを再確認できる）
-                asyncio.run(paypay_gateway.receive_payment(raw, order["amount"], order_id))
+                try:
+                    asyncio.run(paypay_gateway.receive_payment(raw, order["amount"], order_id))
+                except paypay_gateway.PayPayError as dup:
+                    if dup.code != "duplicate" or not order.get("link_code"):
+                        raise
+                    # 以前の注文（保留・停止で実行されなかった）と同じリンク → この注文に付け替えて確認し直す
+                    _adopt_existing_link(order_id, order)
+                    mode = "recheck"
+                    asyncio.run(paypay_gateway.confirm_received(order["link_code"], order_id, order["amount"]))
             else:
                 asyncio.run(paypay_gateway.confirm_received(order.get("link_code"), order_id, order["amount"]))
         except paypay_gateway.PayPayError as exc:
@@ -1532,7 +1554,7 @@ def _pay_order(order_id: str):
             if not (mode == "recheck" and exc.code in WAITING):
                 _fail.setdefault("paypay:" + order_id, []).append(time.time())
             hold = bool(order.get("link_code")) and (exc.code in HOLDISH or (mode == "recheck" and exc.code in ("still_pending", "link_network", "link_check", "rate_limited", "paypay_unavailable")))
-            dead = exc.code in ("hold_failed", "not_found") and mode == "recheck"
+            dead = exc.code in ("hold_failed", "not_found", "receiver_mismatch") and mode == "recheck"
             with _orders_lock:
                 order["state"] = "dead" if dead else ("hold" if hold else "unpaid")
                 order["diag"] = f"{exc.code} {time.strftime('%m/%d %H:%M')}"
@@ -1553,6 +1575,10 @@ def _pay_order(order_id: str):
         with _orders_lock:
             order["state"] = "started"
             order["arguments"] = None
+        try:
+            paypay_gateway.mark_used(order.get("link_code"))
+        except Exception:
+            _log_orders.exception("mark_used failed")
         return body
     out = body.get_json()
     out["paid"] = True
@@ -1876,6 +1902,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .payerr[data-lv="wait"]{border-color:var(--line)}.payerr[data-lv="wait"] b{color:var(--ink)}
 .mbtns{display:flex;gap:8px;margin-top:12px}.mbtns .btn{flex:1;padding:12px 8px;font-size:15px}
 .mbtns .pri{background:var(--accent,#ffc42e);color:#17181c;font-weight:800;flex:2}
+.notice{border:2px solid var(--accent,#ffc42e);border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:14px;line-height:1.6}.notice ul{margin:6px 0 0;padding-left:1.2em}
 .howto{margin:0 0 8px;padding-left:1.3em;font-size:14px;line-height:1.7}
 .mbox details{border-top:1px solid var(--line);padding:8px 0;font-size:14px}.mbox summary{cursor:pointer;font-weight:700}.mbox details p{margin:6px 0 0;color:var(--muted)}
 .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:2px solid var(--line);
@@ -2156,6 +2183,16 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 <div class="modal" id="helpPanel" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
   <div class="mbox">
     <h2 id="helpTitle">使い方</h2>
+    <div class="notice" id="helpNotice">
+      <b>はじめに確認してください</b>
+      <ul>
+        <li>支払いはPayPayの<b>送金リンク</b>で、<b>表示金額ちょうど・パスコードなし</b>で作ってください。</li>
+        <li>PayPay側で<b>「保留」</b>になることがあります。その場合は<b>再送金せず</b>、PayPayアプリで保留を解除して、この画面を開いたままお待ちください。</li>
+        <li>支払い画面の<b>注文番号</b>を控えてください。画面を閉じても、その番号で再開できます。</li>
+        <li>完了後に出る<b>引継ぎコードと暗証番号</b>は必ず控えてください。</li>
+        <li>項目によってはBANなどの恐れがあります。<b>ご利用は自己責任</b>でお願いします。</li>
+      </ul>
+    </div>
     <ol class="howto">
       <li><b>引継ぎ情報を入れる</b>（新規アカウントなら空欄のまま）。</li>
       <li><b>項目を選ぶ</b>：アイテム・数量・キャラ・サブ・その他のタブから選びます。下のバーに金額が出ます。</li>
@@ -2178,7 +2215,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
     <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、入力タブの上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
       <div class="tools"><input type="text" id="claimNo" placeholder="注文番号" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn" id="claimGo">再開</button></div></details>
-    <div class="mbtns"><button class="btn pri" id="helpClose" type="button">閉じる</button></div>
+    <div class="mbtns"><button class="btn pri" id="helpClose" type="button">確認しました</button></div>
   </div>
 </div>
 <div class="toast" id="toast" hidden></div>
@@ -2863,7 +2900,7 @@ const PAY_MSG={
   already_received:['受け取り済みのリンクです','すでに使われたリンクです。新しいリンクを作ってください。'],
   link_cancelled:['リンクが取り消されています','新しい送金リンクを作ってください。'],
   not_pending:['受け取れない状態のリンクです','新しい送金リンクを作ってください。'],
-  duplicate:['使用済みのリンクです','同じリンクは使えません。新しいリンクを作ってください。'],
+  duplicate:['使用済みのリンクです','すでに実行に使われたリンクです。新しいリンクを作ってください。'],
   identity:['送金元を確認できません','自分宛て以外の、通常の送金リンクを使ってください。'],
   order_mismatch:['リンクの内容を確認できません','新しい送金リンクを作り直してください。'],
   link_incomplete:['リンク情報が不足しています','新しい送金リンクを作り直してください。'],
@@ -2887,6 +2924,8 @@ const PAY_MSG={
   started:['すでに開始済みです','「状況」タブを確認してください。'],
   busy:['支払いは完了しています','待機枠がいっぱいです。少し待って、もう一度ボタンを押してください（再送金は不要です）。'],
   start_failed:['支払いは完了しています','開始に失敗しました。もう一度ボタンを押してください（再送金は不要です）。'],
+  needs_admin:['以前の注文で使われたリンクです','お支払い済みの場合は、上の注文番号を管理者に伝えてください（再送金は不要です）。'],
+  receiver_mismatch:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。'],
   dead:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。確認が取れると、入力タブの「未完了の注文」から実行を開始できます（再送金は不要です）。'],
   internal:['予期しないエラー','PayPayアプリで送金状態を確認し、送金済みなら管理者に連絡してください。'],
 };
@@ -2978,6 +3017,7 @@ $('#claimGo').addEventListener('click',async()=>{
   }catch(e){ toast('接続できませんでした'); }
 });
 refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
+openHelp(); /* 開くたびに確認と使い方を表示 */
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
 </script></body></html>"""

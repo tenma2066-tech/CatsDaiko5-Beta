@@ -130,7 +130,7 @@ class HoldReleaseTests(unittest.TestCase):
         body["payload"]["receiver"]["externalId"] = "another-account"
         with self.assertRaises(G.PayPayError) as e:
             self.run_with(FakePayPay(gets=[body], posts=[]), G.confirm_received("abcDEF123456", "order-x", AMOUNT))
-        self.assertEqual(e.exception.code, "hold_failed")
+        self.assertEqual(e.exception.code, "receiver_mismatch")
 
     def test_unknown_status_keeps_waiting_and_is_recorded(self):
         self._held("order-u")
@@ -149,6 +149,23 @@ class HoldReleaseTests(unittest.TestCase):
         self._held("order-a")
         G.mark_paid_by_admin("abcDEF123456", "order-a")
         self.assertTrue(asyncio.run(G.confirm_received("abcDEF123456", "order-a", AMOUNT)))
+
+    def test_link_from_abandoned_order_can_move_to_new_order_once(self):
+        self._held("old-order")
+        with self.assertRaises(G.PayPayError) as e:  # 新しい注文で同じリンク → まず duplicate
+            self.run_with(FakePayPay(gets=[link_body()], posts=[]), G.receive_payment("abcDEF123456", AMOUNT, "new-order"))
+        self.assertEqual(e.exception.code, "duplicate")
+        with self.assertRaises(G.PayPayError) as e:  # 金額が違う注文には付け替えない
+            G.adopt_link("abcDEF123456", "new-order", AMOUNT + 25)
+        self.assertEqual(e.exception.code, "amount_mismatch")
+        G.adopt_link("abcDEF123456", "new-order", AMOUNT)
+        self.assertTrue(self.run_with(FakePayPay(gets=[link_body("SUCCESS")], posts=[]), G.confirm_received("abcDEF123456", "new-order", AMOUNT)))
+        with self.assertRaises(G.PayPayError):  # 古い注文からはもう確認できない
+            asyncio.run(G.confirm_received("abcDEF123456", "old-order", AMOUNT))
+        G.mark_used("abcDEF123456")
+        with self.assertRaises(G.PayPayError) as e:  # 実行に使ったリンクは使い回せない
+            G.adopt_link("abcDEF123456", "third-order", AMOUNT)
+        self.assertEqual(e.exception.code, "duplicate")
 
     def test_amount_changed_is_rejected_on_recheck(self):
         fake = FakePayPay(gets=[link_body()], posts=[HOLD_REPLY])

@@ -10,9 +10,12 @@ class OrderFlow(unittest.TestCase):
     def setUp(self):
         self.p = patch.object(A, "PAYMENTS_ENABLED", True)
         self.p.start()
+        self.o = patch.dict(A._orders, {}, clear=True)  # テストごとに注文を空にする
+        self.o.start()
         self.c = A.app.test_client()
 
     def tearDown(self):
+        self.o.stop()
         self.p.stop()
 
     def order(self, c=None):
@@ -131,6 +134,34 @@ class OrderFlow(unittest.TestCase):
         self.assertEqual(A._orders[j["order"]]["state"], "paid")
         with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JR")):
             self.assertEqual(self.c.post(f"/api/orders/{j['order']}/pay", json={}).get_json()["job"], "JR")
+
+    def test_same_link_in_new_order_takes_over_stuck_order(self):
+        old = self.order()
+        with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("temporary_hold", "保留"))):
+            self.c.post(f"/api/orders/{old['order']}/pay", json={"link": self.LINK})
+        new = self.order()
+        with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("duplicate", "dup"))), \
+             patch.object(G, "adopt_link") as adopt, patch.object(G, "confirm_received", AsyncMock(return_value="d")), \
+             patch.object(G, "mark_used") as used, \
+             patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JN")):
+            r = self.c.post(f"/api/orders/{new['order']}/pay", json={"link": self.LINK})
+            self.assertEqual(r.get_json().get("job"), "JN", r.get_json())
+            adopt.assert_called_once()
+            used.assert_called_once()
+            # 古い注文は無効になり、二重には実行できない
+            self.assertEqual(self.c.post(f"/api/orders/{old['order']}/pay", json={}).status_code, 409)
+
+    def test_link_of_started_order_cannot_be_reused(self):
+        first = self.order()
+        with patch.object(G, "receive_payment", AsyncMock(return_value="d")), patch.object(G, "mark_used"), \
+             patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="J1")):
+            self.c.post(f"/api/orders/{first['order']}/pay", json={"link": self.LINK})
+        second = self.order()
+        with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("duplicate", "dup"))), \
+             patch.object(G, "adopt_link") as adopt, patch.object(A, "_start_job") as start:
+            r = self.c.post(f"/api/orders/{second['order']}/pay", json={"link": self.LINK})
+        self.assertEqual((r.status_code, r.get_json()["code"]), (402, "duplicate"))
+        adopt.assert_not_called(); start.assert_not_called()
 
     def test_hold_failed_kills_order(self):
         j = self.order()
