@@ -360,6 +360,33 @@ async def _fresh_account():
         _save_account(account)
     return account
 
+async def _accept(session, account, code, verified, digest):
+    """受け取りPOST。成功で digest を返す。保留/不明は台帳を更新して PayPayError。自動で再試行しない。"""
+    payload={"requestAt":verified["request_at"],"orderId":verified["order_id"],"requestId":str(uuid4()),
+             "senderChannelUrl":verified["chat_id"],"senderMessageId":verified["message_id"],
+             "verificationCode":code,"client_uuid":account["uuid"],
+             "iosMinimumVersion":"3.45.0","androidMinimumVersion":"3.45.0"}
+    try:
+        async with session.post(LINK_ACCEPT_ENDPOINT,json=payload) as r:
+            status_code=r.status
+            try: reply=await r.json(content_type=None)
+            except Exception: reply=None
+    except (aiohttp.ClientError,asyncio.TimeoutError):
+        with _ledger() as db: db.execute("UPDATE links SET state='review' WHERE digest=?",(digest,))
+        raise PayPayError("accept_uncertain","受取結果が不明です。同じリンクを再送せず、管理者へお問い合わせください。") from None
+    ok=(status_code==200 and isinstance(reply,dict) and isinstance(reply.get("header"),dict)
+        and reply["header"].get("resultCode")=="S0000" and isinstance(reply.get("payload"),dict)
+        and reply["payload"].get("orderStatus")=="COMPLETED" and reply.get("error") is None)
+    if ok:
+        with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
+        return digest
+    hold_code = _provider_hold_code(reply)
+    state="pending" if hold_code else "review"
+    with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
+    raise PayPayError("temporary_hold" if state=="pending" else "accept_unconfirmed",
+                      "PayPay側で一時保留です。状態を確認するまで再送金しないでください。" if state=="pending"
+                      else "受取結果を確定できません。再購入せず管理者へお問い合わせください。")
+
 async def receive_payment(raw_link: str, amount: int, purchase_id: str):
     code = _normalize_link(raw_link)
     if not code: raise _link_problem(raw_link)
@@ -390,35 +417,14 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
                 try: db.execute("INSERT INTO links(digest,order_id,state,created) VALUES(?,?,?,?)",(digest,purchase_id,"attempted",time.time()))
                 except sqlite3.IntegrityError:
                     raise PayPayError("duplicate","このリンクまたは注文はすでに使用済みです。新しい送金リンクを作ってください。") from None
-            payload={"requestAt":verified["request_at"],"orderId":verified["order_id"],"requestId":str(uuid4()),
-                     "senderChannelUrl":verified["chat_id"],"senderMessageId":verified["message_id"],
-                     "verificationCode":code,"client_uuid":account["uuid"],
-                     "iosMinimumVersion":"3.45.0","androidMinimumVersion":"3.45.0"}
-            try:
-                async with session.post(LINK_ACCEPT_ENDPOINT,json=payload) as r:
-                    status_code=r.status
-                    try: reply=await r.json(content_type=None)
-                    except Exception: reply=None
-            except (aiohttp.ClientError,asyncio.TimeoutError):
-                with _ledger() as db: db.execute("UPDATE links SET state='review' WHERE digest=?",(digest,))
-                raise PayPayError("accept_uncertain","受取結果が不明です。同じリンクを再送せず、管理者へお問い合わせください。") from None
-            ok=(status_code==200 and isinstance(reply,dict) and isinstance(reply.get("header"),dict)
-                and reply["header"].get("resultCode")=="S0000" and isinstance(reply.get("payload"),dict)
-                and reply["payload"].get("orderStatus")=="COMPLETED" and reply.get("error") is None)
-            if ok:
-                with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
-                return digest
-            hold_code = _provider_hold_code(reply)
-            state="pending" if hold_code else "review"
-            with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
-            raise PayPayError("temporary_hold" if state=="pending" else "accept_unconfirmed",
-                              "PayPay側で一時保留です。状態を確認するまで再送金しないでください。" if state=="pending"
-                              else "受取結果を確定できません。再購入せず管理者へお問い合わせください。")
+            return await _accept(session, account, code, verified, digest)
 
 
-async def confirm_received(code: str, purchase_id: str):
-    """保留・結果不明になった注文について、同じリンクが実際に受け取り済みか再確認する。
-    新しいリンクは受け付けない（元のリンクが COMPLETED になったときだけ支払い済みにする）。"""
+async def confirm_received(code: str, purchase_id: str, amount: int | None = None):
+    """保留・結果不明になった注文の再確認。新しいリンクは受け付けず、その注文で最初に送られたリンクだけを扱う。
+    - COMPLETED（受け取り済み）→ 支払い済み
+    - PENDING（送金者が保留を解除した等で、まだ受け取っていない）→ 金額等を再検証してもう一度受け取る
+    """
     if not isinstance(code, str) or not CODE_RE.fullmatch(code):
         raise PayPayError("not_found", "確認できる送金リンクがありません。")
     digest = hashlib.sha256(code.encode()).hexdigest()
@@ -437,22 +443,29 @@ async def confirm_received(code: str, purchase_id: str):
         async with aiohttp.ClientSession(timeout=timeout, headers=_headers(referer), cookies={"token": account["session_cookie"]}) as session:
             try:
                 async with session.get(LINK_CHECK_ENDPOINT, params={"verificationCode": code, "client_uuid": account["uuid"]}) as r:
+                    if r.status == 429:
+                        raise PayPayError("rate_limited", "PayPayが混み合っています。しばらくしてからもう一度お試しください。")
+                    if r.status >= 500:
+                        raise PayPayError("paypay_unavailable", "PayPay側で一時的なエラーが起きています。しばらくしてからお試しください。")
                     if r.status != 200:
                         raise PayPayError("link_check", f"PayPayリンクを確認できませんでした（応答 {r.status}）。")
                     body = await r.json(content_type=None)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 raise PayPayError("link_network", "PayPayリンク確認で通信エラーが発生しました。") from None
-    header = body.get("header") if isinstance(body, dict) else None
-    payload = body.get("payload") if isinstance(body, dict) else None
-    status = payload.get("orderStatus") if isinstance(payload, dict) else None
-    if not isinstance(header, dict) or header.get("resultCode") != "S0000":
-        raise PayPayError("invalid_link", "PayPayリンクを確認できませんでした。")
-    if status == "COMPLETED":
-        with _ledger() as db:
-            db.execute("UPDATE links SET state='paid' WHERE digest=?", (digest,))
-        return digest
-    if status == "PENDING":
-        raise PayPayError("still_pending", "まだ受け取りが完了していません。PayPayアプリで該当の送金を受け取って（保留の解除）から、もう一度押してください。")
+            header = body.get("header") if isinstance(body, dict) else None
+            payload = body.get("payload") if isinstance(body, dict) else None
+            status = payload.get("orderStatus") if isinstance(payload, dict) else None
+            if not isinstance(header, dict) or header.get("resultCode") != "S0000":
+                raise PayPayError("invalid_link", "PayPayリンクを確認できませんでした。")
+            if status == "COMPLETED":
+                with _ledger() as db:
+                    db.execute("UPDATE links SET state='paid' WHERE digest=?", (digest,))
+                return digest
+            if status == "PENDING" and amount is not None:
+                verified = _verify_link(body, amount)  # 金額・期限・送金者などを最初と同じ基準で再確認
+                return await _accept(session, account, code, verified, digest)
+            if status == "PENDING":
+                raise PayPayError("still_pending", "まだ受け取りが完了していません。少し待ってからもう一度お試しください。")
     raise PayPayError("hold_failed", "このリンクは受け取れない状態になっています（取り消し・期限切れなど）。管理者に連絡してください。")
 
 

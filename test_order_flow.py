@@ -69,6 +69,11 @@ class OrderFlow(unittest.TestCase):
         with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("still_pending", "未"))):
             r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
         self.assertEqual((r.status_code, r.get_json()["hold"], r.get_json()["code"]), (402, True, "still_pending"))
+        # 解除待ちの確認を何度しても「失敗が続いた」でロックされない
+        with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("still_pending", "未"))):
+            for _ in range(8):
+                r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        self.assertEqual(r.get_json()["code"], "still_pending")
         # 受け取り済み → 開始（新しいリンクもreceive_paymentも使わない）
         with patch.object(G, "confirm_received", AsyncMock(return_value="d")) as cr, \
              patch.object(G, "receive_payment", AsyncMock()) as rp, \

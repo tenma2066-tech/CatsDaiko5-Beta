@@ -1436,7 +1436,7 @@ def _pay_order(order_id: str):
         if order["state"] == "started":
             return jsonify(error="この注文はすでに開始済みです。「状況」タブを確認してください。", code="started"), 409
         if order["state"] in ("unpaid", "hold"):
-            if _too_many_fails("paypay:" + order_id):
+            if order["state"] == "unpaid" and _too_many_fails("paypay:" + order_id):
                 return jsonify(error="失敗が続いたので、10分ほど待ってください。", code="too_many_fails"), 429
             mode = "link" if order["state"] == "unpaid" else "recheck"
             order["state"] = "paying"
@@ -1452,9 +1452,11 @@ def _pay_order(order_id: str):
                 _persist_orders()  # 送金リンクを受け取る前に保存（途中で再起動しても同じリンクを再確認できる）
                 asyncio.run(paypay_gateway.receive_payment(raw, order["amount"], order_id))
             else:
-                asyncio.run(paypay_gateway.confirm_received(order.get("link_code"), order_id))
+                asyncio.run(paypay_gateway.confirm_received(order.get("link_code"), order_id, order["amount"]))
         except paypay_gateway.PayPayError as exc:
-            _fail.setdefault("paypay:" + order_id, []).append(time.time())
+            WAITING = ("still_pending", "temporary_hold", "link_network", "rate_limited", "paypay_unavailable")
+            if not (mode == "recheck" and exc.code in WAITING):
+                _fail.setdefault("paypay:" + order_id, []).append(time.time())
             hold = bool(order.get("link_code")) and (exc.code in HOLDISH or (mode == "recheck" and exc.code in ("still_pending", "link_network", "link_check", "rate_limited", "paypay_unavailable")))
             dead = exc.code in ("hold_failed", "not_found") and mode == "recheck"
             with _orders_lock:
@@ -2074,7 +2076,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     </ul>
     <h3>よくある質問</h3>
     <details><summary>リンクがエラーになる</summary><p>金額が違う・パスコード付き・期限切れ・受け取り済みのリンクは使えません。金額を確認して、新しいリンクを作り直してください。</p></details>
-    <details><summary>送金したのに実行されない</summary><p>結果が確認できない場合は、二重払いを防ぐため注文を止めます。同じリンクを送り直さず、PayPayアプリで送金の状態を確認し、管理者に連絡してください。</p></details>
+    <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した側がPayPayアプリで保留を解除すると、画面を開いたままなら自動で受け取って実行します（「今すぐ確認する」でもOK）。同じリンクを送り直したり、再送金したりしないでください。</p></details>
     <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
     <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
     <div class="mbtns"><button class="btn pri" id="helpClose" type="button">閉じる</button></div>
@@ -2776,8 +2778,8 @@ const PAY_MSG={
   cookie_missing:['現在、決済を受け付けられません','受取側の接続を確認できません。管理者にお知らせください。'],
   accept_uncertain:['受け取り結果が不明です','同じリンクは送り直さず、PayPayアプリで該当の送金を受け取ったら下のボタンで確認してください。'],
   accept_unconfirmed:['受け取りを確定できません','PayPayアプリで該当の送金を受け取ったら、下のボタンで確認してください（再送金は不要です）。'],
-  temporary_hold:['PayPay側で一時保留になりました','PayPayアプリで該当の送金を「受け取る」と解除できます。受け取ったら下のボタンを押してください（再送金は不要です）。'],
-  still_pending:['まだ受け取られていません','PayPayアプリで該当の送金を受け取ってから、もう一度ボタンを押してください。'],
+  temporary_hold:['PayPay側で一時保留になりました','送金した側がPayPayアプリで保留を解除すると、自動で受け取って実行します。この画面を開いたままお待ちください（再送金は不要です）。'],
+  still_pending:['保留の解除待ちです','送金した側がPayPayアプリで保留を解除すると、自動で受け取って実行します。この画面を開いたままお待ちください。'],
   hold_failed:['受け取れない状態です','リンクが取り消し・期限切れになっています。管理者に連絡してください。'],
   not_found:['送金記録が見つかりません','管理者に連絡してください。'],
   too_many_fails:['失敗が続いています','10分ほど待ってからお試しください。'],
@@ -2805,11 +2807,14 @@ function openPay(id,amount,breakdown,skipped){
   $('#payGo').disabled=false; document.body.style.overflow='hidden';
   setTimeout(()=>$('#payLink').focus(),50);
 }
+let holdTimer=null, holdTries=0;
 function setHold(on){
-  $('#payLinkField').hidden=on; $('#payGo').textContent=on?'受け取りを済ませたので確認する':'送金リンクを送って実行';
-  if(on) $('#payInfo').textContent='保留中です。PayPayアプリで該当の送金を「受け取る」（保留の解除）と、ここで確認して自動で実行します。同じリンクを送り直す必要はありません。';
+  $('#payLinkField').hidden=on; $('#payGo').textContent=on?'今すぐ確認する':'送金リンクを送って実行';
+  if(on) $('#payInfo').textContent='保留中です。送金した側がPayPayアプリで保留を解除すると、ここで自動的に受け取って実行します（20秒ごとに確認・この画面は開いたままにしてください）。同じリンクを送り直す必要はありません。';
+  clearInterval(holdTimer); holdTimer=null; holdTries=0;
+  if(on) holdTimer=setInterval(()=>{ if(!payOrder||payDead||$('#payPanel').hidden||++holdTries>45){ clearInterval(holdTimer); holdTimer=null; return; } if(!$('#payGo').disabled) $('#payGo').click(); },20000);
 }
-function closePay(){ payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
+function closePay(){ clearInterval(holdTimer); holdTimer=null; payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
 $('#payCancel').addEventListener('click',()=>{ closePay(); show('input'); });
 $('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
 $('#payGo').addEventListener('click',async()=>{
