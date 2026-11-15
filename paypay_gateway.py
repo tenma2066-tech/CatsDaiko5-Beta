@@ -303,7 +303,9 @@ def _verify_link(body, amount):
     if not all(isinstance(msg.get(k), str) and msg[k] for k in ("messageId", "chatRoomId")) or not _parse_time(data.get("transactionAt")):
         raise PayPayError("link_incomplete", "送金リンクの取引情報が不足しています。")
     return {"order_id":info["orderId"],"message_id":msg["messageId"],"chat_id":msg["chatRoomId"],
-            "request_at":data["transactionAt"],"receiver":str(receiver["externalId"])}
+            "request_at":data["transactionAt"],"receiver":str(receiver["externalId"]),
+            "sender_id":str(sender["externalId"])[:80],
+            "sender_name":(sender.get("displayName") if isinstance(sender.get("displayName"), str) else "")[:40]}
 
 def _provider_hold_code(body):
     if not isinstance(body, dict):
@@ -334,7 +336,11 @@ def _ledger():
                 digest TEXT PRIMARY KEY, order_id TEXT UNIQUE NOT NULL,
                 state TEXT NOT NULL, created REAL NOT NULL
             )""")
-            for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER"):
+            db.execute("""CREATE TABLE IF NOT EXISTS history (
+                order_id TEXT PRIMARY KEY, created REAL NOT NULL, updated REAL NOT NULL, user_id TEXT,
+                amount INTEGER, state TEXT, summary TEXT, diag TEXT
+            )""")
+            for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER", "sender_id TEXT", "sender_name TEXT"):
                 try:
                     db.execute("ALTER TABLE links ADD COLUMN " + column)
                 except sqlite3.OperationalError:
@@ -431,7 +437,7 @@ async def receive_payment(raw_link: str, amount: int, purchase_id: str):
             verified=_verify_link(body,amount)
             digest=hashlib.sha256(code.encode()).hexdigest()
             with _ledger() as db:
-                try: db.execute("INSERT INTO links(digest,order_id,state,created,receiver,amount) VALUES(?,?,?,?,?,?)",(digest,purchase_id,"attempted",time.time(),verified["receiver"],amount))
+                try: db.execute("INSERT INTO links(digest,order_id,state,created,receiver,amount,sender_id,sender_name) VALUES(?,?,?,?,?,?,?,?)",(digest,purchase_id,"attempted",time.time(),verified["receiver"],amount,verified["sender_id"],verified["sender_name"]))
                 except sqlite3.IntegrityError:
                     raise PayPayError("duplicate","このリンクまたは注文はすでに使用済みです。新しい送金リンクを作ってください。") from None
             return await _accept(session, account, code, verified, digest)
@@ -526,6 +532,34 @@ def adopt_link(code: str, new_purchase_id: str, amount: int):
             db.execute("UPDATE links SET order_id=? WHERE digest=?", (new_purchase_id, digest))
         except sqlite3.IntegrityError:
             raise PayPayError("duplicate", "この注文には別の送金リンクが記録されています。") from None
+
+
+def history_upsert(rows):
+    """取引履歴（注文ごとに1行）。引継ぎコードなどの秘密は入れない。"""
+    if not rows:
+        return
+    now = time.time()
+    with _ledger() as db:
+        for r in rows:
+            db.execute("""INSERT INTO history(order_id,created,updated,user_id,amount,state,summary,diag) VALUES(?,?,?,?,?,?,?,?)
+                          ON CONFLICT(order_id) DO UPDATE SET updated=excluded.updated, user_id=excluded.user_id, amount=excluded.amount,
+                          state=excluded.state, summary=excluded.summary, diag=excluded.diag
+                          WHERE history.state IS NOT excluded.state OR history.diag IS NOT excluded.diag OR history.user_id IS NOT excluded.user_id""",
+                       (r["order_id"], r["created"], now, r["user_id"], r["amount"], r["state"], r["summary"], r["diag"]))
+
+
+def history_list(limit: int = 200, user_id: str = ""):
+    with _ledger() as db:
+        sql = """SELECT h.order_id, h.created, h.updated, h.user_id, h.amount, h.state, h.summary, h.diag,
+                        l.sender_id, l.sender_name, l.state AS pay_state, l.last_status
+                 FROM history h LEFT JOIN links l ON l.order_id = h.order_id"""
+        args = []
+        if user_id:
+            sql += " WHERE h.user_id = ? OR l.sender_id = ?"
+            args += [user_id, user_id]
+        sql += " ORDER BY h.created DESC LIMIT ?"
+        args.append(int(limit))
+        return [dict(r) for r in db.execute(sql, args).fetchall()]
 
 
 def link_diag(code: str) -> str:
