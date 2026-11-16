@@ -291,6 +291,28 @@ class OrderFlow(unittest.TestCase):
             A._start_job(job, ("", "", ["XP"], [], [], {}, [], {}, False, False, False), None)
         self.assertEqual((job["status"], job["log"]), ("error", ["old"]))
 
+    def test_drain_makes_pay_wait_and_needs_admin_token(self):
+        j = self.order()
+        with patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(A, "_drain_until", 0.0):
+            self.assertEqual(self.c.post("/api/drain", data={"token": "wrong"}).status_code, 403)
+            self.assertTrue(self.c.post("/api/drain", data={"token": "adm"}).get_json()["draining"])
+            self.assertTrue(self.c.get("/api/state").get_json()["draining"])
+            with patch.object(G, "receive_payment", AsyncMock()) as rp:
+                r = self.c.post(f"/api/orders/{j['order']}/pay", json={"link": self.LINK})
+            self.assertEqual((r.status_code, r.get_json()["code"]), (503, "updating"))
+            rp.assert_not_awaited()
+            self.assertEqual(A._orders[j["order"]]["state"], "unpaid")  # 注文はそのまま
+            self.assertEqual(self.c.post("/run", json={"items": ["XP"]}).status_code, 200)  # 注文の作成はできる
+            self.assertFalse(self.c.post("/api/drain", data={"token": "adm", "off": "1"}).get_json()["draining"])
+
+    def test_blocked_link_on_recheck_keeps_hold(self):
+        j = self.order()
+        A._orders[j["order"]].update(state="hold", link_code="abcDEF123456")
+        with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("temporary_hold", "保留"))):
+            for _ in range(7):
+                r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        self.assertEqual((A._orders[j["order"]]["state"], r.get_json()["hold"]), ("hold", True))
+
     def test_hold_failed_kills_order(self):
         j = self.order()
         with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("accept_uncertain", "不明"))):

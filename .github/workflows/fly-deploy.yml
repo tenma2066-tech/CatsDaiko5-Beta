@@ -29,18 +29,45 @@ jobs:
           add SECRET_KEY "$(openssl rand -hex 32)"
           add PAYPAY_ENCRYPTION_KEY "$(openssl rand 32 | base64 | tr '+/' '-_')"
           [ -z "$ADMIN_PASSWORD" ] || printf '%s' "$ADMIN_PASSWORD" | flyctl secrets set "ADMIN_PASSWORD=$(cat)" -a "$APP" --stage
-      - name: Wait until no job or payment is in progress
-        # デプロイ（再起動）で実行中の処理を切ると、引継ぎコードの発行途中でデータを失う恐れがある。
-        # 実行中・待機中のジョブと決済確認中の注文がなくなるまで待つ（最大25分。超えたら警告して続行）。
+      - name: Build image first (site keeps running)
+        # 時間のかかるビルドを先に済ませ、入れ替え（再起動）の時間を最短にする。
         run: |
           APP=$(sed -n 's/^app *= *"\([^"]*\)".*/\1/p' fly.toml | head -1)
-          URL="https://$APP.fly.dev/api/state"
-          for i in $(seq 1 100); do
-            S=$(curl -fsS -m 10 "$URL" 2>/dev/null) || { echo "state unavailable (first deploy or down) - continue"; exit 0; }
+          LABEL="deploy-${GITHUB_SHA::12}"
+          if flyctl deploy --build-only --push --remote-only --image-label "$LABEL"; then
+            echo "IMAGE=registry.fly.io/$APP:$LABEL" >> "$GITHUB_ENV"
+          else
+            echo "::warning::先行ビルドに失敗。通常のデプロイに切り替えます。"
+          fi
+      - name: Pause new runs, then wait until nothing is in progress
+        # デプロイ（再起動）で実行中の処理を切ると、引継ぎコードの発行途中でデータを失う恐れがある。
+        # 1) 新しい決済確認・実行の開始を待たせる（利用者の画面は「アップデート中」と表示して自動で再試行する）
+        # 2) 実行中・待機中のジョブと決済確認中の注文がなくなるまで待つ（最大12分。超えたら警告して続行）
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          APP=$(sed -n 's/^app *= *"\([^"]*\)".*/\1/p' fly.toml | head -1)
+          BASE="https://$APP.fly.dev"
+          curl -fsS -m 10 -X POST "$BASE/api/drain" --data-urlencode "token=$ADMIN_PASSWORD" || echo "drain not available (older version) - continue"
+          echo
+          for i in $(seq 1 48); do
+            S=$(curl -fsS -m 10 "$BASE/api/state" 2>/dev/null) || { echo "state unavailable (first deploy or down) - continue"; exit 0; }
             N=$(echo "$S" | python3 -c "import sys,json;d=json.load(sys.stdin);print(int(d.get('running_jobs',0))+int(d.get('queued_jobs',0))+int(d.get('paying_orders',0)))")
             if [ "$N" = "0" ]; then echo "idle - deploying"; exit 0; fi
-            echo "busy ($N) - waiting... ($i/100)"; sleep 15
+            echo "busy ($N) - waiting... ($i/48)"; sleep 15
           done
-          echo "::warning::25分待っても処理中のままでした。デプロイを続行します。"
+          echo "::warning::12分待っても処理中のままでした。デプロイを続行します。"
       - name: Deploy
-        run: flyctl deploy --ha=false --remote-only
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          APP=$(sed -n 's/^app *= *"\([^"]*\)".*/\1/p' fly.toml | head -1)
+          if [ -n "${IMAGE:-}" ]; then
+            flyctl deploy --image "$IMAGE" --ha=false && exit 0
+            echo "::warning::イメージ指定のデプロイに失敗。通常のデプロイを試します。"
+          fi
+          if ! flyctl deploy --ha=false --remote-only; then
+            # 失敗したら、待たせていた実行を再開させてから失敗として終わる
+            curl -fsS -m 10 -X POST "https://$APP.fly.dev/api/drain" --data-urlencode "token=$ADMIN_PASSWORD" --data-urlencode "off=1" || true
+            exit 1
+          fi

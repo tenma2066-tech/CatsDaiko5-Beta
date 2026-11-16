@@ -1173,7 +1173,7 @@ def admin():
             orders.append({"id": k, "uid": v.get("uid") or _uid(v["owner"]), "summary": v.get("summary", ""), "amount": v["amount"], "state": v["state"], "state_ja": names.get(v["state"], v["state"]),
                            "created": time.strftime("%m/%d %H:%M", time.localtime(v["created"])),
                            "diag": v.get("diag", ""), "ledger": paypay_gateway.link_diag(v.get("link_code") or ""),
-                           "has_link": bool(v.get("link_code"))})
+                           "has_link": bool(v.get("link_code")), "superseded": str(v.get("diag", "")).startswith("superseded")})
     history, hist_user = [], (request.args.get("user", "") or "").strip()[:80]
     if unlocked:
         _reconcile_orders()
@@ -1339,6 +1339,31 @@ def index():
     )
 
 
+_drain_until = 0.0
+
+
+def _draining() -> bool:
+    """アップデート直前。新しい決済確認・実行の開始を少し待ってもらう（画面側が自動で再試行する）。"""
+    return time.time() < _drain_until
+
+
+def _updating_response():
+    resp = jsonify(error="ただいまアップデート中です。数十秒〜数分で自動的に続きます。", code="updating")
+    resp.headers["Retry-After"] = "5"
+    return resp, 503
+
+
+@app.post("/api/drain")
+def api_drain():
+    """デプロイ用: 管理者パスコードで呼ぶと、15分間（再起動まで）新しい実行の開始を待たせる。"""
+    global _drain_until
+    token = request.form.get("token", "")
+    if not ADMIN_PASSWORD or not hmac.compare_digest(token.encode(), ADMIN_PASSWORD.encode()):
+        return jsonify(error="forbidden"), 403
+    _drain_until = 0.0 if request.form.get("off") else time.time() + 900
+    return jsonify(ok=True, draining=_draining())
+
+
 def _count_paying() -> int:
     with _orders_lock:
         return sum(1 for o in _orders.values() if o["state"] in ("paying", "starting"))
@@ -1361,7 +1386,7 @@ def api_state():
         started_at=int(_started_at),
         # busy/active_jobs intentionally mean real worker jobs only.
         busy=parallel["running_jobs"] > 0,
-        paying_orders=_count_paying(),  # 決済確認中の注文数（デプロイ前の待ち合わせに使う）
+        paying_orders=_count_paying(), draining=_draining(),  # 決済確認中の注文数（デプロイ前の待ち合わせに使う）
         **parallel,
         warm_cache=dict(_warm_cache),
         catalog_version=_names.get("version"),
@@ -1516,6 +1541,8 @@ def run():
             if transfer_key in _active_transfers:
                 return jsonify(error="この引継ぎコードの処理はすでに実行中です。完了までお待ちください。"), 409
     if not PAYMENTS_ENABLED:
+        if _draining():
+            return _updating_response()
         return _start_job(job, arguments, transfer_key)
     _gc_orders()
     _reconcile_orders()
@@ -1649,6 +1676,8 @@ def _adopt_existing_link(order_id: str, order: dict) -> None:
 def _pay_order(order_id: str):
     """PayPay送金リンクを受け取り、確認できたら実行を開始する。支払い済みなら再送不要で開始だけ再試行。"""
     data = request.get_json(silent=True) or {}
+    if _draining():
+        return _updating_response()
     with _orders_lock:
         order = _orders.get(order_id)
         if not order or order["owner"] != _owner():
@@ -1811,7 +1840,9 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <b>{{ o.state_ja }}</b>　{{ o.amount }}円　{{ o.created }}　USERID: <a href="/admin?user={{ o.uid }}"><code>{{ o.uid }}</code></a><br>
 <small>{{ o.summary }}<br>注文番号: <code>{{ o.id }}</code><br>最後の結果: {{ o.diag or "-" }}{% if o.ledger %}　／　PayPay: {{ o.ledger }}{% endif %}{% if not o.has_link %}　／　リンク未送信{% endif %}</small>
 <form method="post" style="margin:.3rem 0"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="order" value="{{ o.id }}">
-{% if o.state != "paid" %}<button name="action" value="order_paid" onclick="return confirm('PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？')">支払い済みにする</button>{% endif %}
+{% if o.superseded %}<p class="msg">この注文の支払いは、同じ利用者の新しい注文に引き継ぎ済みです。支払い済みにしないでください（二重に実行されます）。</p>
+{% elif o.state != "paid" %}{% if not o.has_link %}<p class="msg">この注文には送金リンクの記録がありません（未払いの可能性が高いです）。</p>{% endif %}
+<button name="action" value="order_paid" onclick="return confirm('{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）')">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
 {% if o.state == "dead" %}<button name="action" value="order_hold">保留に戻す（再確認させる）</button>{% endif %}
 {% if o.state != "dead" %}<button name="action" value="order_dead" onclick="return confirm('この注文を停止しますか？')">停止する</button>{% endif %}
 </form></div>
@@ -2051,6 +2082,9 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 
 
 .tab.locked{opacity:.4;cursor:not-allowed}
+.updbanner{position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top,0px));z-index:40;max-width:616px;margin:0 auto;background:var(--accent);color:#17181c;border:2px solid #17181c;border-radius:14px;box-shadow:0 4px 0 #17181c;padding:10px 14px;font-size:13.5px;line-height:1.5}
+.updbanner b{display:block;font-size:15px}
+.updbanner[hidden]{display:none}
 .locknote{border:2px solid var(--accent,#ffc42e);border-radius:10px;padding:10px 12px;margin:0 0 10px;font-size:14px;font-weight:700;line-height:1.5}
 #doneCodes .code{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
 #doneCodes .code div{flex:1;min-width:0}#doneCodes small{display:block;color:var(--muted);font-size:12px}
@@ -2314,6 +2348,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <h2>ご注文内容</h2>
       <p class="sub">内容と金額を確認して、下の「お支払いへ進む」を押してください。</p>
       <div id="cart"></div>
+      <div class="err" id="orderErr" role="alert"></div>
     </div>
     <div class="panel">
       <h2>実行前チェック</h2>
@@ -2505,6 +2540,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <div class="mbtns"><button class="btn pri" id="doneClose" type="button" disabled>閉じる</button></div>
   </div>
 </div>
+<div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -2535,6 +2571,7 @@ function show(t){
     $('#t-'+k).setAttribute('aria-selected',on?'true':'false');
   });
   curView=t; if(MENU.includes(t)) lastMenu=t;
+  if(typeof saveDraft==='function') saveDraft();
   const cur=stepOf(t);
   $$('.step').forEach(b=>{
     const n=+b.dataset.n;
@@ -2931,6 +2968,7 @@ function renderCart(pc,qm){
 function renderExtras(pc,qm,total,bm){
   renderChecks(pc,qm,total);
   try{ renderCart(pc,qm); }catch(e){}
+  saveDraft();
   syncModes(); updateBar();
   if(!pc.err) renderChips(pc.nums);
   renderResults();
@@ -3120,7 +3158,7 @@ async function poll(){
     if(j.status!=='running'&&j.status!=='queued'){
       stopJob(); setTimeout(loadResume,1500);
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
-      if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); }
+      if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); $('#transfer').value=''; $('#confirm').value=''; refresh(); }
       if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① アカウント」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'バン保証の検査が完了しました'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
@@ -3192,7 +3230,7 @@ function currentPreset(name){
   return {name, items:picked('items'), subs:picked('subs'), others:picked('others'), qty:qtyMap(),
           chars:$('#chars').value, cats, safe:$('#safe').checked, dry:$('#dry').checked};
 }
-function applyPreset(p){
+function applyPreset(p,silent){
   ['items','subs','others'].forEach(g=>$$('input[name='+g+']').forEach(e=>e.checked=(p[g]||[]).includes(e.value)));
   $$('input.q').forEach(e=>e.value=(p.qty&&p.qty[e.dataset.item]!=null)?String(p.qty[e.dataset.item]):'');
   $('#chars').value=p.chars||'';
@@ -3201,7 +3239,7 @@ function applyPreset(p){
   $('#safe').checked=p.safe===true; $('#dry').checked=!!p.dry;
   $('#clone').checked=false; $('#integrity').checked=false;
   chipSig=null; refresh();
-  toast('「'+p.name+'」を呼び出しました');
+  if(!silent) toast('「'+p.name+'」を呼び出しました');
 }
 function renderPresets(){
   const box=$('#presets'); box.textContent='';
@@ -3262,21 +3300,85 @@ async function start(){
   }
   $('#fail').hidden=true; $('#res').hidden=true; $('#warn').hidden=true; $('#rep').hidden=true; $('#log').textContent=''; $('#keepNote').textContent='';
   renderSteps(null); $('#elapsed').textContent='00:00'; $('#updated').textContent='--:--:--';
+  $('#orderErr').textContent='';
+  if(PAYMENTS){ /* 支払い前は「実行中」の画面に切り替えない（注文を作るだけ） */
+    const go=$('#go'); go.disabled=true; go.textContent='注文を確認中…';
+    const restore=()=>{ go.disabled=false; go.textContent=goLabel(); };
+    try{
+      const r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(runBody(t,c))});
+      const j=await r.json();
+      restore();
+      if(!r.ok){ $('#orderErr').textContent=j.error||'注文を作成できませんでした'; $('#orderErr').scrollIntoView({block:'center'}); return; }
+      if(j.order){ openPay(j.order,j.amount,j.breakdown,j.skipped,j.state); return; }
+      setRunning(true); show('status'); jobStart=Date.now(); watch(j.job);
+    }catch(e){ restore(); $('#orderErr').textContent='サーバーに接続できませんでした。少し待ってからもう一度お試しください。'; }
+    return;
+  }
   setRunning(true); show('status');
   $('#log').textContent='開始しました。サーバーが休止していた場合は、最初に1分ほどかかります。';
   try{
-    const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c, items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')})});
+    const r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(runBody(t,c))});
     const j=await r.json();
     if(!r.ok){ setRunning(false); $('#log').textContent=''; $('#fail').hidden=false; $('#fail').textContent=j.error||'エラー'; return; }
-    if(j.order){ setRunning(false); $('#log').textContent=''; openPay(j.order,j.amount,j.breakdown,j.skipped,j.state); return; }
     jobStart=Date.now(); watch(j.job);
   }catch(e){
     setRunning(false); $('#log').textContent='';
     $('#fail').hidden=false; $('#fail').textContent='サーバーに接続できませんでした。少し待ってからもう一度お試しください。';
   }
 }
+function runBody(t,c){
+  return {safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c,
+          items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')};
+}
 $('#go').addEventListener('click',start);
+
+/* ---------- アップデート中でも弾かれない通信 ---------- */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let updShown=0;
+function updBanner(on){ updShown=Math.max(0,updShown+(on?1:-1)); $('#updBanner').hidden=updShown===0; }
+/* サーバーの再起動中（接続できない・502/503/504・「アップデート中」「確認中」の応答）は、最大約5分、自動でやり直す。
+   注文と支払いの状態はサーバー側に保存されているので、やり直しても二重に支払われたり実行されたりしない。 */
+async function api(url,opts,tries){
+  let shown=false, last=null;
+  try{
+    for(let i=0;i<(tries||60);i++){
+      try{
+        const r=await fetch(url,opts);
+        if(![502,503,504].includes(r.status)){
+          if(r.status===409){ const c=r.clone(); const j=await c.json().catch(()=>null); if(j&&j.code==='paying'){ last=r; if(!shown){ shown=true; updBanner(true);} await sleep(5000); continue; } }
+          return r;
+        }
+        last=r;
+      }catch(e){ last=null; }
+      if(!shown){ shown=true; updBanner(true); }
+      await sleep(5000);
+    }
+    if(last) return last;
+    throw new Error('offline');
+  }finally{ if(shown) updBanner(false); }
+}
+
+/* ---------- 入力内容の一時保存（再読み込みしても消えない・このタブを閉じるまで） ---------- */
+const DKEY='nyanko-draft';
+let draftTimer=null, draftReady=false;
+function saveDraft(){
+  if(!draftReady) return;
+  clearTimeout(draftTimer);
+  draftTimer=setTimeout(()=>{ try{
+    const d=currentPreset('draft'); d.transfer=$('#transfer').value; d.confirm=$('#confirm').value;
+    d.mode=$('#integrity').checked?'integrity':$('#clone').checked?'clone':'normal'; d.view=curView;
+    sessionStorage.setItem(DKEY,JSON.stringify(d));
+  }catch(e){} },300);
+}
+function restoreDraft(){
+  try{
+    const d=JSON.parse(sessionStorage.getItem(DKEY)||'null'); if(!d) return null;
+    applyPreset(d,true);
+    $('#transfer').value=d.transfer||''; $('#confirm').value=d.confirm||'';
+    $('#integrity').checked=d.mode==='integrity'; $('#clone').checked=d.mode==='clone';
+    return d;
+  }catch(e){ return null; }
+}
 
 /* ---------- PayPay決済 ---------- */
 let payOrder=null, payDead=false;
@@ -3288,7 +3390,9 @@ const PAY_MSG={
   bad_link:['リンクの形式が正しくありません','前後に余計な文字が入っていないか確認してください。'],
   link_not_found:['リンクが見つかりません','リンクが間違っているか、取り消されています。新しく作り直してください。'],
   amount_mismatch:['金額が違います','表示の金額ちょうどで、新しい送金リンクを作ってください（古いリンクは使えません）。'],
-  link_restricted:['このリンクは使えません','パスコードなしで、ブロックされていない送金リンクを作ってください。'],
+  link_restricted:['パスコード付きのリンクは使えません','パスコードなしで送金リンクを作り直してください。'],
+  link_blocked:['PayPay側で保留中のリンクです','PayPayアプリで保留を解除してから、もう一度ボタンを押してください（再送金は不要です）。'],
+  updating:['アップデート中です','自動で続きます。このままお待ちください。'],
   expired:['リンクの期限切れ','新しい送金リンクを作り直してください。'],
   already_received:['受け取り済みのリンクです','すでに使われたリンクです。新しいリンクを作ってください。'],
   link_cancelled:['リンクが取り消されています','新しい送金リンクを作ってください。'],
@@ -3307,7 +3411,7 @@ const PAY_MSG={
   cookie_missing:['現在、決済を受け付けられません','受取側の接続を確認できません。管理者にお知らせください。'],
   accept_uncertain:['受け取り結果が不明です','同じリンクは送り直さず、PayPayアプリで該当の送金を受け取ったら下のボタンで確認してください。'],
   accept_unconfirmed:['受け取りを確定できません','PayPayアプリで該当の送金を受け取ったら、下のボタンで確認してください（再送金は不要です）。'],
-  temporary_hold:['PayPay側で一時保留になりました','送金した側がPayPayアプリで保留を解除すると、自動で受け取って実行します。この画面を開いたままお待ちください（再送金は不要です）。'],
+  temporary_hold:['PayPay側で保留中です','送金した側がPayPayアプリで保留を解除すると、自動で確認して実行します。この画面を開いたままお待ちください（再送金は不要です）。'],
   still_pending:['保留の解除待ちです','送金した側がPayPayアプリで保留を解除すると、自動で受け取って実行します。この画面を開いたままお待ちください。'],
   hold_failed:['自動では確認できませんでした','リンクが取り消し・期限切れ等の状態です。お支払い済みの場合は、上の注文番号を管理者に伝えてください。'],
   not_found:['送金記録が見つかりません','管理者に連絡してください。'],
@@ -3357,9 +3461,13 @@ $('#payGo').addEventListener('click',async()=>{
   const btn=$('#payGo'); btn.disabled=true; payError({error:'決済を確認しています…',code:'x'},'決済を確認しています…','wait');
   $('#payErrTitle').textContent='決済を確認しています…'; $('#payErrHint').textContent='画面を閉じずにお待ちください。';
   try{
-    const r=await fetch('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:$('#payLink').value})});
+    const r=await api('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:$('#payLink').value})});
     const j=await r.json();
     if(!r.ok){
+      if(j.code==='started'){ /* 通信が途切れている間に開始できていた → その実行の状況画面へ */
+        try{ const m=await (await api('/api/orders/mine',{cache:'no-store'},6)).json(); const o=(m.orders||[]).find(x=>x.order===payOrder&&x.job);
+          if(o){ closePay(); setRunning(true); show('status'); jobStart=Date.now(); watch(o.job); return; } }catch(e){}
+      }
       payError(j,'決済を確認できませんでした');
       if(j.hold){ setHold(true); btn.disabled=false; return; }
       if(['dead','order_missing','started'].includes(j.code)){ payDead=true; return; }
@@ -3403,7 +3511,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#helpPanel').h
 const STATE_JA={unpaid:'支払い待ち',hold:'保留中（解除待ち）',paid:'支払い済み・未実行',dead:'確認が必要です',started:'実行中',done:'完了'};
 async function loadResume(){
   try{
-    const r=await fetch('/api/orders/mine',{cache:'no-store'}); if(!r.ok) return;
+    const r=await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
     const j=await r.json(); const list=j.orders||[]; const box=$('#resumeList'); box.textContent='';
     $('#resumePanel').hidden=!list.length;
     list.forEach(o=>{
@@ -3431,12 +3539,14 @@ $('#payCopy').addEventListener('click',async()=>{ const ok=await copyText($('#pa
 $('#claimGo').addEventListener('click',async()=>{
   const no=$('#claimNo').value.trim(); if(!no){ toast('注文番号を入れてください'); return; }
   try{
-    const r=await fetch('/api/orders/'+encodeURIComponent(no)+'/claim',{method:'POST'}); const j=await r.json();
+    const r=await api('/api/orders/'+encodeURIComponent(no)+'/claim',{method:'POST'}); const j=await r.json();
     if(!r.ok){ toast(j.error||'再開できませんでした'); return; }
     closeHelp(); $('#claimNo').value=''; loadResume(); openPay(j.order,j.amount,j.breakdown,j.skipped,j.state);
   }catch(e){ toast('接続できませんでした'); }
 });
-show('input'); refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
+const draft0=restoreDraft();
+show(draft0&&draft0.view&&draft0.view!=='status'&&TABS.includes(draft0.view)?draft0.view:'input'); refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
+draftReady=true;
 openHelp(); /* 開くたびに確認と使い方を表示 */
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }

@@ -288,8 +288,11 @@ def _verify_link(body, amount):
         raise PayPayError("link_incomplete", "送金リンクの金額を確認できません。")
     if info["amount"] != amount:
         raise PayPayError("amount_mismatch", f"金額が違います（リンク {info['amount']:,}円／必要 {amount:,}円）。{amount:,}円ちょうどの新しいリンクを作ってください。")
-    if info.get("isLinkBlocked") is not False or info.get("isSetPasscode") is not False:
-        raise PayPayError("link_restricted", "パスコード付き、またはブロック中のリンクは使えません。パスコードなしで作り直してください。")
+    if info.get("isSetPasscode") is not False:
+        raise PayPayError("link_restricted", "パスコード付きのリンクは使えません。パスコードなしで作り直してください。")
+    if info.get("isLinkBlocked") is not False:
+        # PayPay側の保留中は、未受取のまま「ブロック中」になる。送金者がアプリで解除すると受け取れる。
+        raise PayPayError("link_blocked", "このリンクはPayPay側で保留中です。PayPayアプリで保留を解除してから、もう一度お試しください（再送金は不要です）。")
     expiry = _parse_time(info.get("expiredAt"))
     if not expiry or expiry <= datetime.now(timezone.utc):
         raise PayPayError("expired", "リンクの有効期限が切れているか、確認できません。新しいリンクを作ってください。")
@@ -340,7 +343,7 @@ def _ledger():
                 order_id TEXT PRIMARY KEY, created REAL NOT NULL, updated REAL NOT NULL, user_id TEXT,
                 amount INTEGER, state TEXT, summary TEXT, diag TEXT
             )""")
-            for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER", "sender_id TEXT", "sender_name TEXT"):
+            for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER", "sender_id TEXT", "sender_name TEXT", "accept_status TEXT"):
                 try:
                     db.execute("ALTER TABLE links ADD COLUMN " + column)
                 except sqlite3.OperationalError:
@@ -395,7 +398,7 @@ async def _accept(session, account, code, verified, digest):
     try:  # 診断用: 受け取りPOSTの応答コードだけを記録
         rc = reply.get("header", {}).get("resultCode") if isinstance(reply, dict) and isinstance(reply.get("header"), dict) else None
         rc = rc if isinstance(rc, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", rc) else "-"
-        with _ledger() as db: db.execute("UPDATE links SET last_status=? WHERE digest=?",(f"accept:{status_code}/{rc}/{_provider_hold_code(reply) or '-'}"[:80],digest))
+        with _ledger() as db: db.execute("UPDATE links SET last_status=?, accept_status=? WHERE digest=?",(f"accept:{status_code}/{rc}/{_provider_hold_code(reply) or '-'}"[:80],f"{status_code}/{rc}/{_provider_hold_code(reply) or '-'}"[:80],digest))
     except Exception:
         pass
     ok=(status_code==200 and isinstance(reply,dict) and isinstance(reply.get("header"),dict)
@@ -445,6 +448,14 @@ async def _receive_once(code: str, amount: int, purchase_id: str, force_login: b
 async def receive_payment(raw_link: str, amount: int, purchase_id: str):
     code = _normalize_link(raw_link)
     if not code: raise _link_problem(raw_link)
+    # このリンクをすでに受け付けたことがあるか、先に台帳で確認する。
+    # （保留が解除されて入金済みになったリンクを貼り直したとき、「受け取り済み」と弾く前に自分の入金だと分かるように）
+    with _ledger() as db:
+        known = db.execute("SELECT order_id FROM links WHERE digest=?", (hashlib.sha256(code.encode()).hexdigest(),)).fetchone()
+    if known:
+        if known["order_id"] == purchase_id:
+            return await confirm_received(code, purchase_id, amount)
+        raise PayPayError("duplicate", "このリンクは以前の注文で使われています。")
     try:
         return await _receive_once(code, amount, purchase_id, False)
     except PayPayError as exc:
@@ -518,6 +529,11 @@ async def _confirm_once(code: str, purchase_id: str, amount: int | None, force_l
                 with _ledger() as db:
                     db.execute("UPDATE links SET state='paid' WHERE digest=?", (digest,))
                 return digest
+            if status == "PENDING":
+                info = payload.get("pendingP2PInfo") if isinstance(payload.get("pendingP2PInfo"), dict) else {}
+                if info.get("isLinkBlocked") is True:
+                    # 保留中（未受取＋ブロック中）。解除されるまで待つ。解除後は自動で入金済み（SUCCESS）になるか、もう一度受け取れる。
+                    raise PayPayError("temporary_hold", "PayPay側でまだ保留中です。PayPayアプリで保留を解除すると、自動で確認して実行します。")
             if status == "PENDING" and amount is not None:
                 verified = _verify_link(body, amount)  # 金額・期限・送金者などを最初と同じ基準で再確認
                 return await _accept(session, account, code, verified, digest)

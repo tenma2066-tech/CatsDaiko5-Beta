@@ -193,6 +193,42 @@ class HoldReleaseTests(unittest.TestCase):
             self.run_with(fake, G.receive_payment("abcDEF123456", AMOUNT, "order-r2"))
         self.assertEqual((e.exception.code, fake.post_calls), ("session_rejected", 0))
 
+    def blocked_body(self):
+        b = link_body("PENDING")
+        b["payload"]["pendingP2PInfo"]["isLinkBlocked"] = True
+        return b
+
+    def test_real_world_hold_blocked_then_success(self):
+        """本番の記録どおり: 受け取りが確定せず→ 未受取＋ブロック中 → 解除後は自動で SUCCESS。"""
+        unconfirmed = {"header": {"resultCode": "S9999"}, "payload": None}
+        with self.assertRaises(G.PayPayError) as e:
+            self.run_with(FakePayPay(gets=[link_body()], posts=[unconfirmed]), G.receive_payment("abcDEF123456", AMOUNT, "order-b"))
+        self.assertEqual(e.exception.code, "accept_unconfirmed")
+        fake = FakePayPay(gets=[self.blocked_body()], posts=[])
+        with self.assertRaises(G.PayPayError) as e:  # ブロック中は「まだ保留」。注文を止めない
+            self.run_with(fake, G.confirm_received("abcDEF123456", "order-b", AMOUNT))
+        self.assertEqual((e.exception.code, fake.post_calls), ("temporary_hold", 0))
+        self.assertTrue(self.run_with(FakePayPay(gets=[link_body("SUCCESS")], posts=[]), G.confirm_received("abcDEF123456", "order-b", AMOUNT)))
+
+    def test_pasting_same_link_again_in_same_order_is_recognised(self):
+        self._held("order-p")
+        # 解除されて入金済みになったリンクを、同じ注文でもう一度貼る →「受け取り済み」と弾かずに支払い済みにする
+        fake = FakePayPay(gets=[link_body("SUCCESS")], posts=[])
+        self.assertTrue(self.run_with(fake, G.receive_payment("https://pay.paypay.ne.jp/abcDEF123456", AMOUNT, "order-p")))
+
+    def test_pasting_known_link_in_new_order_reports_duplicate_before_status(self):
+        self._held("order-q")
+        fake = FakePayPay(gets=[link_body("SUCCESS")], posts=[])
+        with self.assertRaises(G.PayPayError) as e:  # 新しい注文 → duplicate（アプリ側で付け替えて確認する）
+            self.run_with(fake, G.receive_payment("abcDEF123456", AMOUNT, "order-new"))
+        self.assertEqual(e.exception.code, "duplicate")
+        self.assertEqual(len(fake.gets), 1)  # PayPayに問い合わせる前に判定
+
+    def test_blocked_link_first_time_gives_clear_message(self):
+        with self.assertRaises(G.PayPayError) as e:
+            self.run_with(FakePayPay(gets=[self.blocked_body()], posts=[]), G.receive_payment("abcDEF123456", AMOUNT, "order-f"))
+        self.assertEqual(e.exception.code, "link_blocked")
+
     def test_amount_changed_is_rejected_on_recheck(self):
         fake = FakePayPay(gets=[link_body()], posts=[HOLD_REPLY])
         with self.assertRaises(G.PayPayError):

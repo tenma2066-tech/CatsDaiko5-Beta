@@ -1,5 +1,8 @@
 app = "catsdaiko5-beta"   # 変更可（fly launch --copy-config --name <名前>） # retry deploy
 primary_region = "nrt"
+# 再起動のとき、処理中のリクエスト（決済確認など）が終わるのを待ってから止める
+kill_signal = "SIGTERM"
+kill_timeout = "120s"
 
 [build]
 
