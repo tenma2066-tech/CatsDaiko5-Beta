@@ -872,7 +872,7 @@ def _run_job(job: dict, transfer: str, confirm: str, items, subs, others, qty=No
             _log(job, "元データと複製データを別インスタンスとして作成しました。")
         else:
             if integrity_only:
-                _step(job, 3, "セーブ保全チェックと既知異常の確認中…")
+                _step(job, 3, "セーブの検査と既知異常の確認中…（バン保証）")
             else:
                 _step(job, 3, "データを書き換え中…")
                 visibility_repair_requested = (
@@ -932,7 +932,7 @@ def _run_job(job: dict, transfer: str, confirm: str, items, subs, others, qty=No
             if integrity_only and not repair_actions:
                 job["integrity"] = {"repaired_count": 0, "upload_required": False}
                 job["status"] = "done"
-                _step(job, 4, "保全チェック完了。修復対象はありませんでした")
+                _step(job, 4, "検査完了。修復対象はありませんでした（バン保証）")
                 _log(job, "既知のエラーキャラや関連参照は見つかりませんでした。セーブの再登録・コード再発行は行っていません。")
                 return
             if repair_actions:
@@ -1047,7 +1047,7 @@ def chara_units(cat_nums, cat_settings) -> int:
 def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings=None) -> tuple[int, list]:
     """サーバー側で金額を決める（ブラウザの金額は信用しない）。戻り値は (合計, 内訳)。"""
     if integrity_only:
-        return PRICES["ban_guarantee"], [("バン保証（セーブ保全チェック）", 1, PRICES["ban_guarantee"])]
+        return PRICES["ban_guarantee"], [("バン保証（セーブの検査・修復）", 1, PRICES["ban_guarantee"])]
     if clone:
         return PRICES["clone"], [("アカウント複製", 1, PRICES["clone"])]
     crash = [x for x in others if x in CRASH_ITEMS]
@@ -1321,12 +1321,13 @@ if _is_server_process():
 
 @app.get("/")
 def index():
+    p = PRICES
     groups = [
-        ("items", "アイテム", "選んだものを最大値まで付与します", ITEMS),
-        ("qty", "数量指定", "個数を決めて付与します。空欄は変更しません", ITEMS),
-        ("chars", "キャラ管理", "キャラを選択し、レベル・形態・本能を1体ずつ設定します", []),
-        ("subs", "サブ", "キャラ・ステージなどをまとめて解放・強化します", SUBS),
-        ("others", "その他", "会員状態やミッションなどを設定します", OTHERS),
+        ("items", "アイテム", f"選んだものを最大値まで付与します（1項目 {p['other']}円）", ITEMS),
+        ("qty", "数量指定", f"個数を決めて付与します。空欄は変更しません（1項目 {p['other']}円）", ITEMS),
+        ("chars", "キャラ", f"キャラを選び、レベル・形態・本能を1体ずつ設定します（1体・1項目ごとに {p['chara']}円）", []),
+        ("subs", "サブ", f"キャラ・ステージなどをまとめて解放・強化します（1項目 {p['other']}円）", SUBS),
+        ("others", "その他", f"会員状態やミッションなどを設定します（1項目 {p['other']}円・クラッシュ修正は {p['crash']}円）", OTHERS),
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
@@ -1426,9 +1427,9 @@ def run():
     clone = bool(data.get("clone", False))
     integrity_only = bool(data.get("integrity_only", False))
     if integrity_only and clone:
-        return jsonify(error="保全チェックとアカウント複製は同時に実行できません。"), 400
+        return jsonify(error="バン保証とアカウント複製は同時に実行できません。"), 400
     if integrity_only and not (transfer and confirm):
-        return jsonify(error="保全チェックには、既存セーブの引継ぎコードと暗証番号が必要です。"), 400
+        return jsonify(error="バン保証には、既存セーブの引継ぎコードと暗証番号が必要です。"), 400
     if clone:  # 実験的な独立アカウント複製：編集項目は使わない。引継ぎコードが必須
         if not (transfer and confirm):
             return jsonify(error="複製には、引継ぎコードと暗証番号が必要です。"), 400
@@ -1804,7 +1805,7 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_otp">
 <label>SMS認証コード(4桁) <input name="otp" inputmode="numeric" maxlength="4" autocomplete="off"></label><button>認証</button></form>
 <h2>未完了の注文</h2>
-<p>保留などで止まった注文です。<b>PayPayアプリで着金を確認できたら「支払い済みにする」</b>を押してください。利用者の画面（入力タブ上部の「未完了の注文」）に「実行を開始」ボタンが出ます。</p>
+<p>保留などで止まった注文です。<b>PayPayアプリで着金を確認できたら「支払い済みにする」</b>を押してください。利用者の画面（「① アカウント」画面の上の「未完了の注文」）に「実行を開始」ボタンが出ます。</p>
 {% for o in orders %}
 <div style="border:1px solid #999;border-radius:8px;padding:.6rem;margin:.6rem 0">
 <b>{{ o.state_ja }}</b>　{{ o.amount }}円　{{ o.created }}　USERID: <a href="/admin?user={{ o.uid }}"><code>{{ o.uid }}</code></a><br>
@@ -2076,15 +2077,87 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .notice{border:2px solid var(--accent,#ffc42e);border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:14px;line-height:1.6}.notice ul{margin:6px 0 0;padding-left:1.2em}
 .howto{margin:0 0 8px;padding-left:1.3em;font-size:14px;line-height:1.7}
 .mbox details{border-top:1px solid var(--line);padding:8px 0;font-size:14px}.mbox summary{cursor:pointer;font-weight:700}.mbox details p{margin:6px 0 0;color:var(--muted)}
+
+/* ---------- 手順ナビ ---------- */
+.stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:0;padding:6px 0 2px;position:relative}
+.step{all:unset;position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;
+  font-size:11.5px;font-weight:700;color:var(--muted);text-align:center;padding:2px 0;-webkit-tap-highlight-color:transparent}
+.step::before{content:"";position:absolute;top:17px;left:-50%;width:100%;height:3px;background:var(--soft);z-index:0}
+.step:first-child::before{display:none}
+.step i{position:relative;z-index:1;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;
+  border:2px solid var(--line);background:var(--panel);color:var(--ink);font-style:normal;font-size:15px;font-weight:800}
+.step[data-state=done]{color:var(--ink)}
+.step[data-state=done] i{background:var(--ink);color:var(--bg)}
+.step[data-state=done]::before,.step[data-state=current]::before{background:var(--ink)}
+.step[data-state=current]{color:var(--ink)}
+.step[data-state=current] i{background:var(--accent);color:#17181c;box-shadow:0 3px 0 var(--line);transform:translateY(-1px)}
+.step[data-state=skip] i{border-style:dashed;color:var(--muted)}
+.stepper .step[aria-selected]{background:none;box-shadow:none;border:0}
+.stepper .step:active{transform:none;box-shadow:none}
+.step:focus-visible i{outline:3px solid #2f7df6;outline-offset:2px}
+.stepper .step.locked{opacity:1;cursor:not-allowed}
+.stepper .step.locked i{background:var(--soft);color:var(--idle);border-color:var(--idle)}
+.stepper .step.locked span{opacity:.55}
+.step .live{top:-2px;right:calc(50% - 22px)}
+.subnav{flex-wrap:wrap;overflow:visible;gap:8px 6px;padding:12px 2px 2px}
+.subnav .tab{flex:1 1 28%;min-height:40px;font-size:13px}
+.tabs.more .tablist.subnav{-webkit-mask-image:none;mask-image:none}
+
+/* ---------- 何をしますか ---------- */
+.modes{display:grid;gap:10px;margin-top:12px}
+.modecard{all:unset;box-sizing:border-box;display:block;padding:14px 16px;border:2px solid var(--line);border-radius:14px;
+  background:var(--panel);box-shadow:0 3px 0 var(--line);cursor:pointer;-webkit-tap-highlight-color:transparent;position:relative}
+.modecard b{display:block;font-size:16px;padding-right:30px}
+.modecard small{display:block;margin-top:3px;font-size:12.5px;color:var(--muted);line-height:1.5}
+.modecard em{font-style:normal;font-weight:800;color:var(--ink)}
+.modecard::after{content:"";position:absolute;top:15px;right:14px;width:20px;height:20px;border-radius:50%;border:2px solid var(--line);background:var(--panel)}
+.modecard[aria-checked=true]{background:var(--hit);}
+.modecard[aria-checked=true]::after{background:var(--ink);box-shadow:inset 0 0 0 4px var(--panel)}
+.modecard:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+.modecard:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
+.specialsw input{display:none}
+details.more{margin-top:12px}
+details.more > summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:1px}
+details.more > summary::-webkit-details-marker{display:none}
+details.more > summary b{font-size:16px}
+details.more > summary b::after{content:"　＋";color:var(--muted);font-weight:700}
+details.more[open] > summary b::after{content:"　−"}
+details.more > summary small{font-size:12.5px;color:var(--muted)}
+.panel > details.more{margin-top:10px;border-top:1px solid var(--soft);padding-top:8px}
+.panel > details.more > summary{font-size:13px;color:var(--muted);font-weight:700}
+
+/* ---------- 注文内容 ---------- */
+#cart{margin-top:10px}
+.cline{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-top:1px solid var(--soft)}
+.cline:first-child{border-top:0}
+.cline .cl{flex:1;min-width:0}
+.cline .cl b{display:block;font-size:15px}
+.cline .cl small{display:block;font-size:12.5px;color:var(--muted);line-height:1.5;word-break:break-all}
+.cline .cp{flex:none;font-weight:800;font-size:15px;text-align:right;white-space:nowrap}
+.cline .cp small{display:block;font-size:11.5px;color:var(--muted);font-weight:600}
+.cline .edit{flex:none;align-self:center;min-height:32px;padding:0 10px;font-size:12px}
+.ctotal{display:flex;align-items:baseline;justify-content:space-between;margin-top:6px;padding-top:12px;border-top:2px solid var(--line)}
+.ctotal span{font-weight:800}
+.ctotal b{font-size:30px;font-weight:800;letter-spacing:.01em}
+.ctotal b small{font-size:15px;margin-left:2px}
+.cnote{margin:8px 0 0;font-size:12.5px;color:var(--muted)}
+.cnote.warn{color:var(--warn);font-weight:700}
+.cempty{padding:18px 0;text-align:center;color:var(--muted);font-size:14px}
+
+/* ---------- 下のバー ---------- */
+.bar #back{flex:none;min-height:52px;padding:0 14px;font-size:15px}
+.bar .info{min-width:0}
+#p-data,#p-api{display:none!important}
 .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:2px solid var(--line);
   padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px))}
 .bar .in{max-width:640px;margin:0 auto;display:flex;align-items:center;gap:12px}
 .bar .info{flex:1;min-width:0;font-size:13px;color:var(--muted);line-height:1.35}
-.bar .info b{display:block;color:var(--ink);font-size:15px}
-#go{flex:none;min-width:130px;min-height:52px;padding:0 20px;border:2px solid var(--line);border-radius:14px;
+.bar .info b{display:block;color:var(--ink);font-size:20px;font-weight:800;line-height:1.2}
+.bar .info span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#go,#next{flex:none;min-width:130px;min-height:52px;padding:0 20px;border:2px solid var(--line);border-radius:14px;
   background:var(--accent);color:#17181c;font-size:18px;font-weight:800;cursor:pointer;box-shadow:0 4px 0 var(--line)}
-#go:active{transform:translateY(3px);box-shadow:0 1px 0 var(--line)}
-#go:disabled{background:var(--soft);color:var(--muted);cursor:default;box-shadow:0 2px 0 var(--line)}
+#go:active,#next:active{transform:translateY(3px);box-shadow:0 1px 0 var(--line)}
+#go:disabled,#next:disabled{background:var(--soft);color:var(--muted);cursor:default;box-shadow:0 2px 0 var(--line)}
 .toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;font-weight:700;max-width:90vw}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
@@ -2101,12 +2174,16 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 </header></div>
 
 <div class="tabs"><div class="wrap">
-  <div class="tablist" role="tablist" aria-label="メニュー">
-    <button class="tab" role="tab" id="t-input" aria-controls="v-input" aria-selected="true" data-tab="input">入力</button>
+  <nav class="stepper" aria-label="手順">
+    <button class="step tab" type="button" id="t-input" data-tab="input" data-n="1"><i>1</i><span>アカウント</span></button>
+    <button class="step tab" type="button" id="t-menu" data-tab="items" data-n="2"><i>2</i><span>メニュー</span></button>
+    <button class="step tab" type="button" id="t-confirm" data-tab="confirm" data-n="3"><i>3</i><span>確認・支払い</span></button>
+    <button class="step tab" type="button" id="t-status" data-tab="status" data-n="4"><i>4</i><span>実行・受取</span><span class="live"></span></button>
+  </nav>
+  <div class="tablist subnav" role="tablist" aria-label="メニューの種類" id="subnav" hidden>
     {% for key, title, desc, lst in groups %}
-    <button class="tab" role="tab" id="t-{{ key }}" aria-controls="v-{{ key }}" aria-selected="false" data-tab="{{ key }}">{{ title }}<span class="badge" id="cnt-{{ key }}">0</span></button>
+    <button class="tab sub" type="button" role="tab" id="t-{{ key }}" aria-controls="v-{{ key }}" aria-selected="false" data-tab="{{ key }}">{{ title }}<span class="badge" id="cnt-{{ key }}">0</span></button>
     {% endfor %}
-    <button class="tab" role="tab" id="t-status" aria-controls="v-status" aria-selected="false" data-tab="status">状況<span class="live"></span></button>
   </div>
 </div></div>
 
@@ -2128,34 +2205,19 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
       <div class="err" id="inputErr" role="alert"></div>
     </div>
     <div class="panel">
-      <h2>実行モード</h2>
-      <label class="sw"><input type="checkbox" id="safe">
-        <span><b>安全モード</b><small>bcsfeの配布元に「BANされることがある」と書かれている項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
-      <label class="sw"><input type="checkbox" id="dry">
-        <span><b>試運転（コードを発行しない）</b><small>書き換えまで行い、変更内容だけ見せます。アップロードはしません。</small></span></label>
-      <label class="sw"><input type="checkbox" id="keepResults" checked>
-        <span><b>発行したコードをこの端末に残す</b><small>完了時の引継ぎコードと暗証番号を、このブラウザに最大10件まで保存します。画面を閉じたり、サーバーの表示期限（30分）が過ぎたりしても「状況」タブで確認できます。共用の端末ではオフにしてください。</small></span></label>
-    </div>
-    <div class="panel">
-      <h2>よく使う組み合わせ</h2>
-      <p class="sub">いま選んでいる項目・数量・キャラ設定・実行モードを名前を付けて保存し、あとで呼び出せます。引継ぎコードと暗証番号は保存しません。保存先はこの端末のブラウザです。</p>
-      <div class="tools preset-save">
-        <input type="text" id="presetName" maxlength="30" placeholder="名前（例：いつもの）" autocomplete="off" aria-label="組み合わせの名前">
-        <button type="button" class="btn" id="presetSave">保存</button>
+      <h2>何をしますか？</h2>
+      <p class="sub">いずれか1つを選んでください。</p>
+      <div class="modes" role="radiogroup" aria-label="内容">
+        <button type="button" class="modecard" role="radio" data-mode="normal"><b>メニューから選ぶ</b><small>アイテム・キャラ・ステージなどを選んで付与・強化します。1項目 {{ prices.other }}円から</small></button>
+        <button type="button" class="modecard" role="radio" data-mode="integrity"><b>バン保証</b><small>セーブを検査し、既知のエラーキャラなどを修復します。<em>{{ prices.ban_guarantee }}円</em>・引継ぎコード必須</small></button>
+        <button type="button" class="modecard" role="radio" data-mode="clone"><b>アカウント複製</b><small>実験機能。元と複製の2アカウントのコードを出します。<em>{{ prices.clone }}円</em>・引継ぎコード必須</small></button>
       </div>
-      <div class="presets" id="presets"></div>
-    </div>
-    <div class="panel">
-      <h2>実行前チェック</h2>
-      <ul class="checks" id="checks" aria-live="polite"></ul>
-    </div>
-    <div class="panel">
-      <h2>選んだ項目</h2>
-      <div class="sum">
-        {% for key, title, desc, lst in groups %}
-        <div>{{ 'キャラ' if key == 'chars' else title }}<b id="sel-{{ key }}">{{ '0体' if key == 'chars' else '0 / ' ~ totals[key] }}</b></div>
-        {% endfor %}
-      </div>
+      <details class="more"><summary>くわしい説明</summary>
+      <label class="sw specialsw"><input type="checkbox" id="integrity">
+        <span><b>バン保証（セーブの検査・既知異常の自動修復）　{{ prices.ban_guarantee }}円</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
+      <label class="sw specialsw"><input type="checkbox" id="clone">
+        <span><b>アカウント複製（実験機能）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。PONOS非公式の方法で、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
+      </details>
     </div>
   </section>
 
@@ -2244,18 +2306,46 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
       </div>
       {% endif %}
     </div>
-    {% if key == 'subs' %}
-    <div class="panel">
-      <h2>特別メニュー</h2>
-      <p class="sub">どちらかを選ぶと、上の項目やキャラ指定は使わず、引継ぎコードと暗証番号のセーブだけを処理します。</p>
-      <label class="sw"><input type="checkbox" id="integrity">
-        <span><b>バン保証（セーブ保全チェック・既知異常の自動修復）　{{ prices.ban_guarantee }}円</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
-      <label class="sw"><input type="checkbox" id="clone">
-        <span><b>アカウント複製（実験機能）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。PONOS非公式の方法で、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
-    </div>
-    {% endif %}
   </section>
   {% endfor %}
+
+  <section class="view" id="v-confirm" role="tabpanel" aria-labelledby="t-confirm" hidden>
+    <div class="panel cartpanel">
+      <h2>ご注文内容</h2>
+      <p class="sub">内容と金額を確認して、下の「お支払いへ進む」を押してください。</p>
+      <div id="cart"></div>
+    </div>
+    <div class="panel">
+      <h2>実行前チェック</h2>
+      <ul class="checks" id="checks" aria-live="polite"></ul>
+    </div>
+    <details class="panel more">
+      <summary><b>オプション</b><small>安全モード・試運転・結果の保存</small></summary>
+      <label class="sw"><input type="checkbox" id="safe">
+        <span><b>安全モード</b><small>bcsfeの配布元に「BANされることがある」と書かれている項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
+      <label class="sw"><input type="checkbox" id="dry">
+        <span><b>試運転（コードを発行しない）</b><small>書き換えまで行い、変更内容だけ見せます。アップロードはしません。</small></span></label>
+      <label class="sw"><input type="checkbox" id="keepResults" checked>
+        <span><b>発行したコードをこの端末に残す</b><small>完了時の引継ぎコードと暗証番号を、このブラウザに最大10件まで保存します。画面を閉じたり、サーバーの表示期限（30分）が過ぎたりしても「状況」タブで確認できます。共用の端末ではオフにしてください。</small></span></label>
+    </details>
+    <details class="panel more">
+      <summary><b>よく使う組み合わせ</b><small>選んだ内容を保存・呼び出し</small></summary>
+      <p class="sub">いま選んでいる項目・数量・キャラ設定・実行モードを名前を付けて保存し、あとで呼び出せます。引継ぎコードと暗証番号は保存しません。保存先はこの端末のブラウザです。</p>
+      <div class="tools preset-save">
+        <input type="text" id="presetName" maxlength="30" placeholder="名前（例：いつもの）" autocomplete="off" aria-label="組み合わせの名前">
+        <button type="button" class="btn" id="presetSave">保存</button>
+      </div>
+      <div class="presets" id="presets"></div>
+    </details>
+    <div class="panel" hidden>
+      <h2>選んだ項目</h2>
+      <div class="sum">
+        {% for key, title, desc, lst in groups %}
+        <div>{{ 'キャラ' if key == 'chars' else title }}<b id="sel-{{ key }}">{{ '0体' if key == 'chars' else '0 / ' ~ totals[key] }}</b></div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
 
   <section class="view" id="v-status" role="tabpanel" aria-labelledby="t-status" hidden>
     <div class="locknote" id="lockNote" hidden>処理中です。終わるまで、この画面のまま（ほかのタブやページを開かずに）お待ちください。完了すると引継ぎコードが表示されます。</div>
@@ -2304,8 +2394,8 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
       <div class="tools"><button type="button" class="btn" id="histClear">すべて削除</button></div>
     </div>
 
-    <div class="panel">
-      <h2>サーバーの状態</h2>
+    <details class="panel more">
+      <summary><b>サーバーの状態</b><small>くわしい情報（通常は見なくて大丈夫です）</small></summary>
       <div class="srv">
         <div class="row"><span>接続</span><b id="s-conn">確認中</b></div>
         <div class="row"><span>通常処理・待機</span><b id="s-queue">-</b></div>
@@ -2324,14 +2414,16 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
       </div>
       <div class="tools"><button type="button" class="btn" id="warm">ゲームデータを先に準備する</button></div>
       <p class="note">先に準備しておくと、実行ボタンを押したあとの待ち時間が短くなります。この画面を開いている間は、サーバーが休止しないよう定期的に接続を確認します。</p>
-    </div>
+    </details>
   </section>
 
 </main>
 
 <div class="bar"><div class="in">
+  <button id="back" class="btn" type="button" hidden>戻る</button>
   <div class="info"><b id="total">選択 0件</b><span id="barmode">初期アカウントから作成</span></div>
-  <button id="go" type="button">{% if payments %}決済して実行{% else %}実行{% endif %}</button>
+  <button id="next" class="primary" type="button">次へ</button>
+  <button id="go" class="primary" type="button" hidden>{% if payments %}お支払いへ進む{% else %}実行{% endif %}</button>
 </div></div>
 
 <div class="modal" id="payPanel" role="dialog" aria-modal="true" aria-labelledby="payTitle" hidden>
@@ -2366,11 +2458,10 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
       </ul>
     </div>
     <ol class="howto">
-      <li><b>引継ぎ情報を入れる</b>（新規アカウントなら空欄のまま）。</li>
-      <li><b>項目を選ぶ</b>：アイテム・数量・キャラ・サブ・その他のタブから選びます。下のバーに金額が出ます。</li>
-      <li><b>「決済して実行」</b>を押すと、お支払い画面が開きます。</li>
-      <li>PayPayアプリで<b>表示金額ちょうどの「送金リンク」</b>を作り（パスコードなし）、リンクを貼り付けて送信します。</li>
-      <li>決済が確認できたら<b>自動で実行</b>が始まります。「状況」タブで進み具合を見られます。完了すると引継ぎコードと暗証番号が出ます。</li>
+      <li><b>① アカウント</b>：引継ぎコードと暗証番号を入れ（新しく作るなら空欄）、「何をしますか？」から1つ選びます。</li>
+      <li><b>② メニュー</b>：アイテム・数量指定・キャラ・サブ・その他から選びます。下のバーに金額が出ます。</li>
+      <li><b>③ 確認・支払い</b>：注文内容と金額を確かめて「お支払いへ進む」。PayPayで<b>表示金額ちょうどの送金リンク</b>（パスコードなし）を作って貼り付けます。</li>
+      <li><b>④ 実行・受取</b>：支払いが確認できると自動で実行します。終わると<b>引継ぎコードと暗証番号</b>、ゲームでの引き継ぎ手順が出ます。</li>
     </ol>
     <h3>料金</h3>
     <ul class="paylist">
@@ -2385,7 +2476,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
     <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した側がPayPayアプリで保留を解除すると、画面を開いたままなら自動で受け取って実行します（「今すぐ確認する」でもOK）。同じリンクを送り直したり、再送金したりしないでください。</p></details>
     <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
     <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
-    <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、入力タブの上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
+    <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、「① アカウント」画面の上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
       <div class="tools"><input type="text" id="claimNo" placeholder="注文番号" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn" id="claimGo">再開</button></div></details>
     <p class="ordno">あなたのユーザーID: <code>{{ uid }}</code>（問い合わせのときに伝えてください）</p>
     <div class="mbtns"><button class="btn pri" id="helpClose" type="button">確認しました</button></div>
@@ -2423,7 +2514,9 @@ const PRICES={{ prices|tojson }}, CRASH={{ crash_items|tojson }}, PAYMENTS={{ pa
 const HIGH={{ high|tojson }};
 const ERRNUMS={{ error_nums|tojson }};
 const GROUPS=['items','subs','others'];
-const TABS=['input','items','qty','chars','subs','others','status'];
+const TABS=['input','items','qty','chars','subs','others','confirm','status'];
+const MENU=['items','qty','chars','subs','others'];
+let curView='input', lastMenu='items';
 const STEP_TEXT=['準備','取得','書き換え','発行'];
 let curJob=null, pollTimer=null, tickTimer=null, jobStart=0, jobRunning=false;
 let lastOk=0, fails=0, state=null;
@@ -2431,16 +2524,74 @@ let CATS=[], CATSTATE='none', catsTries=0, catsAsked=false;
 const NAMEOF=new Map();
 
 /* ---------- タブ ---------- */
+function special(){ return $('#integrity').checked||$('#clone').checked; }
+function stepOf(v){ return v==='input'?1:MENU.includes(v)?2:v==='confirm'?3:4; }
 function show(t){
   if(jobRunning&&t!=='status'){ toast('処理が終わるまで、この画面のままお待ちください'); t='status'; }
+  if(MENU.includes(t)&&special()){ t='confirm'; }
   TABS.forEach(k=>{
     const on=k===t;
     $('#v-'+k).hidden=!on;
     $('#t-'+k).setAttribute('aria-selected',on?'true':'false');
   });
-  $('#t-'+t).scrollIntoView({block:'nearest',inline:'center'});
+  curView=t; if(MENU.includes(t)) lastMenu=t;
+  const cur=stepOf(t);
+  $$('.step').forEach(b=>{
+    const n=+b.dataset.n;
+    b.dataset.state=n===cur?'current':(n===2&&special()&&cur>1?'skip':(n<cur?'done':'todo'));
+    b.setAttribute('aria-current',n===cur?'step':'false');
+  });
+  $('#subnav').hidden=!MENU.includes(t);
+  if(MENU.includes(t)) $('#t-'+t).scrollIntoView({block:'nearest',inline:'center'});
+  if(t==='chars'&&!catsAsked) loadCats();
+  updateBar();
   window.scrollTo({top:0}); setTimeout(tabMore,350);
 }
+function updateBar(){
+  const v=curView, st=stepOf(v);
+  const back=$('#back'), next=$('#next'), go=$('#go');
+  back.hidden=!(st===2||st===3)||jobRunning;
+  go.hidden=!(st===3||jobRunning);
+  next.hidden=st===3||jobRunning||(st===4);
+  if(st===1) next.textContent=special()?'次へ：確認':'次へ：メニュー';
+  else if(st===2) next.textContent='次へ：確認';
+  if(st===4&&!jobRunning){ next.hidden=false; next.textContent='新しく注文する'; }
+  if(st===4){
+    $('#total').textContent=jobRunning?'実行中です':'実行・受け取り';
+    $('#barmode').textContent=jobRunning?'終わるまで、この画面のままお待ちください':'コードを控えたら完了です';
+  }
+}
+function goNext(){
+  const st=stepOf(curView);
+  if(st===4){ show('input'); return; }
+  if(st===1){
+    const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
+    if(!t!==!c){ $('#inputErr').textContent='引継ぎコードと暗証番号は「両方入力」か「両方空欄」にしてください。'; $('#transfer').focus(); return; }
+    if(special()&&!(t&&c)){ $('#inputErr').textContent=($('#integrity').checked?'バン保証':'アカウント複製')+'には、引継ぎコードと暗証番号の両方が必要です。'; $('#transfer').focus(); return; }
+    show(special()?'confirm':lastMenu); return;
+  }
+  if(st===2){
+    if(parseNums($('#chars').value).err){ show('chars'); toast('キャラ番号を確認してください'); return; }
+    if(refresh()===0){ toast('メニューを1つ以上選んでください'); return; }
+    const bad=overInputs()[0];
+    if(bad){ show('qty'); const d=bad.closest('details'); if(d) d.open=true; toast('「'+(bad.dataset.label||bad.dataset.item)+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
+    show('confirm');
+  }
+}
+function goBack(){ const st=stepOf(curView); if(st===3) show(special()?'input':lastMenu); else if(st===2) show('input'); }
+$('#next').addEventListener('click',goNext);
+$('#back').addEventListener('click',goBack);
+$('#t-menu').addEventListener('click',e=>{ e.stopImmediatePropagation(); if(special()){ toast('バン保証・アカウント複製では、メニューの選択はありません'); return; } show(lastMenu); },true);
+/* 何をしますか */
+function syncModes(){
+  const m=$('#integrity').checked?'integrity':$('#clone').checked?'clone':'normal';
+  $$('.modecard').forEach(b=>b.setAttribute('aria-checked',b.dataset.mode===m?'true':'false'));
+}
+$$('.modecard').forEach(b=>b.addEventListener('click',()=>{
+  const m=b.dataset.mode;
+  $('#integrity').checked=m==='integrity'; $('#clone').checked=m==='clone';
+  syncModes(); refresh(); updateBar();
+}));
 function tabMore(){const t=$('.tablist'); $('.tabs').classList.toggle('more',t.scrollLeft+t.clientWidth<t.scrollWidth-6);}
 $('.tablist').addEventListener('scroll',tabMore); window.addEventListener('resize',tabMore);
 $$('.tab').forEach(b=>b.addEventListener('click',()=>show(b.dataset.tab)));
@@ -2519,7 +2670,7 @@ function refresh(){
   const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
   let m, bm;
   if(!t&&!c){m='<b>初期アカウント</b>から新しく作ります。'; bm='初期アカウントから作成';}
-  else if(t&&c){m=$('#integrity').checked?'<b>引継ぎコード</b>のセーブを保全チェックします。':$('#clone').checked?'<b>引継ぎコード</b>のデータから、元・複製の2アカウントを別々に作成します。':'<b>引継ぎコード</b>のデータを取得して書き換えます。'; bm=$('#integrity').checked?'既存セーブの保全チェック':'引継ぎコードから取得';}
+  else if(t&&c){m=$('#integrity').checked?'<b>引継ぎコード</b>のセーブを検査・修復します（バン保証）。':$('#clone').checked?'<b>引継ぎコード</b>のデータから、元・複製の2アカウントを別々に作成します。':'<b>引継ぎコード</b>のデータを取得して書き換えます。'; bm=$('#integrity').checked?'既存セーブの検査（バン保証）':'引継ぎコードから取得';}
   else{m='<b>片方だけ入力されています。</b>両方入力するか、両方空欄にしてください。'; bm='入力を確認してください';}
   $('#mode').innerHTML=m; $('#barmode').textContent=bm;
   $('#total').textContent='選択 '+total+'件';
@@ -2674,7 +2825,7 @@ $('#cRetry').addEventListener('click',async()=>{
 });
 
 /* ---------- 実行前チェック・モード ---------- */
-function goLabel(){ return $('#integrity').checked?($('#dry').checked?'保全チェック（試運転）':'保全チェック'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
+function goLabel(){ if(PAYMENTS&&!jobRunning) return 'お支払いへ進む'; return $('#integrity').checked?($('#dry').checked?'バン保証（試運転）':'バン保証'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
 function renderChecks(pc,qm,total){
   const L=[]; const add=(lv,t)=>L.push([lv,t]);
   if($('#clone').checked){
@@ -2689,7 +2840,7 @@ function renderChecks(pc,qm,total){
   }
   if($('#integrity').checked){
     const t0=$('#transfer').value.trim(), c0=$('#confirm').value.trim();
-    if(!t0||!c0) add('bad','保全チェックには、既存セーブの引継ぎコードと暗証番号が必要です。');
+    if(!t0||!c0) add('bad','バン保証には、既存セーブの引継ぎコードと暗証番号が必要です。');
     add('warn','選択した編集項目は実行せず、セーブ構造検査と既知のエラーキャラ・参照の確認だけを行います。');
     add('warn','修復対象が見つかった場合だけ保存データを修復・再検査して再登録し、新しい引継ぎコードを発行します。');
     if($('#dry').checked) add('ok','試運転：修復と再検査まで行いますが、アップロード・コード発行はしません。');
@@ -2738,14 +2889,56 @@ function estimate(pc,qm){
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
   return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other;
 }
+function renderCart(pc,qm){
+  const box=$('#cart'); if(!box) return; box.textContent='';
+  const t=$('#transfer').value.trim();
+  const line=(title,detail,price,view)=>{
+    const r=el('div','cline'), l=el('div','cl'); l.append(el('b',null,title)); if(detail) l.append(el('small',null,detail));
+    r.append(l);
+    if(price!=null){ const p=el('div','cp'); p.append(price); r.append(p); }
+    if(view){ const e=el('button','btn edit','変更'); e.type='button'; e.addEventListener('click',()=>show(view)); r.append(e); }
+    box.append(r);
+  };
+  const yen=(n,unit,cnt)=>{ const f=document.createDocumentFragment(); f.append((n).toLocaleString('ja-JP')+'円'); if(cnt>1||unit){ f.append(el('small',null,cnt+'件 × '+unit+'円')); } return f; };
+  line(t?'引継ぎコードのデータ':'新しいアカウント', t?('引継ぎコード '+t.slice(0,3)+'••••'):'初期状態のアカウントから作ります', null, 'input');
+  let total=0;
+  if($('#integrity').checked){ total=PRICES.ban_guarantee; line('バン保証','セーブを検査し、既知の異常を修復します',yen(total,0,1),'input'); }
+  else if($('#clone').checked){ total=PRICES.clone; line('アカウント複製','元と複製の2アカウントのコードを出します',yen(total,0,1),'input'); }
+  else{
+    if(!pc.err&&pc.nums.length){
+      const cs=catSettingsPayload(); let units=0;
+      pc.nums.forEach(n=>{ const c=cs[n]||{}; units+=Math.max(1,((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0)); });
+      total+=units*PRICES.chara;
+      line('キャラ '+pc.nums.length+'体','番号 '+compress(pc.nums)+'（レベル・形態・本能は1項目ずつ）',yen(units*PRICES.chara,PRICES.chara,units),'chars');
+    }
+    const items=picked('items'), qkeys=Object.keys(qm);
+    const qbase=[...new Set(qkeys.map(k=>k.split('#')[0]))].filter(x=>!items.includes(x));
+    if(items.length) { total+=items.length*PRICES.other; line('アイテム（最大まで）',items.join('・'),yen(items.length*PRICES.other,PRICES.other,items.length),'items'); }
+    if(qbase.length){ total+=qbase.length*PRICES.other; line('アイテム（数量指定）',qkeys.map(k=>{ const e=document.querySelector('input.q[data-item="'+CSS.escape(k)+'"]'); return (e&&e.dataset.label||k)+' '+Number(qm[k]).toLocaleString('ja-JP'); }).join('・'),yen(qbase.length*PRICES.other,PRICES.other,qbase.length),'qty'); }
+    const subs=picked('subs'); if(subs.length){ total+=subs.length*PRICES.other; line('サブ',subs.join('・'),yen(subs.length*PRICES.other,PRICES.other,subs.length),'subs'); }
+    const oth=picked('others'), crash=oth.filter(x=>CRASH.includes(x)), rest=oth.filter(x=>!CRASH.includes(x));
+    if(crash.length){ total+=crash.length*PRICES.crash; line('クラッシュ修正',crash.join('・'),yen(crash.length*PRICES.crash,PRICES.crash,crash.length),'others'); }
+    if(rest.length){ total+=rest.length*PRICES.other; line('その他',rest.join('・'),yen(rest.length*PRICES.other,PRICES.other,rest.length),'others'); }
+    if(total===0){ box.append(el('div','cempty','まだメニューが選ばれていません。「戻る」から選んでください。')); }
+  }
+  if(PAYMENTS){
+    const tot=el('div','ctotal'); const b=el('b'); b.append(total.toLocaleString('ja-JP')); b.append(el('small',null,'円'));
+    tot.append(el('span',null,'お支払い金額'),b); box.append(tot);
+  }
+  if($('#dry').checked) box.append(el('p','cnote warn','試運転がオンです：コードは発行されません（料金は同じです）。'));
+  if($('#safe').checked){ const sk=[...new Set([...picked('items'),...Object.keys(qm)])].filter(x=>HIGH.includes(x)); if(sk.length) box.append(el('p','cnote warn','安全モードのため実行されません（料金に含まれません）：'+sk.join('・'))); }
+}
 function renderExtras(pc,qm,total,bm){
   renderChecks(pc,qm,total);
+  try{ renderCart(pc,qm); }catch(e){}
+  syncModes(); updateBar();
   if(!pc.err) renderChips(pc.nums);
   renderResults();
-  $('#barmode').textContent=bm+($('#dry').checked?'・試運転':'')+($('#integrity').checked?'・保全チェック':$('#clone').checked?'・複製':($('#safe').checked?'・安全':''));
-  if($('#clone').checked) $('#total').textContent='複製モード';
-  if($('#integrity').checked) $('#total').textContent='バン保証';
-  if(PAYMENTS){ const y=estimate(pc,qm); $('#total').textContent+='　'+(y?y.toLocaleString('ja-JP')+'円':''); }
+  const what=$('#integrity').checked?'バン保証':$('#clone').checked?'アカウント複製':('選択 '+total+'件');
+  const flags=($('#dry').checked?'・試運転':'')+($('#safe').checked&&!special()?'・安全モード':'');
+  if(PAYMENTS){ $('#total').textContent=estimate(pc,qm).toLocaleString('ja-JP')+'円'; $('#barmode').textContent=what+'・'+bm+flags; }
+  else{ $('#total').textContent=what; $('#barmode').textContent=bm+flags; }
+  if(stepOf(curView)===4) updateBar();
   if(!jobRunning) $('#go').textContent=goLabel();
 }
 try{ if(localStorage.getItem('nyanko-safe2')==='1') $('#safe').checked=true; }catch(e){}
@@ -2753,7 +2946,6 @@ $('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe
 $('#dry').addEventListener('change',refresh);
 $('#clone').addEventListener('change',()=>{ if($('#clone').checked) $('#integrity').checked=false; refresh(); });
 $('#integrity').addEventListener('change',()=>{ if($('#integrity').checked) $('#clone').checked=false; refresh(); });
-$('#t-chars').addEventListener('click',()=>{ if(!catsAsked) loadCats(); });
 
 /* ---------- 小物 ---------- */
 let toastTimer=null;
@@ -2849,7 +3041,7 @@ function setRunning(v){
   $('#go').disabled=v; $('#go').textContent=v?($('#dry').checked?'試運転中…':$('#clone').checked?'複製中…':'実行中…'):goLabel();
   $('#t-status').classList.toggle('running',v);
   $$('.tab').forEach(b=>{ if(b.dataset.tab!=='status'){ b.disabled=v; b.classList.toggle('locked',v); } });
-  $('#lockNote').hidden=!v;
+  $('#lockNote').hidden=!v; updateBar();
   if(v&&$('#v-status').hidden) show('status');
   document.title=v?'実行中… | にゃんこ代行':'にゃんこ代行';
   renderState();
@@ -2878,7 +3070,7 @@ function renderJob(j){
   if(!w.hidden){ w.textContent=''; const b=document.createElement('b'); b.textContent='注意'; w.append(b); j.warn.forEach(x=>{w.append(document.createElement('br'),x)}); }
   $('#fail').hidden=j.status!=='error';
   if(j.status==='error') $('#fail').textContent=j.error||'エラーが発生しました';
-  $('#res-title').textContent=j.integrity_only?'保全チェック結果':j.clone?(j.status==='error'?'複製処理の途中結果':'複製処理の結果'):'完了しました';
+  $('#res-title').textContent=j.integrity_only?'バン保証の結果':j.clone?(j.status==='error'?'複製処理の途中結果':'複製処理の結果'):'完了しました';
   const showRes=!!j.result&&!j.dry;
   $('#res').hidden=!showRes;
   if(showRes&&j.clone){
@@ -2929,8 +3121,8 @@ async function poll(){
       stopJob(); setTimeout(loadResume,1500);
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
       if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); }
-      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「入力」タブ上部の「未完了の注文」から、再送金なしで再実行できます。'; }
-      if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'保全チェック完了'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
+      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① アカウント」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
+      if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'バン保証の検査が完了しました'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
   }catch(e){fails++; renderState();} /* 一時的な通信エラーは次回に再試行 */
 }
@@ -3051,7 +3243,7 @@ async function start(){
     show('input'); $('#inputErr').textContent='引継ぎコードと暗証番号は「両方入力」か「両方空欄」にしてください。'; return;
   }
   if($('#integrity').checked){
-    if(!t||!c){ show('input'); $('#inputErr').textContent='保全チェックには、既存セーブの引継ぎコードと暗証番号の両方が必要です。'; return; }
+    if(!t||!c){ show('input'); $('#inputErr').textContent='バン保証には、既存セーブの引継ぎコードと暗証番号の両方が必要です。'; return; }
     if(!$('#dry').checked){
       const accepted=window.confirm('既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復対象が見つかった場合は保存データを再登録し、新しい引継ぎコードを発行します。修復対象がなければ再登録しません。BAN回避や安全性を保証する機能ではありません。続行しますか？');
       if(!accepted) return;
@@ -3128,7 +3320,7 @@ const PAY_MSG={
   needs_admin:['以前の注文で使われたリンクです','お支払い済みの場合は、上の注文番号を管理者に伝えてください（再送金は不要です）。'],
   receiver_mismatch:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。'],
   done:['この注文は完了しています','新しく実行する場合は、もう一度「決済して実行」から始めてください。'],
-  dead:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。確認が取れると、入力タブの「未完了の注文」から実行を開始できます（再送金は不要です）。'],
+  dead:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。確認が取れると、「① アカウント」画面の上の「未完了の注文」から実行を開始できます（再送金は不要です）。'],
   internal:['予期しないエラー','PayPayアプリで送金状態を確認し、送金済みなら管理者に連絡してください。'],
 };
 function payError(j,fallback,lv){
@@ -3244,7 +3436,7 @@ $('#claimGo').addEventListener('click',async()=>{
     closeHelp(); $('#claimNo').value=''; loadResume(); openPay(j.order,j.amount,j.breakdown,j.skipped,j.state);
   }catch(e){ toast('接続できませんでした'); }
 });
-refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
+show('input'); refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
 openHelp(); /* 開くたびに確認と使い方を表示 */
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
