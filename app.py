@@ -1143,6 +1143,9 @@ def admin():
                         o["state"] = "hold" if o.get("link_code") else "unpaid"
                     o["diag"] = f"admin:{action} {time.strftime('%m/%d %H:%M')}"
                     msg = "注文を更新しました。"
+                    if action == "order_paid" and o.get("arguments") is None:
+                        o["state"] = "done"
+                        msg = "この注文は入力内容が残っていない（完了済み）ため、実行できません。"
                     code_for_ledger = o.get("link_code") if action == "order_paid" else None
             if msg == "注文を更新しました。":
                 if code_for_ledger:
@@ -1150,6 +1153,21 @@ def admin():
                         paypay_gateway.mark_paid_by_admin(code_for_ledger, oid)
                     except Exception:
                         pass
+                if action == "order_paid":
+                    # 支払い済みにしたら、その場で実行を開始する（利用者の操作を待たない）。
+                    # 利用者の画面は自動で状態を確認しているので、そのまま進み具合の表示に切り替わる。
+                    try:
+                        resp = _start_paid_order(o)
+                        body, rc = (resp if isinstance(resp, tuple) else (resp, 200))
+                        if rc == 200:
+                            msg = "支払い済みにして、実行を開始しました。利用者の画面は自動で進み具合の表示に切り替わります。"
+                        elif rc == 429:
+                            msg = "支払い済みにしました。いま待機枠がいっぱいのため、利用者の画面に「実行を開始する」ボタンが出ます（再送金は不要）。"
+                        else:
+                            msg = "支払い済みにしました。実行の開始に失敗したため、利用者の画面に「実行を開始する」ボタンが出ます。"
+                    except Exception:
+                        _log_orders.exception("admin start failed")
+                        msg = "支払い済みにしました。実行の開始に失敗したため、利用者の画面に「実行を開始する」ボタンが出ます。"
                 _persist_orders()
         elif action == "lock":
             session.pop("admin", None)
@@ -1198,7 +1216,7 @@ _orders: dict[str, dict] = {}
 _orders_lock = threading.Lock()
 
 
-ORDER_KEEP = {"hold": 7 * 86400, "paid": 7 * 86400, "paying": 7 * 86400, "starting": 7 * 86400, "dead": 7 * 86400, "started": 86400, "done": 3600}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
+ORDER_KEEP = {"hold": 7 * 86400, "paid": 7 * 86400, "paying": 7 * 86400, "starting": 7 * 86400, "dead": 7 * 86400, "started": 86400, "done": 3 * 86400}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
 _log_orders = logging.getLogger("orders")
 
 
@@ -1259,6 +1277,7 @@ def _reconcile_orders() -> None:
     changed = False
     with _jobs_lock:
         jobs = {k: (v.get("status"), v.get("error"), bool(v.get("outcome_unknown")), v.get("result") is not None) for k, v in _jobs.items()}
+        results = {k: (v.get("result"), bool(v.get("clone")), bool(v.get("dry"))) for k, v in _jobs.items() if v.get("result") is not None}
     stamp = time.strftime('%m/%d %H:%M')
     with _orders_lock:
         for o in _orders.values():
@@ -1269,8 +1288,12 @@ def _reconcile_orders() -> None:
                 continue
             if info and info[0] == "done":
                 o.update(state="done", arguments=None, transfer_key=None, diag=f"done {stamp}")
+                if o.get("job_id") in results:  # 発行されたコードを注文に残す（暗号化して保存。あとから開いても見られる）
+                    o["result"], o["clone"], o["dry"] = results[o["job_id"]]
             elif info and (info[2] or info[3]):
                 o.update(state="done", arguments=None, transfer_key=None, diag=f"結果不明: {str(info[1])[:80]} {stamp}")
+                if o.get("job_id") in results:
+                    o["result"], o["clone"], o["dry"] = results[o["job_id"]]
             else:
                 reason = str(info[1])[:80] if info else "中断（サーバー再起動など）"
                 o.update(state="paid", retry=True, job_id=None, diag=f"失敗→再実行可: {reason} {stamp}")
@@ -1611,6 +1634,7 @@ VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号�
 
 def _public_order(order_id: str, o: dict) -> dict:
     return {"order": order_id, "amount": o["amount"], "state": o["state"], "created": int(o["created"]), "retry": bool(o.get("retry")),
+            "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
 
 
@@ -1624,9 +1648,11 @@ def my_orders():
         live = set(_jobs)
     with _orders_lock:
         items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in VISIBLE]
-        for k, v in _orders.items():  # 実行中・完了直後の注文は、状況・結果の画面に戻れるようにする
-            if v["owner"] == me and v["state"] in ("started", "done") and v.get("job_id") in live:
+        for k, v in _orders.items():  # 実行中・完了した注文は、状況・結果を見られるようにする
+            if v["owner"] == me and v["state"] == "started" and v.get("job_id") in live:
                 items.append(dict(_public_order(k, v), job=v["job_id"]))
+            elif v["owner"] == me and v["state"] == "done" and (v.get("job_id") in live or (v.get("result") and not v.get("dry"))):
+                items.append(dict(_public_order(k, v), job=v.get("job_id") if v.get("job_id") in live else None))
     items.sort(key=lambda x: -x["created"])
     return jsonify(orders=items)
 
@@ -1740,6 +1766,11 @@ def _pay_order(order_id: str):
                            hold=order["state"] == "hold", uncertain=True), 500
         with _orders_lock:
             order["state"] = "paid"
+    return _start_paid_order(order)
+
+
+def _start_paid_order(order: dict):
+    """支払い済みの注文の実行を開始する（利用者の操作・管理者の「支払い済みにする」の両方から使う）。"""
     with _orders_lock:
         # 開始できるのは「支払い済み」の注文だけ。開始の権利をロック内で1回だけ取る（同時押しで二重に実行しない）
         if order["state"] != "paid" or order.get("arguments") is None:
@@ -3269,6 +3300,7 @@ $('#presetName').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventD
 
 function watch(id){
   curJob=id; sessionStorage.setItem('job',id);
+  try{ const sn=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); if(!sn.includes(id)) sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(sn.concat(id).slice(-20))); }catch(e){}
   setRunning(true);
   clearInterval(pollTimer); clearInterval(tickTimer);
   pollTimer=setInterval(poll,2000);
@@ -3434,6 +3466,7 @@ function payError(j,fallback,lv){
   $('#payErr').dataset.lv=lv||'bad'; $('#payErr').hidden=false;
 }
 function openPay(id,amount,breakdown,skipped,state){
+  watchOrders(true);
   payOrder=id; $('#payOrderNo').textContent=id; payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
   $('#payAmount').textContent=Number(amount).toLocaleString('ja-JP');
   const ul=$('#payList'); ul.textContent='';
@@ -3509,15 +3542,46 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#helpPanel').h
 
 /* ---------- 未完了の注文の再開 ---------- */
 const STATE_JA={unpaid:'支払い待ち',hold:'保留中（解除待ち）',paid:'支払い済み・未実行',dead:'確認が必要です',started:'実行中',done:'完了'};
-async function loadResume(){
+let watchTimer=null;
+/* 未完了の注文があるあいだ、状態を自動で確認し続ける。
+   管理者が「支払い済み」にした・保留が解除された、などで実行が始まったら、自動で進み具合の画面に切り替える。 */
+function watchOrders(on){
+  if(on&&!watchTimer) watchTimer=setInterval(()=>{ if(!document.hidden) loadResume(true); },6000);
+  if(!on&&watchTimer){ clearInterval(watchTimer); watchTimer=null; }
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&watchTimer) loadResume(true); });
+async function loadResume(quiet){
   try{
-    const r=await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
-    const j=await r.json(); const list=j.orders||[]; const box=$('#resumeList'); box.textContent='';
+    const r=quiet?await fetch('/api/orders/mine',{cache:'no-store'}):await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
+    const j=await r.json(); const list=j.orders||[];
+    // 実行が始まった注文（管理者の承認・保留解除など）→ 見ていなければ自動で状況画面へ
+    let seen=[]; try{ seen=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); }catch(e){}
+    // 完了済みでサーバーの表示期限が過ぎていても、保存したコードを1回だけ自動で表示する
+    const saved=list.find(o=>o.state==='done'&&!o.job&&o.result&&!seen.includes('r:'+o.order));
+    if(saved&&!jobRunning&&$('#donePanel').hidden){
+      try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat('r:'+saved.order).slice(-20))); }catch(e){}
+      if(payOrder===saved.order) closePay();
+      show('status'); openDone({result:saved.result,clone:saved.clone}); keepResult('o:'+saved.order,{result:saved.result,clone:saved.clone});
+    }
+    const live=list.find(o=>o.job&&(o.state==='started'||o.state==='done')&&!seen.includes(o.job));
+    if(live&&!jobRunning&&curJob!==live.job){
+      try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat(live.job).slice(-20))); }catch(e){}
+      if(payOrder&&payOrder===live.order) closePay();
+      if($('#donePanel').hidden){ toast('お支払いが確認できました。実行を開始します'); setRunning(true); show('status'); jobStart=Date.now(); watch(live.job); }
+    }
+    // 支払い画面を開いている注文が「支払い済み」になった → その場で開始ボタンに切り替える
+    if(payOrder){ const me=list.find(o=>o.order===payOrder); if(me&&me.state==='paid'&&!$('#payPanel').hidden&&$('#payGo').textContent!=='支払い済み・実行を開始'){ payDead=false; clearInterval(holdTimer); holdTimer=null; $('#payLinkField').hidden=true; $('#payGo').disabled=false; $('#payGo').textContent='支払い済み・実行を開始'; $('#payErr').hidden=true; $('#payInfo').textContent='お支払いが確認できました。ボタンを押すと実行を開始します（再送金は不要です）。'; } }
+    watchOrders(list.some(o=>['unpaid','hold','paid','dead','starting','paying'].includes(o.state)||(o.state==='started'&&o.job)));
+    const box=$('#resumeList'); box.textContent='';
     $('#resumePanel').hidden=!list.length;
     list.forEach(o=>{
       const row=el('div','rrow'); const d=new Date(o.created*1000);
       row.append(el('span',null,(d.getMonth()+1)+'/'+d.getDate()+' '+clock(d)+'　'+Number(o.amount).toLocaleString('ja-JP')+'円　'+(STATE_JA[o.state]||o.state)));
-      if(o.job){
+      if(o.state==='done'&&!o.job&&o.result){
+        const b=el('button','btn','コードを見る'); b.type='button';
+        b.addEventListener('click',()=>{ show('status'); openDone({result:o.result,clone:o.clone}); });
+        row.append(b); box.append(row);
+      }else if(o.job){
         const b=el('button','btn',o.state==='done'?'結果を見る':'状況を見る'); b.type='button';
         b.addEventListener('click',()=>{ show('status'); if(curJob!==o.job){ jobStart=Date.now(); watch(o.job); } });
         row.append(b); box.append(row);

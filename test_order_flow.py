@@ -135,11 +135,37 @@ class OrderFlow(unittest.TestCase):
             page = admin.get("/admin").get_data(as_text=True)
             self.assertIn(j["order"], page)
             self.assertIn("hold_failed", page)
-            admin.post("/admin", data={"action": "order_paid", "csrf": csrf, "order": j["order"]})
+            def real_like_start(*a):  # 本物と同じく、開始したジョブを登録してから返す
+                A._jobs["JR"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
+                return A.jsonify(job="JR")
+            with patch.object(A, "_start_job", side_effect=real_like_start) as st:
+                page = admin.post("/admin", data={"action": "order_paid", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
             mp.assert_called_once()
+            st.assert_called_once()  # 管理者が支払い済みにした時点で実行が始まる
+            self.assertIn("実行を開始しました", page)
+        self.assertEqual((A._orders[j["order"]]["state"], A._orders[j["order"]]["job_id"]), ("started", "JR"))
+        # 利用者の画面からは、その実行が見える（自動で状況画面に切り替わる）
+        self.jobs["JR"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
+        mine = self.c.get("/api/orders/mine").get_json()["orders"]
+        self.assertEqual([(o["state"], o.get("job")) for o in mine], [("started", "JR")])
+
+    def test_admin_paid_when_busy_leaves_start_button(self):
+        j = self.order()
+        A._orders[j["order"]].update(state="dead", link_code="abcDEF123456")
+        admin = A.app.test_client()
+        with patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(G, "status", return_value={}), patch.object(G, "mark_paid_by_admin"), \
+             patch.object(G, "link_diag", return_value=""):
+            admin.get("/admin")
+            with admin.session_transaction() as s:
+                csrf = s["admin_csrf"]
+            admin.post("/admin", data={"action": "unlock", "csrf": csrf, "passcode": "adm"})
+            with admin.session_transaction() as s:
+                csrf = s["admin_csrf"]
+            with patch.object(A, "_start_job", side_effect=lambda *a: (A.jsonify(error="busy"), 429)):
+                page = admin.post("/admin", data={"action": "order_paid", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
+        self.assertIn("待機枠がいっぱい", page)
         self.assertEqual(A._orders[j["order"]]["state"], "paid")
-        with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JR")):
-            self.assertEqual(self.c.post(f"/api/orders/{j['order']}/pay", json={}).get_json()["job"], "JR")
+        self.assertEqual(self.c.get("/api/orders/mine").get_json()["orders"][0]["state"], "paid")
 
     def test_same_link_in_new_order_takes_over_stuck_order(self):
         old = self.order()
@@ -312,6 +338,25 @@ class OrderFlow(unittest.TestCase):
             for _ in range(7):
                 r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
         self.assertEqual((A._orders[j["order"]]["state"], r.get_json()["hold"]), ("hold", True))
+
+    def test_codes_still_shown_after_server_forgets_job(self):
+        j = self._paid_and_started("JK")
+        self.jobs["JK"] = {"finished": __import__("time").time(), "created": __import__("time").time(), "status": "done", "error": None,
+                           "result": {"transfer": "KEEPcode1", "confirm": "1111"}, "clone": False, "dry": False}
+        A._reconcile_orders()
+        del self.jobs["JK"]  # 30分たってサーバーの表示から消えた（または再起動した）
+        mine = self.c.get("/api/orders/mine").get_json()["orders"]
+        self.assertEqual(mine[0]["state"], "done")
+        self.assertEqual(mine[0]["result"]["transfer"], "KEEPcode1")
+        self.assertIsNone(mine[0]["job"])
+        self.assertEqual(A.app.test_client().get("/api/orders/mine").get_json()["orders"], [])  # 他人には見えない
+        self.assertIsNone(A._orders[j["order"]]["arguments"])  # 入力した引継ぎコードは消えている
+
+    def test_dry_run_result_not_kept(self):
+        j = self._paid_and_started("JY")
+        self.jobs["JY"] = {"finished": None, "created": __import__("time").time(), "status": "done", "error": None, "result": {"transfer": "x"}, "dry": True}
+        A._reconcile_orders(); del self.jobs["JY"]
+        self.assertEqual(self.c.get("/api/orders/mine").get_json()["orders"], [])
 
     def test_hold_failed_kills_order(self):
         j = self.order()
