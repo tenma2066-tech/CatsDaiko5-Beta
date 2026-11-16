@@ -358,6 +358,54 @@ class OrderFlow(unittest.TestCase):
         A._reconcile_orders(); del self.jobs["JY"]
         self.assertEqual(self.c.get("/api/orders/mine").get_json()["orders"], [])
 
+    def test_server_side_recheck_starts_without_customer(self):
+        j = self.order()
+        A._orders[j["order"]].update(state="hold", link_code="abcDEF123456")
+        def start(*a):
+            A._jobs["JW"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
+            return A.jsonify(job="JW")
+        with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("temporary_hold", "保留"))):
+            self.assertEqual(A._recheck_and_start(j["order"], "auto"), "wait:temporary_hold")
+        self.assertEqual(A._orders[j["order"]]["state"], "hold")
+        with patch.object(G, "confirm_received", AsyncMock(return_value="d")), patch.object(A, "_start_job", side_effect=start):
+            self.assertEqual(A._recheck_and_start(j["order"], "auto"), "started")
+        self.assertEqual((A._orders[j["order"]]["state"], A._orders[j["order"]]["job_id"]), ("started", "JW"))
+
+    def test_rescue_old_stranded_orders(self):
+        j = self.order(); k = self.order()
+        A._orders[j["order"]].update(state="unpaid", link_code="abcDEF123456")
+        A._orders[k["order"]].update(state="unpaid", link_code="zzzZZZ999999")
+        with patch.object(G, "link_order_id", side_effect=lambda c: j["order"] if c == "abcDEF123456" else None):
+            A._rescue_stranded_orders()
+        self.assertEqual(A._orders[j["order"]]["state"], "dead")   # 受け付け済みのリンクがある → 要確認へ
+        self.assertEqual(A._orders[k["order"]]["state"], "unpaid") # 台帳にない（未払い）→ そのまま
+
+    def test_admin_recheck_and_start_buttons(self):
+        j = self.order()
+        A._orders[j["order"]].update(state="dead", link_code="abcDEF123456")
+        admin = A.app.test_client()
+        with patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(G, "status", return_value={}), patch.object(G, "link_diag", return_value=""):
+            admin.get("/admin")
+            with admin.session_transaction() as s:
+                csrf = s["admin_csrf"]
+            admin.post("/admin", data={"action": "unlock", "csrf": csrf, "passcode": "adm"})
+            with admin.session_transaction() as s:
+                csrf = s["admin_csrf"]
+            self.assertIn("PayPayに再確認する", admin.get("/admin").get_data(as_text=True))
+            with patch.object(G, "confirm_received", AsyncMock(return_value="d")), \
+                 patch.object(A, "_start_job", side_effect=lambda *a: (A.jsonify(error="busy"), 429)):
+                page = admin.post("/admin", data={"action": "order_recheck", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
+            self.assertIn("入金を確認しました", page)
+            self.assertEqual(A._orders[j["order"]]["state"], "paid")
+            self.assertIn("実行を開始する", page)
+            def start(*a):
+                A._jobs["JS"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
+                return A.jsonify(job="JS")
+            with patch.object(A, "_start_job", side_effect=start):
+                page = admin.post("/admin", data={"action": "order_start", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
+            self.assertIn("実行を開始しました", page)
+        self.assertEqual(A._orders[j["order"]]["state"], "started")
+
     def test_hold_failed_kills_order(self):
         j = self.order()
         with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("accept_uncertain", "不明"))):

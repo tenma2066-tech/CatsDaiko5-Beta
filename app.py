@@ -448,6 +448,7 @@ def _ensure_cleanup() -> None:
                 except Exception:
                     pass
         threading.Thread(target=cleanup_loop, daemon=True).start()
+        threading.Thread(target=_hold_watcher, daemon=True).start()
 
 
 @app.after_request
@@ -1128,6 +1129,27 @@ def admin():
         elif action == "pp_otp":
             res, err = _pp(paypay_gateway.finish_login(request.form.get("otp", "").strip()))
             msg = err or "PayPayに接続しました。"
+        elif action == "order_recheck":
+            oid = request.form.get("order", "")
+            r = _recheck_and_start(oid, "admin")
+            msg = {"started": "PayPayで入金を確認できたので、実行を開始しました。",
+                   "paid": "PayPayで入金を確認しました（支払い済み）。待機枠がいっぱいのため、利用者の画面に開始ボタンが出ます。",
+                   "skip": "この注文は再確認できません（送金リンクがない、または開始済み）。"}.get(r)
+            if not msg:
+                kind, _, code = r.partition(":")
+                msg = (f"まだ入金を確認できません（{code}）。保留中のままです。90秒ごとに自動で確認します。" if kind == "wait"
+                       else f"PayPayの状態が受け取り不可でした（{code}）。PayPayアプリで着金を確認できた場合だけ「支払い済みにする」を押してください。")
+        elif action == "order_start":
+            oid = request.form.get("order", "")
+            with _orders_lock:
+                o = _orders.get(oid)
+            if not o or o["state"] != "paid":
+                msg = "この注文は支払い済みではありません。"
+            else:
+                resp = _start_paid_order(o)
+                rc = resp[1] if isinstance(resp, tuple) else 200
+                msg = "実行を開始しました。利用者の画面は自動で切り替わり、完了するとコードが表示されます（3日間保存）。" if rc == 200 else "いま待機枠がいっぱいです。少し待ってからもう一度押してください。"
+                _persist_orders()
         elif action in ("order_paid", "order_dead", "order_hold"):
             oid = request.form.get("order", "")
             with _orders_lock:
@@ -1302,6 +1324,25 @@ def _reconcile_orders() -> None:
         _persist_orders()
 
 
+def _rescue_stranded_orders() -> None:
+    """旧バージョンの不具合で「支払い待ち」に戻された注文（送金リンクを受け付け済み）を、管理者の確認待ちにする。"""
+    with _orders_lock:
+        cands = [(k, o) for k, o in _orders.items() if o["state"] == "unpaid" and o.get("link_code")]
+    changed = False
+    for k, o in cands:
+        try:
+            if paypay_gateway.link_order_id(o["link_code"]) == k:
+                with _orders_lock:
+                    if o["state"] == "unpaid":
+                        o["state"] = "dead"
+                        o["diag"] = "要確認: 旧バージョンで停止（「PayPayに再確認する」を押してください）"
+                        changed = True
+        except Exception:
+            pass
+    if changed:
+        _persist_orders()
+
+
 def _history_rows() -> list:
     with _orders_lock:
         return [{"order_id": k, "created": v["created"], "user_id": v.get("uid") or _uid(v["owner"]), "amount": v["amount"],
@@ -1338,6 +1379,7 @@ if _is_server_process():
     _load_orders()
     try:
         _reconcile_orders()  # 再起動で中断された実行を「支払い済み」に戻す
+        _rescue_stranded_orders()
     except Exception:
         _log_orders.exception("reconcile at startup failed")
 
@@ -1699,6 +1741,61 @@ def _adopt_existing_link(order_id: str, order: dict) -> None:
             o["diag"] = f"superseded {time.strftime('%m/%d %H:%M')}"
 
 
+RECHECK_WAIT = ("temporary_hold", "accept_uncertain", "accept_unconfirmed", "still_pending", "link_network", "link_check",
+                "rate_limited", "paypay_unavailable", "session_rejected", "login_required", "otp_required", "cookie_missing",
+                "oauth_rejected", "oauth_network", "oauth_response", "runtime_store", "account_unreadable", "missing_key", "invalid_key")
+
+
+def _recheck_and_start(order_id: str, who: str) -> str:
+    """送金リンクがある注文を、サーバー側でPayPayに確認し直す。入金済みなら支払い済みにして実行を開始する。
+    利用者が画面を開いていなくても動く（保留の自動確認・管理者の「再確認」で使う）。戻り値は結果の説明。"""
+    with _orders_lock:
+        order = _orders.get(order_id)
+        if not order or not order.get("link_code") or order["state"] not in ("hold", "unpaid", "dead"):
+            return "skip"
+        order["state"] = "paying"
+    try:
+        asyncio.run(paypay_gateway.confirm_received(order["link_code"], order_id, order["amount"]))
+    except paypay_gateway.PayPayError as exc:
+        with _orders_lock:
+            order["state"] = "hold" if exc.code in RECHECK_WAIT else "dead"
+            order["diag"] = f"{who}:{exc.code} {time.strftime('%m/%d %H:%M')}"
+        _persist_orders()
+        return "wait:" + exc.code if exc.code in RECHECK_WAIT else "stop:" + exc.code
+    except Exception:
+        _log_orders.exception("recheck failed")
+        with _orders_lock:
+            order["state"] = "hold"
+            order["diag"] = f"{who}:internal {time.strftime('%m/%d %H:%M')}"
+        _persist_orders()
+        return "wait:internal"
+    with _orders_lock:
+        order["state"] = "paid"
+        order["diag"] = f"{who}:入金確認 {time.strftime('%m/%d %H:%M')}"
+    with app.app_context():
+        resp = _start_paid_order(order)
+    rc = resp[1] if isinstance(resp, tuple) else 200
+    _persist_orders()
+    return "started" if rc == 200 else "paid"
+
+
+def _hold_watcher() -> None:
+    """保留中の注文を90秒ごとにサーバー側で確認する（1回に最大5件・3日以内の注文）。"""
+    while True:
+        time.sleep(90)
+        if not PAYMENTS_ENABLED or _draining():
+            continue
+        try:
+            now = time.time()
+            with _orders_lock:
+                targets = [k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
+                           if o["state"] == "hold" and o.get("link_code") and now - o["created"] < 3 * 86400][:5]
+            for k in targets:
+                _recheck_and_start(k, "auto")
+        except Exception:
+            _log_orders.exception("hold watcher failed")
+
+
 def _pay_order(order_id: str):
     """PayPay送金リンクを受け取り、確認できたら実行を開始する。支払い済みなら再送不要で開始だけ再試行。"""
     data = request.get_json(silent=True) or {}
@@ -1874,7 +1971,8 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 {% if o.superseded %}<p class="msg">この注文の支払いは、同じ利用者の新しい注文に引き継ぎ済みです。支払い済みにしないでください（二重に実行されます）。</p>
 {% elif o.state != "paid" %}{% if not o.has_link %}<p class="msg">この注文には送金リンクの記録がありません（未払いの可能性が高いです）。</p>{% endif %}
 <button name="action" value="order_paid" onclick="return confirm('{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）')">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
-{% if o.state == "dead" %}<button name="action" value="order_hold">保留に戻す（再確認させる）</button>{% endif %}
+{% if o.state == "paid" %}{% if not o.has_link %}<p class="msg">この注文には送金リンク（入金）の記録がありません。同じ人の別の注文と重複していないか確認してから開始してください。</p>{% endif %}<button name="action" value="order_start" onclick="return confirm('この注文の実行を開始しますか？')">実行を開始する</button>{% endif %}
+{% if o.has_link and o.state in ("hold", "unpaid", "dead") %}<button name="action" value="order_recheck">PayPayに再確認する</button>{% endif %}
 {% if o.state != "dead" %}<button name="action" value="order_dead" onclick="return confirm('この注文を停止しますか？')">停止する</button>{% endif %}
 </form></div>
 {% else %}<p>ありません。</p>{% endfor %}

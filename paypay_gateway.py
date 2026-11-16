@@ -600,6 +600,15 @@ def history_list(limit: int = 200, user_id: str = ""):
         return [dict(r) for r in db.execute(sql, args).fetchall()]
 
 
+def link_order_id(code: str):
+    """台帳で、このリンクがどの注文のものとして記録されているか。"""
+    if not isinstance(code, str) or not CODE_RE.fullmatch(code):
+        return None
+    with _ledger() as db:
+        row = db.execute("SELECT order_id FROM links WHERE digest=?", (hashlib.sha256(code.encode()).hexdigest(),)).fetchone()
+    return row["order_id"] if row else None
+
+
 def link_diag(code: str) -> str:
     """管理画面用: 台帳の状態と、最後にPayPayが返した状態名。"""
     if not isinstance(code, str) or not CODE_RE.fullmatch(code):
