@@ -1245,7 +1245,9 @@ _log_orders = logging.getLogger("orders")
 def _gc_orders() -> None:
     now = time.time()
     with _orders_lock:
-        for k in [k for k, v in _orders.items() if now - v["created"] > ORDER_KEEP.get(v["state"], ORDER_TTL)]:  # 保留・支払い済み・要確認は3日残す
+        # 保留・支払い済み・要確認は7日、送金リンクを受け付けたことのある注文は（支払い待ちでも）7日残す
+        for k in [k for k, v in _orders.items()
+                  if now - v["created"] > (7 * 86400 if v.get("link_code") else ORDER_KEEP.get(v["state"], ORDER_TTL))]:
             del _orders[k]
 
 
