@@ -48,7 +48,9 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
     ("nyanko-web:" + ADMIN_PASSWORD).encode()  # ワーカープロセス間でも同じ値になるよう固定（本番は SECRET_KEY を設定）
 ).hexdigest()
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_SECURE=bool(os.environ.get("FLY_APP_NAME") or os.environ.get("SESSION_COOKIE_SECURE")),
+                  PERMANENT_SESSION_LIFETIME=30 * 86400)
 
 ITEMS = [
     "猫缶", "XP", "NP", "にゃんチケ", "レアチケ", "プラチケ", "プラチナのかけら", "レジェチケ",
@@ -1081,6 +1083,7 @@ def _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integ
 
 
 def _owner() -> str:
+    session.permanent = True  # ブラウザを閉じても30日は同じ利用者として扱う（未完了の注文を見つけられるように）
     return session.setdefault("job_owner", secrets.token_urlsafe(32))
 
 
@@ -1129,7 +1132,7 @@ def admin():
             oid = request.form.get("order", "")
             with _orders_lock:
                 o = _orders.get(oid)
-                if not o or o["state"] in ("started", "paying"):
+                if not o or o["state"] in ("started", "paying", "starting"):
                     msg = "その注文は変更できません（開始済み・確認中・期限切れ）。"
                 else:
                     if action == "order_paid":
@@ -1163,7 +1166,7 @@ def admin():
         _gc_orders()
         with _orders_lock:
             snap = [(k, dict(v)) for k, v in _orders.items() if v["state"] != "started"]
-        names = {"unpaid": "支払い待ち", "paying": "確認中", "hold": "保留中", "paid": "支払い済み・未開始", "dead": "要確認（停止）"}
+        names = {"unpaid": "支払い待ち", "paying": "確認中", "hold": "保留中", "paid": "支払い済み・未開始", "starting": "開始処理中", "dead": "要確認（停止）"}
         for k, v in sorted(snap, key=lambda kv: -kv[1]["created"]):
             if v["state"] == "done":
                 continue
@@ -1174,7 +1177,7 @@ def admin():
     history, hist_user = [], (request.args.get("user", "") or "").strip()[:80]
     if unlocked:
         _reconcile_orders()
-        names_h = {"unpaid": "未払い", "paying": "確認中", "hold": "保留", "paid": "支払い済み・未実行", "started": "実行中", "done": "完了", "dead": "停止"}
+        names_h = {"unpaid": "未払い", "paying": "確認中", "hold": "保留", "paid": "支払い済み・未実行", "starting": "開始処理中", "started": "実行中", "done": "完了", "dead": "停止"}
         try:
             paypay_gateway.history_upsert(_history_rows())
             for r in paypay_gateway.history_list(200, hist_user):
@@ -1195,7 +1198,7 @@ _orders: dict[str, dict] = {}
 _orders_lock = threading.Lock()
 
 
-ORDER_KEEP = {"hold": 3 * 86400, "paid": 3 * 86400, "paying": 3 * 86400, "dead": 3 * 86400, "started": 86400, "done": 3600}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
+ORDER_KEEP = {"hold": 7 * 86400, "paid": 7 * 86400, "paying": 7 * 86400, "starting": 7 * 86400, "dead": 7 * 86400, "started": 86400, "done": 3600}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
 _log_orders = logging.getLogger("orders")
 
 
@@ -1227,6 +1230,8 @@ def _order_from_json(o: dict) -> dict:
     out["transfer_key"] = bytes.fromhex(out["transfer_key"]) if out.get("transfer_key") else None
     if out.get("state") == "paying":  # 決済確認中に再起動した → 同じリンクを再確認できる保留へ
         out["state"] = "hold" if out.get("link_code") else "unpaid"
+    if out.get("state") == "starting":  # 開始処理の途中で再起動した → 支払い済みに戻す（再送金なしで再開できる）
+        out.update(state="paid", retry=True)
     return out
 
 
@@ -1297,11 +1302,21 @@ def _load_orders() -> None:
     _gc_orders()
 
 
-_load_orders()
-try:
-    _reconcile_orders()  # 再起動で中断された実行を「支払い済み」に戻す
-except Exception:
-    _log_orders.exception("reconcile at startup failed")
+# 実行用の子プロセス（spawn）もこのモジュールを読み込むため、注文の読み込み・照合はサーバー本体でだけ行う。
+# （子プロセスで行うと、実行中の注文を「中断された」と誤判定してディスクに書き戻してしまう）
+def _is_server_process() -> bool:
+    # spawn の子プロセスは、モジュール読み込み中はまだ parent_process() が設定されていない。
+    # 読み込み前にプロセス名が子の名前に変わり、_inheriting が立つので、それで判定する。
+    cur = multiprocessing.current_process()
+    return cur.name == "MainProcess" and not getattr(cur, "_inheriting", False)
+
+
+if _is_server_process():
+    _load_orders()
+    try:
+        _reconcile_orders()  # 再起動で中断された実行を「支払い済み」に戻す
+    except Exception:
+        _log_orders.exception("reconcile at startup failed")
 
 
 @app.get("/")
@@ -1323,6 +1338,11 @@ def index():
     )
 
 
+def _count_paying() -> int:
+    with _orders_lock:
+        return sum(1 for o in _orders.values() if o["state"] in ("paying", "starting"))
+
+
 @app.get("/api/state")
 def api_state():
     """画面の接続表示用。軽い処理だけを返す。"""
@@ -1340,6 +1360,7 @@ def api_state():
         started_at=int(_started_at),
         # busy/active_jobs intentionally mean real worker jobs only.
         busy=parallel["running_jobs"] > 0,
+        paying_orders=_count_paying(),  # 決済確認中の注文数（デプロイ前の待ち合わせに使う）
         **parallel,
         warm_cache=dict(_warm_cache),
         catalog_version=_names.get("version"),
@@ -1522,7 +1543,8 @@ def run():
 
 def _start_job(job: dict, arguments: tuple, transfer_key):
     job_id = uuid.uuid4().hex
-    # 再実行のときに前回の途中経過が残らないよう、毎回まっさらな状態から始める
+    # 再実行のときに前回の途中経過が残らないよう、毎回コピーしたまっさらな状態から始める（前回のジョブ表示を書き換えない）
+    job = dict(job)
     job.update(status="running", step=0, log=[], warn=[], report=[], result=None, error=None, finished=None)
     for stale in ("outcome_unknown", "issuing_codes", "integrity", "audit", "repair", "post_audit"):
         job.pop(stale, None)
@@ -1613,7 +1635,7 @@ def _adopt_existing_link(order_id: str, order: dict) -> None:
     code = order["link_code"]
     with _orders_lock:
         others = [(k, o) for k, o in _orders.items() if k != order_id and o.get("link_code") == code]
-        if any(o["state"] in ("started", "paying") for _, o in others):
+        if any(o["state"] in ("started", "paying", "starting", "done") for _, o in others):
             raise paypay_gateway.PayPayError("duplicate", "このリンクはすでに別の注文で使用されています。新しい送金リンクを作ってください。")
     paypay_gateway.adopt_link(code, order_id, order["amount"])
     with _orders_lock:  # 付け替えに成功したら、古い注文は無効にする（二重に実行させない）
@@ -1632,8 +1654,12 @@ def _pay_order(order_id: str):
             return jsonify(error="注文が見つかりません（30分で期限切れになります）。もう一度「実行」から始めてください。", code="order_missing"), 404
         if order["state"] == "paying":
             return jsonify(error="決済確認中です。少しお待ちください。", code="paying"), 409
-        if order["state"] == "started":
+        if order["state"] in ("started", "starting"):
             return jsonify(error="この注文はすでに開始済みです。「状況」タブを確認してください。", code="started"), 409
+        if order["state"] == "done":
+            return jsonify(error="この注文は完了しています。新しく実行する場合は、もう一度「決済して実行」から始めてください。", code="done"), 409
+        if order["state"] == "dead":
+            return jsonify(error="この注文は自動では確認できませんでした。お支払い済みの場合は、注文番号を管理者に伝えてください。", code="dead"), 409
         if order["state"] in ("unpaid", "hold"):
             if order["state"] == "unpaid" and _too_many_fails("paypay:" + order_id):
                 return jsonify(error="失敗が続いたので、10分ほど待ってください。", code="too_many_fails"), 429
@@ -1661,27 +1687,42 @@ def _pay_order(order_id: str):
             else:
                 asyncio.run(paypay_gateway.confirm_received(order.get("link_code"), order_id, order["amount"]))
         except paypay_gateway.PayPayError as exc:
-            WAITING = ("still_pending", "temporary_hold", "link_network", "rate_limited", "paypay_unavailable")
+            # 待てば直るもの（PayPay側の保留・混雑・通信、こちらのPayPay接続切れなど）
+            WAITING = ("still_pending", "temporary_hold", "link_network", "link_check", "rate_limited", "paypay_unavailable",
+                       "session_rejected", "login_required", "otp_required", "cookie_missing", "oauth_rejected",
+                       "oauth_network", "oauth_response", "runtime_store", "account_unreadable", "missing_key", "invalid_key")
             if not (mode == "recheck" and exc.code in WAITING):
                 _fail.setdefault("paypay:" + order_id, []).append(time.time())
-            hold = bool(order.get("link_code")) and (exc.code in HOLDISH or (mode == "recheck" and exc.code in ("still_pending", "link_network", "link_check", "rate_limited", "paypay_unavailable")))
-            dead = exc.code in ("hold_failed", "not_found", "receiver_mismatch") and mode == "recheck"
+            hold = bool(order.get("link_code")) and (exc.code in HOLDISH or (mode == "recheck" and exc.code in WAITING))
+            # 再確認（同じリンク）で、待てば直る種類以外のエラー → 自動では進められないので管理者確認へ。
+            # 「支払い待ち」に戻すと、台帳にこの注文のリンクが残っているため新しいリンクも受け付けられず行き詰まる。
+            dead = mode == "recheck" and not hold
             with _orders_lock:
                 order["state"] = "dead" if dead else ("hold" if hold else "unpaid")
                 order["diag"] = f"{exc.code} {time.strftime('%m/%d %H:%M')}"
             return jsonify(error=exc.message, code=exc.code, hold=hold, uncertain=hold), 402
         except Exception:
+            _log_orders.exception("unexpected error while confirming payment")
             with _orders_lock:
-                order["state"] = "hold" if order.get("link_code") and mode == "link" else "dead"
+                order["state"] = "hold" if order.get("link_code") else "unpaid"
+                order["diag"] = f"internal {time.strftime('%m/%d %H:%M')}"
             return jsonify(error="決済確認中に予期しないエラーが発生しました。PayPayアプリで送金状況を確認してください。", code="internal",
                            hold=order["state"] == "hold", uncertain=True), 500
         with _orders_lock:
             order["state"] = "paid"
     with _orders_lock:
-        if order["state"] == "dead":
-            return jsonify(error="この注文は使用できません。PayPayアプリで送金状況を確認してください。", code="dead"), 409
-    resp = _start_job(order["job"], order["arguments"], order["transfer_key"])
+        # 開始できるのは「支払い済み」の注文だけ。開始の権利をロック内で1回だけ取る（同時押しで二重に実行しない）
+        if order["state"] != "paid" or order.get("arguments") is None:
+            return jsonify(error="この注文は実行を開始できる状態ではありません。画面を開き直してください。", code="started"), 409
+        order["state"] = "starting"
+    try:
+        resp = _start_job(order["job"], order["arguments"], order["transfer_key"])
+    except Exception:
+        resp = (jsonify(error="処理を開始できませんでした。もう一度お試しください。"), 503)
     body, code = (resp if isinstance(resp, tuple) else (resp, 200))
+    if code != 200:
+        with _orders_lock:
+            order["state"] = "paid"  # 支払いは有効のまま。もう一度押せば再送金なしで開始できる
     if code == 200:
         with _orders_lock:
             order["state"] = "started"
@@ -3086,6 +3127,7 @@ const PAY_MSG={
   start_failed:['支払いは完了しています','開始に失敗しました。もう一度ボタンを押してください（再送金は不要です）。'],
   needs_admin:['以前の注文で使われたリンクです','お支払い済みの場合は、上の注文番号を管理者に伝えてください（再送金は不要です）。'],
   receiver_mismatch:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。'],
+  done:['この注文は完了しています','新しく実行する場合は、もう一度「決済して実行」から始めてください。'],
   dead:['自動では確認できませんでした','お支払い済みの場合は、上の注文番号を管理者に伝えてください。確認が取れると、入力タブの「未完了の注文」から実行を開始できます（再送金は不要です）。'],
   internal:['予期しないエラー','PayPayアプリで送金状態を確認し、送金済みなら管理者に連絡してください。'],
 };

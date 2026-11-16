@@ -230,6 +230,67 @@ class OrderFlow(unittest.TestCase):
         self.assertEqual(f([], [], [], {"マタタビ#1": 5, "マタタビ#2": 5, "マタタビ#3": 5}, [], False, False)[0], 25)
         self.assertEqual(f(["マタタビ"], [], [], {"マタタビ#1": 5, "XP": 1}, [], False, False)[0], 50)
 
+    def test_done_order_cannot_be_rerun_for_free(self):
+        j = self._paid_and_started("JZ")
+        self.jobs["JZ"] = {"finished": None, "created": __import__("time").time(), "status": "done", "error": None, "result": {"transfer": "t"}}
+        A._reconcile_orders()
+        with patch.object(A, "_start_job") as start:
+            r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        self.assertEqual((r.status_code, r.get_json()["code"]), (409, "done"))
+        start.assert_not_called()
+
+    def test_double_press_starts_only_once(self):
+        import threading
+        j = self.order()
+        A._orders[j["order"]]["state"] = "paid"
+        calls = []
+        def slow(*a):
+            calls.append(1); __import__("time").sleep(0.3); return A.jsonify(job="JJ")
+        owner = A._orders[j["order"]]["owner"]
+        def hit():
+            c2 = A.app.test_client()
+            with c2.session_transaction() as s:
+                s["job_owner"] = owner
+            c2.post(f"/api/orders/{j['order']}/pay", json={})
+        with patch.object(A, "_start_job", side_effect=slow):
+            ts = [threading.Thread(target=hit) for _ in range(3)]
+            [t.start() for t in ts]; [t.join() for t in ts]
+        self.assertEqual(len(calls), 1)
+
+    def test_failed_start_returns_to_paid(self):
+        j = self.order()
+        A._orders[j["order"]]["state"] = "paid"
+        with patch.object(A, "_start_job", side_effect=RuntimeError("boom")):
+            r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        self.assertEqual(r.status_code, 503)
+        self.assertEqual(A._orders[j["order"]]["state"], "paid")
+
+    def test_recheck_validation_error_goes_to_admin_not_stranded(self):
+        j = self.order()
+        A._orders[j["order"]].update(state="hold", link_code="abcDEF123456")
+        with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError("expired", "期限切れ"))):
+            self.c.post(f"/api/orders/{j['order']}/pay", json={})
+        self.assertEqual(A._orders[j["order"]]["state"], "dead")
+
+    def test_recheck_our_side_outage_keeps_hold(self):
+        j = self.order()
+        A._orders[j["order"]].update(state="hold", link_code="abcDEF123456")
+        for code in ("session_rejected", "otp_required", "login_required"):
+            with patch.object(G, "confirm_received", AsyncMock(side_effect=G.PayPayError(code, "x"))):
+                r = self.c.post(f"/api/orders/{j['order']}/pay", json={})
+            self.assertEqual(A._orders[j["order"]]["state"], "hold", code)
+            self.assertTrue(r.get_json()["hold"])
+
+    def test_starting_state_after_restart_becomes_paid(self):
+        o = A._order_from_json({"state": "starting", "arguments": None, "transfer_key": None})
+        self.assertEqual((o["state"], o["retry"]), ("paid", True))
+
+    def test_rerun_does_not_rewrite_previous_job_record(self):
+        job = {"status": "error", "log": ["old"], "owner": "o"}
+        with A.app.app_context(), patch.object(A, "_launch_job"), patch.object(A, "_slots", [None]), patch.dict(A._jobs, {}, clear=True):
+            A._start_job(job, ("", "", ["XP"], [], [], {}, [], {}, False, False, False), None)
+        self.assertEqual((job["status"], job["log"]), ("error", ["old"]))
+
     def test_hold_failed_kills_order(self):
         j = self.order()
         with patch.object(G, "receive_payment", AsyncMock(side_effect=G.PayPayError("accept_uncertain", "不明"))):

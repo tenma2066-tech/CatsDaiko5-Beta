@@ -27,6 +27,17 @@ HOLD_REPLY = {"header": {"resultCode": "42007013"}, "payload": None}
 OK_REPLY = {"header": {"resultCode": "S0000"}, "payload": {"orderStatus": "COMPLETED"}, "error": None}
 
 
+class StatusResp:
+    def __init__(self, status, body=None):
+        self.status, self.body = status, body
+    async def json(self, content_type=None):
+        return self.body
+    async def __aenter__(self):
+        return self
+    async def __aexit__(self, *a):
+        return False
+
+
 class FakePayPay:
     """getP2PLinkInfo と acceptP2PSendMoneyLink を順番どおりに返す。"""
     def __init__(self, gets, posts):
@@ -55,7 +66,8 @@ class FakePayPay:
         return R()
 
     def get(self, *a, **k):
-        return self._resp(self.gets.pop(0))
+        nxt = self.gets.pop(0)
+        return nxt if isinstance(nxt, StatusResp) else self._resp(nxt)
 
     def post(self, *a, **k):
         self.post_calls += 1
@@ -166,6 +178,20 @@ class HoldReleaseTests(unittest.TestCase):
         with self.assertRaises(G.PayPayError) as e:  # 実行に使ったリンクは使い回せない
             G.adopt_link("abcDEF123456", "third-order", AMOUNT)
         self.assertEqual(e.exception.code, "duplicate")
+
+    def test_session_rejected_relogs_in_once_and_retries(self):
+        fresh = AsyncMock(return_value={"uuid": "u", "session_cookie": "c"})
+        fake = FakePayPay(gets=[StatusResp(401), link_body()], posts=[OK_REPLY])
+        with patch.object(G, "_fresh_account", fresh):
+            self.assertTrue(self.run_with(fake, G.receive_payment("abcDEF123456", AMOUNT, "order-r")))
+        self.assertEqual([c.kwargs.get("force") for c in fresh.await_args_list], [False, True])
+        self.assertEqual(fake.post_calls, 1)
+
+    def test_session_rejected_twice_gives_up_without_accepting(self):
+        fake = FakePayPay(gets=[StatusResp(401), StatusResp(401)], posts=[])
+        with self.assertRaises(G.PayPayError) as e:
+            self.run_with(fake, G.receive_payment("abcDEF123456", AMOUNT, "order-r2"))
+        self.assertEqual((e.exception.code, fake.post_calls), ("session_rejected", 0))
 
     def test_amount_changed_is_rejected_on_recheck(self):
         fake = FakePayPay(gets=[link_body()], posts=[HOLD_REPLY])
