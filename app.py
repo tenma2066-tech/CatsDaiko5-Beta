@@ -1691,7 +1691,8 @@ def my_orders():
     with _jobs_lock:
         live = set(_jobs)
     with _orders_lock:
-        items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in VISIBLE]
+        items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in VISIBLE
+                 and not str(v.get("diag", "")).startswith("superseded")]  # 新しい注文に支払いを引き継いだ古い注文は見せない
         for k, v in _orders.items():  # 実行中・完了した注文は、状況・結果を見られるようにする
             if v["owner"] == me and v["state"] == "started" and v.get("job_id") in live:
                 items.append(dict(_public_order(k, v), job=v["job_id"]))
@@ -1755,12 +1756,16 @@ def _recheck_and_start(order_id: str, who: str) -> str:
         order = _orders.get(order_id)
         if not order or not order.get("link_code") or order["state"] not in ("hold", "unpaid", "dead"):
             return "skip"
+        previous = order["state"]
         order["state"] = "paying"
     try:
         asyncio.run(paypay_gateway.confirm_received(order["link_code"], order_id, order["amount"]))
     except paypay_gateway.PayPayError as exc:
         with _orders_lock:
-            order["state"] = "hold" if exc.code in RECHECK_WAIT else "dead"
+            if exc.code == "not_found":  # このリンクは一度も受け付けていない（検証で弾かれた等）→ 状態は変えない
+                order["state"] = previous
+            else:
+                order["state"] = "hold" if exc.code in RECHECK_WAIT else "dead"
             order["diag"] = f"{who}:{exc.code} {time.strftime('%m/%d %H:%M')}"
         _persist_orders()
         return "wait:" + exc.code if exc.code in RECHECK_WAIT else "stop:" + exc.code
@@ -2639,7 +2644,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     </ul>
     <h3>よくある質問</h3>
     <details><summary>リンクがエラーになる</summary><p>金額が違う・パスコード付き・期限切れ・受け取り済みのリンクは使えません。金額を確認して、新しいリンクを作り直してください。</p></details>
-    <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した側がPayPayアプリで保留を解除すると、画面を開いたままなら自動で受け取って実行します（「今すぐ確認する」でもOK）。同じリンクを送り直したり、再送金したりしないでください。</p></details>
+    <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のその送金から、保留を解除してください。解除されると、サーバーが自動で確認して実行します（画面を閉じていても大丈夫です）。あとで同じブラウザで開くと、結果の引継ぎコードが表示されます。同じリンクを送り直したり、再送金したりしないでください。</p></details>
     <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
     <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
     <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、「① アカウント」画面の上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
@@ -3477,7 +3482,7 @@ async function api(url,opts,tries){
       try{
         const r=await fetch(url,opts);
         if(![502,503,504].includes(r.status)){
-          if(r.status===409){ const c=r.clone(); const j=await c.json().catch(()=>null); if(j&&j.code==='paying'){ last=r; if(!shown){ shown=true; updBanner(true);} await sleep(5000); continue; } }
+          if(r.status===409){ const c=r.clone(); const j=await c.json().catch(()=>null); if(j&&j.code==='paying'){ last=r; await sleep(4000); continue; } }
           return r;
         }
         last=r;
@@ -3541,10 +3546,10 @@ const PAY_MSG={
   login_required:['現在、決済を受け付けられません','受取側PayPayが未接続です。管理者にお知らせください。'],
   otp_required:['現在、決済を受け付けられません','受取側PayPayが再認証待ちです。管理者にお知らせください。'],
   cookie_missing:['現在、決済を受け付けられません','受取側の接続を確認できません。管理者にお知らせください。'],
-  accept_uncertain:['受け取り結果が不明です','同じリンクは送り直さず、PayPayアプリで該当の送金を受け取ったら下のボタンで確認してください。'],
-  accept_unconfirmed:['受け取りを確定できません','PayPayアプリで該当の送金を受け取ったら、下のボタンで確認してください（再送金は不要です）。'],
-  temporary_hold:['PayPay側で保留中です','送金した側がPayPayアプリで保留を解除すると、自動で確認して実行します。この画面を開いたままお待ちください（再送金は不要です）。'],
-  still_pending:['保留の解除待ちです','送金した側がPayPayアプリで保留を解除すると、自動で受け取って実行します。この画面を開いたままお待ちください。'],
+  accept_uncertain:['PayPay側で保留になった可能性があります','PayPay側の安全確認で止まっています。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のこの送金から、保留を解除してください。解除されると自動で実行します（再送金は不要・この画面は閉じても大丈夫です）。'],
+  accept_unconfirmed:['PayPay側で保留になりました','PayPay側の安全確認で止まっています。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のこの送金から、保留を解除してください。解除されると自動で実行します（再送金は不要・この画面は閉じても大丈夫です）。'],
+  temporary_hold:['PayPay側で保留中です','PayPay側の安全確認で止まっています。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のこの送金から、保留を解除してください。解除されると自動で実行します（再送金は不要・この画面は閉じても大丈夫です）。'],
+  still_pending:['保留の解除待ちです','PayPay側の安全確認で止まっています。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のこの送金から、保留を解除してください。解除されると自動で実行します（再送金は不要・この画面は閉じても大丈夫です）。'],
   hold_failed:['自動では確認できませんでした','リンクが取り消し・期限切れ等の状態です。お支払い済みの場合は、上の注文番号を管理者に伝えてください。'],
   not_found:['送金記録が見つかりません','管理者に連絡してください。'],
   too_many_fails:['失敗が続いています','10分ほど待ってからお試しください。'],
@@ -3581,10 +3586,11 @@ function openPay(id,amount,breakdown,skipped,state){
 let holdTimer=null, holdTries=0;
 function setHold(on){
   $('#payLinkField').hidden=on; $('#payGo').textContent=on?'今すぐ確認する':'送金リンクを送って実行';
-  if(on) $('#payInfo').textContent='保留中です。送金した側がPayPayアプリで保留を解除すると、ここで自動的に受け取って実行します（45秒ごとに確認・この画面は開いたままにしてください）。同じリンクを送り直す必要はありません。';
+  if(on) $('#payInfo').textContent='保留中です。送金した方がPayPayアプリで保留を解除（承認）すると、自動で確認して実行します。同じリンクを送り直したり、再送金したりしないでください。この画面を閉じても、サーバーが確認を続けます。あとで同じブラウザで開けば、結果（引継ぎコード）を見られます。';
+  $('#payCancel').textContent=on?'閉じる（確認は続きます）':'やめる';
   if(!on){ clearInterval(holdTimer); holdTimer=null; holdTries=0; return; }
   if(holdTimer) return; /* すでに自動確認中（回数は引き継ぐ） */
-  holdTimer=setInterval(()=>{ if(!payOrder||payDead||$('#payPanel').hidden||++holdTries>20){ clearInterval(holdTimer); holdTimer=null; if(holdTries>20) $('#payInfo').textContent='自動確認を終了しました。保留を解除したあと「今すぐ確認する」を押してください。'; return; } if(!$('#payGo').disabled) $('#payGo').click(); },45000);
+  holdTimer=setInterval(()=>{ if(!payOrder||payDead||$('#payPanel').hidden||++holdTries>20){ clearInterval(holdTimer); holdTimer=null; if(holdTries>20) $('#payInfo').textContent='保留の解除を待っています。サーバーが引き続き自動で確認します（この画面は閉じても大丈夫です）。解除したあとすぐ進めたいときは「今すぐ確認する」を押してください。'; return; } if(!$('#payGo').disabled) $('#payGo').click(); },45000);
 }
 function closePay(){ setTimeout(loadResume,300); clearInterval(holdTimer); holdTimer=null; payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
 $('#payCancel').addEventListener('click',()=>{ closePay(); show('input'); });
@@ -3602,7 +3608,7 @@ $('#payGo').addEventListener('click',async()=>{
           if(o){ closePay(); setRunning(true); show('status'); jobStart=Date.now(); watch(o.job); return; } }catch(e){}
       }
       payError(j,'決済を確認できませんでした');
-      if(j.hold){ setHold(true); btn.disabled=false; return; }
+      if(j.hold){ setHold(true); $('#payErr').dataset.lv='wait'; btn.disabled=false; return; }
       if(['dead','order_missing','started'].includes(j.code)){ payDead=true; return; }
       btn.disabled=false; return;
     }
