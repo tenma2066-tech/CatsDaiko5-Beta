@@ -29,6 +29,28 @@ jobs:
             "cd /opt/catsdaiko && docker compose exec -T app python3 -" < /tmp/d.py
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
             "cd /opt/catsdaiko && echo '--- app log (tail) ---' && docker compose logs --tail 60 app 2>&1 | cut -c1-220 && echo '--- processes ---' && docker compose top app 2>&1 | cut -c1-200 && echo '--- stats ---' && docker stats --no-stream 2>&1 | cut -c1-160 && echo '--- disk/mem ---' && df -h / | tail -1 && free -m | sed -n 2p" || true
+      - name: Network check (MTU and HTTPS to the game upload host)
+        run: |
+          cat > /tmp/n.sh <<'SH'
+          echo "--- host MTU ---"; ip -o link | awk '{print $2, $4, $5}' | grep -v "^lo"
+          echo "--- docker network MTU ---"; docker network inspect catsdaiko_default --format '{{json .Options}}'
+          for host in nyanko-service-data-prd.s3.amazonaws.com s3.ap-northeast-1.amazonaws.com nyanko-backups.ponosgames.com www.google.com; do
+            printf "host %-40s " "$host"; curl -s -o /dev/null -m 15 -w "code=%{http_code} connect=%{time_connect} tls=%{time_appconnect} total=%{time_total}\n" "https://$host/" || echo "FAILED(rc=$?)"
+          done
+          echo "--- same from inside the app container ---"
+          cd /opt/catsdaiko
+          docker compose exec -T app python3 - <<'PY'
+          import time, requests
+          for h in ["nyanko-service-data-prd.s3.amazonaws.com","s3.ap-northeast-1.amazonaws.com","nyanko-backups.ponosgames.com","www.google.com"]:
+              t=time.time()
+              try:
+                  r=requests.get("https://"+h+"/", timeout=(10,15)); print("container", h, r.status_code, "%.1fs"%(time.time()-t))
+              except Exception as e:
+                  print("container", h, "FAIL", type(e).__name__, "%.1fs"%(time.time()-t))
+          PY
+          SH
+          sed -i 's/^          //' /tmp/n.sh
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/n.sh 2>&1 | head -40 || true
       - name: Stack of the running worker (read-only, no local variables)
         run: |
           cat > /tmp/s.sh <<'SH'
