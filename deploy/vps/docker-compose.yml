@@ -1,4 +1,4 @@
-# Oracle Cloud（または任意のVPS）用。GitHub Actions がサーバーの /opt/catsdaiko に配置して起動する。
+# VPS（Ubuntu + Docker）用。GitHub Actions がサーバーの /opt/catsdaiko に配置して起動する。
 services:
   app:
     build: ./src

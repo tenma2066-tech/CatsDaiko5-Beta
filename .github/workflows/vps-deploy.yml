@@ -1,0 +1,94 @@
+name: Deploy to VPS
+# 国内VPS（Ubuntu）へ、SSH（パスワードまたは鍵）でデプロイする。
+# 必要なシークレット: VPS_HOST（IPアドレス）, ADMIN_PASSWORD, VPS_PASSWORD（または VPS_SSH_KEY）
+# 任意: VPS_USER（既定 root）, SITE_DOMAIN（独自ドメイン。なければ <IP>.sslip.io で自動HTTPS）
+on:
+  push:
+    branches: [claude/zealous-ritchie-5o2epn]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+concurrency: vps-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check secrets
+        env:
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          [ -n "$VPS_HOST" ] || { echo "::error::シークレット VPS_HOST（サーバーのIPアドレス）を登録してください"; exit 1; }
+          [ -n "$ADMIN_PASSWORD" ] || { echo "::error::シークレット ADMIN_PASSWORD を登録してください"; exit 1; }
+          if [ -z "$VPS_PASSWORD" ] && [ -z "$VPS_SSH_KEY" ]; then echo "::error::シークレット VPS_PASSWORD（または VPS_SSH_KEY）を登録してください"; exit 1; fi
+      - name: Prepare SSH
+        env:
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SITE_DOMAIN: ${{ secrets.SITE_DOMAIN }}
+        run: |
+          set -eu
+          U="${VPS_USER:-root}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ConnectTimeout=20"
+          if [ -n "$VPS_SSH_KEY" ]; then
+            printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/id_vps; chmod 600 ~/.ssh/id_vps
+            echo "SSH_CMD=ssh -i $HOME/.ssh/id_vps $OPTS" >> "$GITHUB_ENV"
+          else
+            sudo apt-get install -y sshpass >/dev/null
+            echo "SSH_CMD=sshpass -e ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no $OPTS" >> "$GITHUB_ENV"
+            echo "USE_SSHPASS=1" >> "$GITHUB_ENV"
+          fi
+          echo "TARGET=$U@$VPS_HOST" >> "$GITHUB_ENV"
+          echo "SUDO=$([ "$U" = root ] && echo '' || echo 'sudo')" >> "$GITHUB_ENV"
+          if [ -n "$SITE_DOMAIN" ]; then echo "SITE_HOST=$SITE_DOMAIN" >> "$GITHUB_ENV"; else echo "SITE_HOST=$(echo "$VPS_HOST" | tr '.' '-').sslip.io" >> "$GITHUB_ENV"; fi
+      - name: Test connection
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          if ! $SSH_CMD "$TARGET" 'echo connected; id -un; lsb_release -ds 2>/dev/null || true; free -m | sed -n 2p'; then
+            echo "::error::サーバーにSSHで入れません。次を確認してください: (1) VPS_HOST のIPアドレス (2) ユーザー名（既定 root。VPS_USER で変更） (3) パスワード (4) サーバー管理画面のパケットフィルターで 22番(SSH) を許可"
+            exit 1
+          fi
+      - name: Upload source
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -eu
+          NEW="/tmp/catsdaiko-src-$GITHUB_RUN_ID"
+          echo "NEW_SRC=$NEW" >> "$GITHUB_ENV"
+          tar czf - --exclude=.git . | $SSH_CMD "$TARGET" "rm -rf $NEW && mkdir -p $NEW && tar xzf - -C $NEW"
+      - name: Setup and start on server
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          set -eu
+          AF="/tmp/.ap-$GITHUB_RUN_ID"
+          printf '%s' "$ADMIN_PASSWORD" | $SSH_CMD "$TARGET" "umask 077; cat > $AF"
+          # sudo を使うユーザーの場合は、同じパスワードを標準入力で渡す（root なら不要）
+          if [ -n "$SUDO" ] && [ -n "${USE_SSHPASS:-}" ]; then
+            printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
+          else
+            $SSH_CMD "$TARGET" "$SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
+          fi
+      - name: Health check
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          for i in $(seq 1 36); do
+            if curl -fsS -m 10 "https://$SITE_HOST/health" >/dev/null 2>&1; then echo "OK: https://$SITE_HOST/"; exit 0; fi
+            sleep 10
+          done
+          echo "::warning::https://$SITE_HOST/health に接続できません。サーバー管理画面のパケットフィルターで 80番・443番 を許可しているか確認してください。"
+          echo "--- サーバー内の状態（コンテナ） ---"
+          $SSH_CMD "$TARGET" "cd /opt/catsdaiko && docker compose ps && docker compose logs --tail 25 app" 2>&1 | tail -40 || true
+          echo "--- サーバー内から直接確認 ---"
+          $SSH_CMD "$TARGET" "curl -s -m 5 -o /dev/null -w 'app health via caddy(local): %{http_code}\n' --resolve $SITE_HOST:443:127.0.0.1 -k https://$SITE_HOST/health" 2>&1 | tail -2 || true
+          exit 1

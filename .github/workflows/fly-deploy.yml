@@ -1,8 +1,6 @@
 name: Deploy to Fly.io
 on:
-  push:
-    branches: [claude/zealous-ritchie-5o2epn]
-    paths-ignore: ["**.md", "docs/**"]
+  # VPSへ移行したため、自動実行はやめて手動のみ（Fly.io を使い続ける場合だけ手動で実行）
   workflow_dispatch:
 
 concurrency: fly-deploy
