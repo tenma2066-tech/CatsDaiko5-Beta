@@ -65,11 +65,18 @@ else:
     d=get("/api/state"); print(int(d.get("running_jobs",0))+int(d.get("queued_jobs",0))+int(d.get("paying_orders",0)))'
 if docker compose ps --status running --services 2>/dev/null | grep -qx app; then
   docker compose exec -T app python3 -c "$APP_PY" drain "" >/dev/null 2>&1 || true
+  N=1
   for i in $(seq 1 48); do
-    N=$(docker compose exec -T app python3 -c "$APP_PY" state 2>/dev/null) || break
+    N=$(docker compose exec -T app python3 -c "$APP_PY" state 2>/dev/null) || { N=0; break; }
     [ "$N" = "0" ] && break
     echo "busy ($N) - waiting... ($i/48)"; sleep 15
   done
+  if [ "$N" != "0" ] && [ "${FORCE_DEPLOY:-}" != "1" ]; then
+    # 処理中のまま入れ替えると、利用者の実行が途中で止まる。入れ替えずに中止して、受付を再開する。
+    docker compose exec -T app python3 -c "$APP_PY" drain 1 >/dev/null 2>&1 || true
+    echo "::error::12分待っても処理中（$N 件）のため、入れ替えを中止しました（利用者の実行を守るため）。あとでもう一度デプロイしてください。"
+    exit 3
+  fi
 fi
 
 # 7) 入れ替え

@@ -1,0 +1,28 @@
+name: VPS diagnostics
+# 調査用。注文・決済の状態（状態名・金額・経過時間・メモ）だけを出す。リンク・引継ぎコード・名前は出さない。
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      SSHPASS: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Dump sanitized states
+        run: |
+          sudo apt-get install -y sshpass >/dev/null
+          cat > /tmp/d.py <<'PY'
+          import sqlite3, time
+          db = sqlite3.connect("/data/paypay/payments.sqlite3"); db.row_factory = sqlite3.Row; now = time.time()
+          for r in db.execute("SELECT * FROM history ORDER BY created DESC LIMIT 40"):
+              d = dict(r)
+              print("H", d["order_id"][:5], "u=" + str(d["user_id"])[:4], "age_min=%d" % ((now - d["created"]) / 60), "upd_min=%d" % ((now - d["updated"]) / 60),
+                    "state=" + str(d["state"]), "amt=" + str(d["amount"]), "diag=" + str(d["diag"]))
+          PY
+          sed -i 's/^          //' /tmp/d.py
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
+            "cd /opt/catsdaiko && docker compose exec -T app python3 -" < /tmp/d.py
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
+            "cd /opt/catsdaiko && docker compose logs --since 40m app 2>&1 | grep -iE 'error|exception|traceback|timeout|killed' | tail -20" || true
