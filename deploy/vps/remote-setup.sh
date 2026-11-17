@@ -66,9 +66,10 @@ else:
 if docker compose ps --status running --services 2>/dev/null | grep -qx app; then
   docker compose exec -T app python3 -c "$APP_PY" drain "" >/dev/null 2>&1 || true
   N=1
+  ALLOW="${ALLOW_RUNNING:-0}"   # 止まったまま終わらない実行がある場合だけ、その件数を許して入れ替える（手動実行時のみ）
   for i in $(seq 1 48); do
     N=$(docker compose exec -T app python3 -c "$APP_PY" state 2>/dev/null) || { N=0; break; }
-    [ "$N" = "0" ] && break
+    [ "$N" -le "$ALLOW" ] 2>/dev/null && { N=0; break; }
     echo "busy ($N) - waiting... ($i/48)"; sleep 15
   done
   if [ "$N" != "0" ] && [ "${FORCE_DEPLOY:-}" != "1" ]; then

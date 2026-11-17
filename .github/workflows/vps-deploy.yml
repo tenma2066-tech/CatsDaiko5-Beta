@@ -7,6 +7,11 @@ on:
     branches: [claude/zealous-ritchie-5o2epn]
     paths-ignore: ["**.md", "docs/**", ".github/workflows/vps-diag.yml", ".github/workflows/diag.yml"]
   workflow_dispatch:
+    inputs:
+      allow_running:
+        description: "止まったまま終わらない実行の件数（通常は0。0以外にするとその件数の実行を止めて入れ替える）"
+        required: false
+        default: "0"
 
 concurrency: vps-deploy
 
@@ -80,7 +85,8 @@ jobs:
           if [ -n "$SUDO" ] && [ -n "${USE_SSHPASS:-}" ]; then
             printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
           else
-            $SSH_CMD "$TARGET" "$SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
+            AR="${{ github.event.inputs.allow_running || '0' }}"; case "$AR" in ''|*[!0-9]*) AR=0;; esac
+            $SSH_CMD "$TARGET" "ALLOW_RUNNING=$AR $SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
           fi
       - name: Health check
         if: env.SKIP != 'true'

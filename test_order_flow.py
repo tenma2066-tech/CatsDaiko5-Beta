@@ -647,5 +647,47 @@ class MaintenanceMode(unittest.TestCase):
             self.assertIn("https://", bad)
 
 
+
+class NetworkTimeouts(unittest.TestCase):
+    """bcsfe の上限なしアップロードで実行が永久に止まらないこと／接続段階の失敗だけ安全にやり直すこと。"""
+    def _hanging_tls_server(self):
+        import socket, threading
+        srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(8)
+        threading.Thread(target=lambda: [srv.accept() for _ in range(8)], daemon=True).start()
+        return srv.getsockname()[1]
+
+    def test_handshake_hang_times_out_and_is_classified_as_not_sent(self):
+        import os, time, requests
+        port = self._hanging_tls_server()
+        with patch.dict(os.environ, {"NO_PROXY": "*"}), patch.object(A, "NET_CONNECT_TIMEOUT", 1), patch.object(A, "NET_READ_TIMEOUT", 1):
+            A._install_net_timeouts()
+            t = time.time()
+            with self.assertRaises(requests.exceptions.Timeout):
+                requests.post(f"https://127.0.0.1:{port}/upload", data=b"x", timeout=None)  # bcsfe と同じく上限なしで呼ぶ
+            self.assertLess(time.time() - t, 10)
+            self.assertEqual(A._NET["last_fail"], "connect")
+
+    def test_issue_codes_retries_only_connect_failures(self):
+        class H:
+            def __init__(self, plan): self.plan, self.calls = list(plan), 0
+            def get_codes(self, **k):
+                self.calls += 1
+                kind = self.plan.pop(0)
+                if kind == "ok": return ("NEWCODE", "1234")
+                A._NET["last_fail"] = kind
+                return None
+        with patch.object(A.time, "sleep"), patch.object(A, "_publish_job"):
+            h = H(["connect", "connect", "ok"]); job = {"log": []}
+            self.assertEqual(A._issue_codes_once(job, h, "x"), ("NEWCODE", "1234")); self.assertEqual(h.calls, 3)
+            h = H(["after_send", "ok"]); job = {"log": []}
+            with self.assertRaises(RuntimeError):
+                A._issue_codes_once(job, h, "x")
+            self.assertEqual((h.calls, job.get("outcome_unknown")), (1, True))  # 送った後の失敗はやり直さない
+            h = H(["connect", "connect", "connect"]); job = {"log": []}
+            with self.assertRaises(RuntimeError):
+                A._issue_codes_once(job, h, "x")
+            self.assertEqual(h.calls, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

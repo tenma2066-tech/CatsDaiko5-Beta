@@ -674,6 +674,7 @@ def _worker_entry(pipe, job, arguments, slot, learned_version, names):
             _VERSION_FILE = os.path.join(_bcsfe_base, "game_version.json")
             _learned["version"] = learned_version
             _names.update(names)
+            _install_net_timeouts()
             _run_job(job, *arguments)
     except BaseException as exc:
         job.update(status="error", error=f"処理を開始できませんでした: {exc}", finished=time.time())
@@ -825,18 +826,66 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
     engine.clear_all_ads_and_popups(save)
 
 
+# ゲームのサーバーとの通信: bcsfe はセーブのアップロードを「待ち時間の上限なし」で行うため、
+# 接続が途中で止まると実行が永久に終わらない。上限を付け、失敗が「接続の段階」か「送ったあと」かを記録する。
+_NET = {"last_fail": None}   # None / "connect"（何も送っていない）/ "after_send"（送った後に失敗＝結果不明）
+NET_CONNECT_TIMEOUT = 20
+NET_READ_TIMEOUT = 120  # TLSのハンドシェイクもこの値で打ち切られる
+
+
+def _install_net_timeouts() -> None:
+    import requests
+    if getattr(requests, "_nyanko_timeouts", False):
+        return
+    def wrap(fn):
+        def inner(*args, **kwargs):
+            if kwargs.get("timeout") is None:
+                kwargs["timeout"] = (NET_CONNECT_TIMEOUT, NET_READ_TIMEOUT)
+            try:
+                response = fn(*args, **kwargs)
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.SSLError):
+                _NET["last_fail"] = "connect"
+                raise
+            except requests.exceptions.ConnectionError as exc:
+                text = repr(exc)
+                _NET["last_fail"] = "connect" if ("NewConnectionError" in text or "Failed to establish" in text
+                                                  or "Name or service not known" in text) else "after_send"
+                raise
+            except requests.exceptions.Timeout as exc:
+                # TLSのハンドシェイク中に止まった場合も ReadTimeout になる。原因の連鎖に "handshake" があれば、まだ何も送っていない。
+                chain, c = [], exc
+                while c is not None and len(chain) < 8:
+                    chain.append(str(c)); c = c.__cause__ or c.__context__
+                _NET["last_fail"] = "connect" if any("handshake" in x.lower() for x in chain) else "after_send"
+                raise
+            _NET["last_fail"] = None
+            return response
+        return inner
+    requests.post, requests.get = wrap(requests.post), wrap(requests.get)
+    requests._nyanko_timeouts = True
+
+
 def _issue_codes_once(job: dict, handler, label: str):
     # BCSFE itself retries unless tries=1. Do not repeat a write whose result
     # may have been lost after the server accepted it.
+    # ただし「接続の段階で失敗した（何も送っていない）」ときだけは、最大3回まで安全にやり直す。
     job["issuing_codes"] = True
     _publish_job(job)
-    try:
-        codes = handler.get_codes(upload_managed_items=False, tries=1)
-        if codes:
-            job["issuing_codes"] = False
-            return codes
-    except Exception:  # noqa: BLE001
-        pass  # Never expose a transport exception containing request data.
+    for attempt in range(3):
+        _NET["last_fail"] = None
+        try:
+            codes = handler.get_codes(upload_managed_items=False, tries=1)
+            if codes:
+                job["issuing_codes"] = False
+                return codes
+        except Exception:  # noqa: BLE001
+            pass  # Never expose a transport exception containing request data.
+        if _NET["last_fail"] == "connect" and attempt < 2:
+            _log(job, "ゲームのサーバーにつながりませんでした（データは送られていません）。少し待ってやり直します…")
+            _publish_job(job)
+            time.sleep(10 * (attempt + 1))
+            continue
+        break
     job["issuing_codes"] = False
     job["outcome_unknown"] = True
     raise RuntimeError(label + "のコード発行結果を確認できませんでした。サーバー側で処理済みの可能性があるため、自動再試行はしていません。再実行する前にゲーム側の状態を確認してください。")
