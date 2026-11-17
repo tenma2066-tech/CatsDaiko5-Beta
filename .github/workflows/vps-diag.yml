@@ -29,3 +29,16 @@ jobs:
             "cd /opt/catsdaiko && docker compose exec -T app python3 -" < /tmp/d.py
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
             "cd /opt/catsdaiko && echo '--- app log (tail) ---' && docker compose logs --tail 60 app 2>&1 | cut -c1-220 && echo '--- processes ---' && docker compose top app 2>&1 | cut -c1-200 && echo '--- stats ---' && docker stats --no-stream 2>&1 | cut -c1-160 && echo '--- disk/mem ---' && df -h / | tail -1 && free -m | sed -n 2p" || true
+      - name: Stack of the running worker (read-only, no local variables)
+        run: |
+          cat > /tmp/s.sh <<'SH'
+          cd /opt/catsdaiko
+          docker run --rm --pid=container:catsdaiko-app-1 --cap-add SYS_PTRACE python:3.12-slim sh -c '
+            pip install -q py-spy >/dev/null 2>&1
+            for p in /proc/[0-9]*; do
+              if tr "\0" " " < $p/cmdline 2>/dev/null | grep -q spawn_main; then echo "== worker pid ${p#/proc/} =="; py-spy dump --pid ${p#/proc/} 2>&1 | head -60; fi
+            done'
+          SH
+          sed -i 's/^          //' /tmp/s.sh
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/s.sh 2>&1 | cut -c1-220 | head -80 || true
+
