@@ -1282,8 +1282,29 @@ def admin():
         except Exception:
             _log_orders.exception("history view failed")
             msg = msg or "取引履歴を読み込めませんでした。"
+    dash = {}
+    if unlocked:
+        with _jobs_lock:
+            par = _parallel_state_locked()
+        now = time.time()
+        lt = time.localtime(now)
+        day0 = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+        try:
+            allrows = paypay_gateway.history_list(500, "")
+        except Exception:
+            allrows = []
+        def sales(since):
+            rows = [r for r in allrows if r.get("pay_state") == "paid" and r["created"] >= since]
+            return {"count": len(rows), "yen": sum(int(r.get("amount") or 0) for r in rows)}
+        counts = {}
+        for o in orders:
+            counts[o["state"]] = counts.get(o["state"], 0) + 1
+        dash = {"running": par.get("running_jobs", 0), "queued": par.get("queued_jobs", 0), "max_jobs": par.get("max_concurrent_jobs", 0),
+                "today": sales(day0), "week": sales(now - 7 * 86400), "uptime": int(now - _started_at), "version": APP_VERSION,
+                "attention": [o for o in orders if o["state"] in ("dead", "paid", "hold")],
+                "counts": counts, "open_orders": len(orders)}
     return render_template_string(ADMIN_HTML, maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
-                                  history=history, hist_user=hist_user,
+                                  history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, payments=PAYMENTS_ENABLED)
 
 
@@ -2010,59 +2031,198 @@ def cancel_job(job_id: str):
 
 
 # ---------------------------------------------------------------- 画面
-ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>管理者</title>
-<style>body{font-family:system-ui;max-width:60rem;margin:2rem auto;padding:0 1rem}input,button{font:inherit;padding:.5rem;margin:.25rem 0}form{margin:1rem 0}.msg{color:#a23}</style></head><body>
-<a href="/">戻る</a><h1>管理者モード</h1><p class="msg">{{ msg }}</p>
-{% if not unlocked %}
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="unlock">
-<label>管理者パスコード <input name="passcode" type="password" autocomplete="current-password" required></label><button>入る</button></form>
-{% else %}
-<h2>PayPay受取アカウント</h2>
-<p>料金: キャラ指定 {{ prices.chara }}円/項目・クラッシュ解除 {{ prices.crash }}円・バン保証 {{ prices.ban_guarantee }}円・アカウント複製 {{ prices.clone }}円・その他 {{ prices.other }}円/件（決済{{ "あり" if payments else "なし" }}）</p>
-<p>状態: {% if pp.ready %}接続済み（有効）{% elif pp.connected %}接続済み（セッション期限切れ。次の決済時に再認証）{% else %}未接続{% endif %}</p>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_login">
-<label>電話番号 <input name="phone" inputmode="tel" autocomplete="off" required></label><br>
-<label>パスワード <input name="password" type="password" autocomplete="off" required></label><br><button>PayPayにログイン</button></form>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_otp">
-<label>SMS認証コード(4桁) <input name="otp" inputmode="numeric" maxlength="4" autocomplete="off"></label><button>認証</button></form>
-<h2>メンテナンス表示</h2>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="maint_save">
-<p>状態: <b>{{ "オン（新規の注文・新しい支払いを停止中）" if maint.on else "オフ" }}</b>。オンの間も、すでに支払い済み・保留中の注文は最後まで進みます。</p>
-<label><input type="radio" name="on" value="1" {{ "checked" if maint.on }}> オン</label> <label><input type="radio" name="on" value="0" {{ "checked" if not maint.on }}> オフ</label><br>
-<label>表示する文章（空なら標準の文章）<br><textarea name="message" rows="3" style="width:100%" maxlength="300">{{ maint.message }}</textarea></label><br>
-<label>新しいサイトのURL（移行後に入れる。表示されて、押せるリンクになります）<br><input name="url" style="width:100%" value="{{ maint.url }}" placeholder="https://..." maxlength="300"></label><br>
-<button>保存</button></form>
-<h2>未完了の注文</h2>
-<p>保留などで止まった注文です。<b>PayPayアプリで着金を確認できたら「支払い済みにする」</b>を押してください。利用者の画面（「① アカウント」画面の上の「未完了の注文」）に「実行を開始」ボタンが出ます。</p>
-{% for o in orders %}
-<div style="border:1px solid #999;border-radius:8px;padding:.6rem;margin:.6rem 0">
-<b>{{ o.state_ja }}</b>　{{ o.amount }}円　{{ o.created }}　USERID: <a href="/admin?user={{ o.uid }}"><code>{{ o.uid }}</code></a><br>
-<small>{{ o.summary }}<br>注文番号: <code>{{ o.id }}</code><br>最後の結果: {{ o.diag or "-" }}{% if o.ledger %}　／　PayPay: {{ o.ledger }}{% endif %}{% if not o.has_link %}　／　リンク未送信{% endif %}</small>
-<form method="post" style="margin:.3rem 0"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="order" value="{{ o.id }}">
-{% if o.superseded %}<p class="msg">この注文の支払いは、同じ利用者の新しい注文に引き継ぎ済みです。支払い済みにしないでください（二重に実行されます）。</p>
-{% elif o.state != "paid" %}{% if not o.has_link %}<p class="msg">この注文には送金リンクの記録がありません（未払いの可能性が高いです）。</p>{% endif %}
-<button name="action" value="order_paid" onclick="return confirm('{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）')">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
-{% if o.state == "paid" %}{% if not o.has_link %}<p class="msg">この注文には送金リンク（入金）の記録がありません。同じ人の別の注文と重複していないか確認してから開始してください。</p>{% endif %}<button name="action" value="order_start" onclick="return confirm('この注文の実行を開始しますか？')">実行を開始する</button>{% endif %}
-{% if o.has_link and o.state in ("hold", "unpaid", "dead") %}<button name="action" value="order_recheck">PayPayに再確認する</button>{% endif %}
-{% if o.state != "dead" %}<button name="action" value="order_dead" onclick="return confirm('この注文を停止しますか？')">停止する</button>{% endif %}
-</form></div>
-{% else %}<p>ありません。</p>{% endfor %}
-<h2>取引履歴{% if hist_user %}（{{ hist_user }} のみ　<a href="/admin">すべて表示</a>）{% endif %}</h2>
-<p>新しい順に最大200件。USERID はブラウザごとの番号（Cookieを消すと変わります）。PayPayの送金者は、送金リンクを確認できた注文だけ表示されます。USERID か送金者IDを押すと、その人の履歴だけに絞れます。</p>
-<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem;white-space:nowrap">
-<tr style="text-align:left;border-bottom:2px solid #999"><th>日時</th><th>USERID</th><th>PayPay送金者</th><th>金額</th><th>入金</th><th>状態</th><th>内容</th><th>メモ</th><th>注文番号</th></tr>
-{% for h in history %}<tr style="border-bottom:1px solid #ccc;vertical-align:top">
-<td>{{ h.when }}</td><td><a href="/admin?user={{ h.user_id }}"><code>{{ h.user_id }}</code></a></td>
-<td>{% if h.sender_id %}{{ h.sender_name or "(名前なし)" }}<br><a href="/admin?user={{ h.sender_id }}"><code>{{ h.sender_id[:16] }}</code></a>{% else %}-{% endif %}</td>
-<td style="text-align:right">{{ h.amount }}円</td><td>{{ "済" if h.received else "-" }}</td><td>{{ h.state_ja }}</td>
-<td style="white-space:normal;min-width:14rem">{{ h.summary }}</td><td style="white-space:normal;min-width:10rem">{{ h.diag }}{% if h.last_status %}<br>PayPay: {{ h.last_status }}{% endif %}</td><td><code>{{ h.order_id }}</code></td></tr>
-{% else %}<tr><td colspan="9">まだありません。</td></tr>{% endfor %}
-</table></div>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button>管理者モードを終了</button></form>
-{% endif %}
-</body></html>"""
+ADMIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow">
+<title>管理者 | にゃんこ代行</title>
+<style>
+:root{--bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;--accent:#ffc42e;--ok:#12a05c;--warn:#e08a00;--bad:#d93636;--okbg:#e6f6ee;--warnbg:#fff3dc;--badbg:#fdebeb}
+@media (prefers-color-scheme:dark){:root{--bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;--okbg:#14291f;--warnbg:#33290f;--badbg:#321a1a}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;line-height:1.5;padding-bottom:40px}
+.wrap{max-width:760px;margin:0 auto;padding:0 14px}
+header{padding:calc(14px + env(safe-area-inset-top,0px)) 0 8px;display:flex;align-items:center;gap:10px}
+header h1{margin:0;font-size:20px;flex:1}header a{font-size:13px;color:var(--muted)}
+.nav{position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0 8px}
+.tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:8px 2px 4px}.tabs::-webkit-scrollbar{display:none}
+.tab{position:relative;flex:1 0 auto;min-height:42px;padding:0 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 3px 0 var(--line);white-space:nowrap}
+.tab[aria-selected=true]{background:var(--accent);color:#17181c}.tab:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
+.badge{position:absolute;top:-8px;right:-4px;min-width:20px;padding:0 5px;border:2px solid var(--line);border-radius:999px;background:var(--bad);color:#fff;font-size:11px;line-height:16px;text-align:center}
+.badge.warn{background:var(--warn)}
+section.view{display:none}section.view.on{display:block}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:16px;box-shadow:0 3px 0 var(--line);padding:14px;margin-top:12px}
+.card h2{margin:0 0 4px;font-size:17px}.card h3{margin:14px 0 6px;font-size:14px}.sub{margin:0 0 8px;font-size:13px;color:var(--muted)}
+.msgbar{margin-top:12px;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--accent);color:#17181c;font-weight:700;font-size:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.stat{background:var(--soft);border-radius:12px;padding:10px 12px}.stat small{display:block;color:var(--muted);font-size:12px}.stat b{display:block;font-size:20px;line-height:1.3}.stat span{font-size:12px;color:var(--muted)}
+.stat.ok{background:var(--okbg)}.stat.warn{background:var(--warnbg)}.stat.bad{background:var(--badbg)}
+.chip{display:inline-block;padding:1px 9px;border-radius:999px;border:1.5px solid var(--line);font-size:12px;font-weight:700;background:var(--soft);white-space:nowrap}
+.chip.ok{background:var(--okbg);border-color:var(--ok);color:var(--ok)}.chip.warn{background:var(--warnbg);border-color:var(--warn);color:var(--warn)}.chip.bad{background:var(--badbg);border-color:var(--bad);color:var(--bad)}
+label{display:block;font-size:13px;font-weight:700;margin:10px 0 4px}
+input[type=text],input[type=password],input[type=search],input:not([type]),textarea,input[type=tel],input[type=url]{width:100%;font:inherit;font-size:16px;padding:11px 12px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+textarea{min-height:76px;resize:vertical}
+input:focus-visible,textarea:focus-visible,button:focus-visible,.tab:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+.btn{min-height:42px;padding:0 14px;border:2px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 0 var(--line)}
+.btn:active{transform:translateY(1px);box-shadow:0 1px 0 var(--line)}
+.btn.pri{background:var(--accent);color:#17181c}.btn.danger{color:var(--bad);border-color:var(--bad);box-shadow:0 2px 0 var(--bad)}.btn.full{width:100%;margin-top:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.row .btn{flex:1 1 auto}
+.order{border:2px solid var(--line);border-radius:14px;padding:12px;margin-top:10px;background:var(--panel)}
+.order.bad{border-color:var(--bad);background:var(--badbg)}.order.warn{border-color:var(--warn);background:var(--warnbg)}.order.ok{border-color:var(--ok);background:var(--okbg)}
+.order .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.order .amt{margin-left:auto;font-size:22px;font-weight:800}
+.order .meta{font-size:12.5px;color:var(--muted);margin-top:4px;word-break:break-all}
+.order .sum{font-size:13.5px;margin-top:6px}
+code{font-size:12px;background:var(--soft);padding:1px 5px;border-radius:5px;word-break:break-all}
+a{color:#2f7df6}@media (prefers-color-scheme:dark){a{color:#7fb0ff}}
+header a{color:var(--muted)}
+.note{margin:8px 0 0;padding:8px 10px;border-radius:10px;font-size:13px;background:var(--warnbg);border:1.5px solid var(--warn)}
+.note.bad{background:var(--badbg);border-color:var(--bad)}
+.h{border-top:1px solid var(--soft);padding:10px 0}.h:first-child{border-top:0}
+.h .l1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.h .l1 .amt{margin-left:auto;font-weight:800}
+.h .l2{font-size:13px;color:var(--muted);margin-top:2px}.h details{margin-top:4px;font-size:12.5px;color:var(--muted)}.h summary{cursor:pointer}
+.sw{display:flex;gap:10px;margin:10px 0}.sw label{flex:1;margin:0;padding:12px;border:2px solid var(--line);border-radius:12px;text-align:center;cursor:pointer;font-size:14px}
+.sw input{position:absolute;opacity:0}.sw label:has(input:checked){background:var(--accent);color:#17181c}
+.empty{padding:16px 0;text-align:center;color:var(--muted);font-size:14px}
+.gate{max-width:380px;margin:14vh auto 0}
+table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding:6px 0;border-top:1px solid var(--soft)}.price td:last-child{text-align:right;font-weight:800}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style></head><body>
+<div class="wrap">
+<header><h1>管理者</h1><a href="/">← サイトへ戻る</a></header>
+{% if msg %}<div class="msgbar" role="status">{{ msg }}</div>{% endif %}
 
+{% if not unlocked %}
+<div class="card gate"><h2>管理者パスコード</h2><p class="sub">入るにはパスコードが必要です。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="unlock">
+<label for="pc">パスコード</label><input id="pc" name="passcode" type="password" autocomplete="current-password" required>
+<button class="btn pri full">入る</button></form></div>
+{% else %}
+
+<div class="nav"><div class="tabs" role="tablist">
+<button class="tab" role="tab" data-sec="home">ホーム</button>
+<button class="tab" role="tab" data-sec="orders">注文{% if dash.attention %}<span class="badge">{{ dash.attention|length }}</span>{% endif %}</button>
+<button class="tab" role="tab" data-sec="history">履歴</button>
+<button class="tab" role="tab" data-sec="paypay">PayPay{% if not pp.ready %}<span class="badge">!</span>{% endif %}</button>
+<button class="tab" role="tab" data-sec="settings">設定{% if maint.on %}<span class="badge warn">ON</span>{% endif %}</button>
+</div></div>
+
+<!-- ===== ホーム ===== -->
+<section class="view" id="sec-home">
+<div class="card"><h2>いまの状態</h2>
+<div class="grid">
+<div class="stat {{ 'ok' if pp.ready else 'bad' }}"><small>PayPay 接続</small><b>{% if pp.ready %}接続済み{% elif pp.connected %}再認証が必要{% else %}未接続{% endif %}</b></div>
+<div class="stat {{ 'warn' if maint.on else '' }}"><small>メンテナンス表示</small><b>{{ 'オン' if maint.on else 'オフ' }}</b></div>
+<div class="stat"><small>実行中 / 待機</small><b>{{ dash.running }} / {{ dash.queued }}</b><span>同時実行の上限 {{ dash.max_jobs }}</span></div>
+<div class="stat {{ 'bad' if dash.attention else 'ok' }}"><small>要対応の注文</small><b>{{ dash.attention|length }} 件</b><span>未完了 全{{ dash.open_orders }}件</span></div>
+</div></div>
+<div class="card"><h2>売上（入金確認済み）</h2>
+<div class="grid"><div class="stat"><small>今日</small><b>{{ '{:,}'.format(dash.today.yen) }} 円</b><span>{{ dash.today.count }} 件</span></div>
+<div class="stat"><small>直近7日</small><b>{{ '{:,}'.format(dash.week.yen) }} 円</b><span>{{ dash.week.count }} 件</span></div></div>
+<p class="sub" style="margin-top:8px">履歴に残っている範囲の集計です。</p></div>
+{% if dash.attention %}
+<div class="card"><h2>要対応</h2><p class="sub">「注文」タブで対応できます。</p>
+{% for o in dash.attention[:5] %}<div class="h"><div class="l1"><span class="chip {{ 'bad' if o.state=='dead' else 'warn' }}">{{ o.state_ja }}</span><span class="chip">{{ o.created }}</span><span class="amt">{{ o.amount }}円</span></div>
+<div class="l2">{{ o.summary }}</div></div>{% endfor %}
+<button class="btn pri full" data-go="orders">注文を見る</button></div>
+{% endif %}
+<div class="card"><h2>サーバー</h2><p class="sub">バージョン {{ dash.version }} ・ 稼働 {{ (dash.uptime // 3600) }}時間{{ ((dash.uptime % 3600) // 60) }}分</p></div>
+</section>
+
+<!-- ===== 注文 ===== -->
+<section class="view" id="sec-orders">
+<div class="card"><h2>未完了の注文</h2>
+<p class="sub">保留などで止まった注文です。<b>PayPayアプリで着金を確認できたら「支払い済みにする」</b>を押してください。押すとすぐ実行が始まり、利用者の画面は自動で切り替わります。</p>
+{% for o in orders %}
+<div class="order {{ 'bad' if o.state=='dead' else ('warn' if o.state in ('hold','paid') else '') }}">
+<div class="top"><span class="chip {{ 'bad' if o.state=='dead' else ('warn' if o.state in ('hold','paid') else '') }}">{{ o.state_ja }}</span><span class="chip">{{ o.created }}</span><span class="amt">{{ o.amount }}円</span></div>
+<div class="sum">{{ o.summary }}</div>
+<div class="meta">USERID <a href="/admin?user={{ o.uid }}#history"><code>{{ o.uid }}</code></a>　注文番号 <code>{{ o.id }}</code></div>
+<div class="meta">最後の結果: {{ o.diag or "-" }}{% if o.ledger %}　／　PayPay: {{ o.ledger }}{% endif %}{% if not o.has_link %}　／　リンク未送信{% endif %}</div>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="order" value="{{ o.id }}">
+{% if o.superseded %}<div class="note bad">この注文の支払いは、同じ利用者の新しい注文に引き継ぎ済みです。支払い済みにしないでください（二重に実行されます）。</div>
+{% elif o.state != "paid" %}{% if not o.has_link %}<div class="note">この注文には送金リンクの記録がありません（未払いの可能性が高いです）。</div>{% endif %}{% endif %}
+{% if o.state == "paid" and not o.has_link %}<div class="note">この注文には送金リンク（入金）の記録がありません。同じ人の別の注文と重複していないか確認してから開始してください。</div>{% endif %}
+<div class="row">
+{% if o.has_link and o.state in ("hold", "unpaid", "dead") %}<button class="btn" name="action" value="order_recheck">PayPayに再確認する</button>{% endif %}
+{% if o.state == "paid" %}<button class="btn pri" name="action" value="order_start" onclick="return confirm('この注文の実行を開始しますか？')">実行を開始する</button>{% endif %}
+{% if not o.superseded and o.state != "paid" %}<button class="btn {{ 'pri' if o.has_link else '' }}" name="action" value="order_paid" onclick="return confirm('{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）')">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
+{% if o.state != "dead" %}<button class="btn danger" name="action" value="order_dead" onclick="return confirm('この注文を停止しますか？')">停止する</button>{% endif %}
+</div></form></div>
+{% else %}<div class="empty">未完了の注文はありません 🎉</div>{% endfor %}
+</div></section>
+
+<!-- ===== 履歴 ===== -->
+<section class="view" id="sec-history">
+<div class="card"><h2>取引履歴{% if hist_user %}<span class="chip" style="margin-left:6px">{{ hist_user }}</span>{% endif %}</h2>
+<p class="sub">新しい順に最大200件。USERID はブラウザごとの番号（Cookieを消すと変わります）。送金者は、送金リンクを確認できた注文だけ表示されます。{% if hist_user %}<a href="/admin#history">すべて表示</a>{% endif %}</p>
+<input type="search" id="hq" placeholder="絞り込み（金額・内容・ID・状態）" autocomplete="off" aria-label="履歴を絞り込み">
+<div id="hlist" style="margin-top:6px">
+{% for h in history %}<div class="h" data-q="{{ h.when }} {{ h.user_id }} {{ h.sender_id or '' }} {{ h.sender_name or '' }} {{ h.amount }} {{ h.state_ja }} {{ h.summary }} {{ h.order_id }}">
+<div class="l1"><span class="chip {{ 'ok' if h.state=='done' else ('bad' if h.state=='dead' else ('warn' if h.state in ('hold','paid','started','starting') else '')) }}">{{ h.state_ja }}</span>
+{% if h.received %}<span class="chip ok">入金済</span>{% endif %}<span class="chip">{{ h.when }}</span><span class="amt">{{ h.amount }}円</span></div>
+<div class="l2">{{ h.summary }}</div>
+<div class="l2">USERID <a href="/admin?user={{ h.user_id }}#history"><code>{{ h.user_id }}</code></a>{% if h.sender_id %}　送金者 {{ h.sender_name or "(名前なし)" }} <a href="/admin?user={{ h.sender_id }}#history"><code>{{ h.sender_id[:16] }}</code></a>{% endif %}</div>
+<details><summary>くわしく</summary>メモ: {{ h.diag or "-" }}{% if h.last_status %}<br>PayPay: {{ h.last_status }}{% endif %}<br>注文番号: <code>{{ h.order_id }}</code></details></div>
+{% else %}<div class="empty">まだありません</div>{% endfor %}
+</div></div></section>
+
+<!-- ===== PayPay ===== -->
+<section class="view" id="sec-paypay">
+<div class="card"><h2>PayPay 受取アカウント</h2>
+<p><span class="chip {{ 'ok' if pp.ready else ('warn' if pp.connected else 'bad') }}">{% if pp.ready %}接続済み（有効）{% elif pp.connected %}接続済み（セッション期限切れ。次の決済時に再認証）{% else %}未接続{% endif %}</span></p>
+<p class="sub">① 電話番号とパスワードでログイン → ② SMS で届いた4桁のコードを入力、の順です。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_login">
+<h3>① ログイン</h3>
+<label for="ph">電話番号</label><input id="ph" name="phone" type="tel" inputmode="tel" autocomplete="off" required>
+<label for="pw">パスワード</label><input id="pw" name="password" type="password" autocomplete="off" required>
+<button class="btn pri full">PayPayにログイン</button></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_otp">
+<h3>② SMS 認証</h3>
+<label for="otp">認証コード（4桁）</label><input id="otp" name="otp" inputmode="numeric" maxlength="4" autocomplete="off">
+<button class="btn full">認証</button></form></div></section>
+
+<!-- ===== 設定 ===== -->
+<section class="view" id="sec-settings">
+<div class="card"><h2>メンテナンス表示</h2>
+<p class="sub">オンの間は新規の注文・新しい支払いを止めます。すでに支払い済み・保留中の注文は最後まで進みます。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="maint_save">
+<div class="sw"><label><input type="radio" name="on" value="1" {{ "checked" if maint.on }}>オン</label><label><input type="radio" name="on" value="0" {{ "checked" if not maint.on }}>オフ</label></div>
+<label for="mm">表示する文章（空なら標準の文章）</label><textarea id="mm" name="message" maxlength="300">{{ maint.message }}</textarea>
+<label for="mu">新しいサイトのURL（移行後に入れると、押せるリンクが出ます）</label><input id="mu" name="url" type="url" value="{{ maint.url }}" placeholder="https://..." maxlength="300">
+<button class="btn pri full">保存</button></form></div>
+<div class="card"><h2>料金（決済{{ "あり" if payments else "なし" }}）</h2>
+<table class="price"><tr><td>キャラ指定（レベル・形態・本能を1項目ずつ）</td><td>{{ prices.chara }}円</td></tr>
+<tr><td>クラッシュ解除（1件）</td><td>{{ prices.crash }}円</td></tr><tr><td>バン保証</td><td>{{ prices.ban_guarantee }}円</td></tr>
+<tr><td>アカウント複製</td><td>{{ prices.clone }}円</td></tr><tr><td>それ以外（1件）</td><td>{{ prices.other }}円</td></tr></table>
+<p class="sub" style="margin-top:8px">料金は <code>app.py</code> の <code>PRICES</code> で変更します。</p></div>
+<div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button class="btn full">管理者モードを終了</button></form></div>
+</section>
+
+<script>
+(function(){
+  var secs=['home','orders','history','paypay','settings'];
+  function show(id,push){
+    if(secs.indexOf(id)<0) id='home';
+    secs.forEach(function(s){ var e=document.getElementById('sec-'+s); if(e) e.classList.toggle('on',s===id); });
+    document.querySelectorAll('.tab').forEach(function(b){ b.setAttribute('aria-selected',b.dataset.sec===id?'true':'false'); });
+    try{ sessionStorage.setItem('adm-tab',id); }catch(e){}
+    if(push) history.replaceState(null,'','#'+id);
+    window.scrollTo(0,0);
+  }
+  document.querySelectorAll('.tab').forEach(function(b){ b.addEventListener('click',function(){ show(b.dataset.sec,true); }); });
+  document.querySelectorAll('[data-go]').forEach(function(b){ b.addEventListener('click',function(){ show(b.dataset.go,true); }); });
+  var start=(location.hash||'').slice(1);
+  if(!start){ try{ start=sessionStorage.getItem('adm-tab')||''; }catch(e){} }
+  /* 操作の直後（メッセージが出ているとき）は、その操作をしたタブに戻す */
+  show(start||'home',false);
+  var hq=document.getElementById('hq');
+  if(hq) hq.addEventListener('input',function(){
+    var q=hq.value.trim().toLowerCase();
+    document.querySelectorAll('#hlist .h').forEach(function(r){ r.style.display=(!q||r.dataset.q.toLowerCase().indexOf(q)>=0)?'':'none'; });
+  });
+})();
+</script>
+{% endif %}
+</div></body></html>"""
 
 
 MAIN_HTML = r"""<!doctype html><html lang="ja"><head><meta charset="utf-8">

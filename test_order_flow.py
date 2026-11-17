@@ -484,7 +484,7 @@ class HistoryTests(unittest.TestCase):
             self.assertNotIn("SECRETcode9", page)
             self.assertNotIn("4321", page)
             self.assertIn(uid, admin.get("/admin?user=" + uid).get_data(as_text=True))
-            self.assertNotIn(j["order"], admin.get("/admin?user=nobody00").get_data(as_text=True).split("取引履歴")[1])
+            self.assertNotIn(j["order"], admin.get("/admin?user=nobody00").get_data(as_text=True).split("id=\"sec-history\"")[1])
 
 
 class OrderPersistence(unittest.TestCase):
