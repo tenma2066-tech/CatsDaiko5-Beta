@@ -24,10 +24,11 @@ jobs:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
-          [ -n "$VPS_HOST" ] || { echo "::error::シークレット VPS_HOST（サーバーのIPアドレス）を登録してください"; exit 1; }
+          if [ -z "$VPS_HOST" ]; then echo "::notice::VPS_HOST が未登録のため、VPSへのデプロイは行いません（登録後に実行されます）"; echo "SKIP=true" >> "$GITHUB_ENV"; exit 0; fi
           [ -n "$ADMIN_PASSWORD" ] || { echo "::error::シークレット ADMIN_PASSWORD を登録してください"; exit 1; }
           if [ -z "$VPS_PASSWORD" ] && [ -z "$VPS_SSH_KEY" ]; then echo "::error::シークレット VPS_PASSWORD（または VPS_SSH_KEY）を登録してください"; exit 1; fi
       - name: Prepare SSH
+        if: env.SKIP != 'true'
         env:
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -49,6 +50,7 @@ jobs:
           echo "SUDO=$([ "$U" = root ] && echo '' || echo 'sudo')" >> "$GITHUB_ENV"
           if [ -n "$SITE_DOMAIN" ]; then echo "SITE_HOST=$SITE_DOMAIN" >> "$GITHUB_ENV"; else echo "SITE_HOST=$(echo "$VPS_HOST" | tr '.' '-').sslip.io" >> "$GITHUB_ENV"; fi
       - name: Test connection
+        if: env.SKIP != 'true'
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
@@ -57,6 +59,7 @@ jobs:
             exit 1
           fi
       - name: Upload source
+        if: env.SKIP != 'true'
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
@@ -65,6 +68,7 @@ jobs:
           echo "NEW_SRC=$NEW" >> "$GITHUB_ENV"
           tar czf - --exclude=.git . | $SSH_CMD "$TARGET" "rm -rf $NEW && mkdir -p $NEW && tar xzf - -C $NEW"
       - name: Setup and start on server
+        if: env.SKIP != 'true'
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
@@ -79,6 +83,7 @@ jobs:
             $SSH_CMD "$TARGET" "$SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
           fi
       - name: Health check
+        if: env.SKIP != 'true'
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |

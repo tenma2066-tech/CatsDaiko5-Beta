@@ -1073,6 +1073,42 @@ def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, ca
     return sum(n * p for _, n, p in rows), rows
 
 
+_MAINT_FILE = os.path.join(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay"), "maintenance.json")
+_maint_cache = {"mtime": None, "data": {"on": False, "message": "", "url": ""}}
+
+
+def _maint() -> dict:
+    """メンテナンス表示の設定（管理画面で切り替え。ファイルに保存して再起動後も続く）。"""
+    try:
+        m = os.stat(_MAINT_FILE).st_mtime
+    except OSError:
+        return {"on": False, "message": "", "url": ""}
+    if _maint_cache["mtime"] != m:
+        try:
+            with open(_MAINT_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+            _maint_cache.update(mtime=m, data={"on": bool(d.get("on")), "message": str(d.get("message", ""))[:300], "url": str(d.get("url", ""))[:300]})
+        except Exception:
+            return {"on": False, "message": "", "url": ""}
+    return _maint_cache["data"]
+
+
+def _set_maint(on: bool, message: str, url: str) -> None:
+    os.makedirs(os.path.dirname(_MAINT_FILE) or ".", exist_ok=True)
+    url = url.strip()
+    if url and not re.fullmatch(r"https://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{4,280}", url):
+        raise ValueError("新しいURLは https:// で始まる形で入力してください。")
+    tmp = _MAINT_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"on": on, "message": message.strip()[:300], "url": url}, f, ensure_ascii=False)
+    os.replace(tmp, _MAINT_FILE)
+
+
+def _maintenance_response():
+    m = _maint()
+    return jsonify(error=m["message"] or "ただいまメンテナンス中です。新規のご注文は、作業が終わるまでお待ちください。", code="maintenance", url=m["url"]), 503
+
+
 def _uid(owner: str) -> str:
     """管理画面・履歴用の短いユーザーID（ブラウザごと。Cookieを消すと変わる）。"""
     return hashlib.sha256(("uid:" + owner).encode()).hexdigest()[:8]
@@ -1141,6 +1177,12 @@ def admin():
         elif action == "pp_otp":
             res, err = _pp(paypay_gateway.finish_login(request.form.get("otp", "").strip()))
             msg = err or "PayPayに接続しました。"
+        elif action == "maint_save":
+            try:
+                _set_maint(request.form.get("on") == "1", request.form.get("message", ""), request.form.get("url", ""))
+                msg = "メンテナンス表示を" + ("オンにしました（新規の注文と新しい支払いを止めています）。" if request.form.get("on") == "1" else "オフにしました。")
+            except (ValueError, OSError) as exc:
+                msg = str(exc) or "保存できませんでした。"
         elif action == "order_recheck":
             oid = request.form.get("order", "")
             r = _recheck_and_start(oid, "admin")
@@ -1240,7 +1282,7 @@ def admin():
         except Exception:
             _log_orders.exception("history view failed")
             msg = msg or "取引履歴を読み込めませんでした。"
-    return render_template_string(ADMIN_HTML, msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
+    return render_template_string(ADMIN_HTML, maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user,
                                   prices=PRICES, payments=PAYMENTS_ENABLED)
 
@@ -1410,7 +1452,7 @@ def index():
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
-        MAIN_HTML, uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
+        MAIN_HTML, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
@@ -1523,6 +1565,8 @@ def api_cats_refresh():
 @app.post("/run")
 def run():
     _gc_jobs()
+    if _maint()["on"] and PAYMENTS_ENABLED:
+        return _maintenance_response()
     data = request.get_json(silent=True) or {}
     transfer = str(data.get("transfer", "")).strip()
     confirm = str(data.get("confirm", "")).strip()
@@ -1711,7 +1755,7 @@ def my_orders():
             elif v["owner"] == me and v["state"] == "done" and (v.get("job_id") in live or (v.get("result") and not v.get("dry"))):
                 items.append(dict(_public_order(k, v), job=v.get("job_id") if v.get("job_id") in live else None))
     items.sort(key=lambda x: -x["created"])
-    return jsonify(orders=items)
+    return jsonify(orders=items, maint=_maint())
 
 
 @app.post("/api/orders/<order_id>/claim")
@@ -1824,6 +1868,8 @@ def _pay_order(order_id: str):
         order = _orders.get(order_id)
         if not order or order["owner"] != _owner():
             return jsonify(error="注文が見つかりません（30分で期限切れになります）。もう一度「実行」から始めてください。", code="order_missing"), 404
+        if _maint()["on"] and order["state"] == "unpaid":  # メンテナンス中は新しい支払いを受け付けない（すでに支払い済み・保留の注文は進められる）
+            return _maintenance_response()
         if order["state"] == "paying":
             return jsonify(error="決済確認中です。少しお待ちください。", code="paying"), 409
         if order["state"] in ("started", "starting"):
@@ -1980,6 +2026,13 @@ ADMIN_HTML = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <label>パスワード <input name="password" type="password" autocomplete="off" required></label><br><button>PayPayにログイン</button></form>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_otp">
 <label>SMS認証コード(4桁) <input name="otp" inputmode="numeric" maxlength="4" autocomplete="off"></label><button>認証</button></form>
+<h2>メンテナンス表示</h2>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="maint_save">
+<p>状態: <b>{{ "オン（新規の注文・新しい支払いを停止中）" if maint.on else "オフ" }}</b>。オンの間も、すでに支払い済み・保留中の注文は最後まで進みます。</p>
+<label><input type="radio" name="on" value="1" {{ "checked" if maint.on }}> オン</label> <label><input type="radio" name="on" value="0" {{ "checked" if not maint.on }}> オフ</label><br>
+<label>表示する文章（空なら標準の文章）<br><textarea name="message" rows="3" style="width:100%" maxlength="300">{{ maint.message }}</textarea></label><br>
+<label>新しいサイトのURL（移行後に入れる。表示されて、押せるリンクになります）<br><input name="url" style="width:100%" value="{{ maint.url }}" placeholder="https://..." maxlength="300"></label><br>
+<button>保存</button></form>
 <h2>未完了の注文</h2>
 <p>保留などで止まった注文です。<b>PayPayアプリで着金を確認できたら「支払い済みにする」</b>を押してください。利用者の画面（「① アカウント」画面の上の「未完了の注文」）に「実行を開始」ボタンが出ます。</p>
 {% for o in orders %}
@@ -2230,6 +2283,12 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 
 
 .tab.locked{opacity:.4;cursor:not-allowed}
+.maintbar{position:sticky;top:0;z-index:50;background:var(--accent);color:#17181c;border-bottom:2px solid #17181c;padding:8px 14px;font-size:13.5px;line-height:1.5;text-align:center}
+.maintbar b{margin-right:8px}.maintbar a{color:#17181c;font-weight:800;margin-left:6px}
+.maintwall{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
+.maintwall[hidden],.maintbar[hidden]{display:none}
+.maintwall .mbox{max-width:420px;text-align:center;background:var(--panel);color:var(--ink);border:2px solid var(--line);border-radius:16px;box-shadow:0 4px 0 var(--line);padding:22px 18px}
+.maintwall .btn.pri{background:var(--accent);color:#17181c;border:2px solid var(--line);border-radius:12px;font-weight:800;box-shadow:0 3px 0 var(--line)}.maintwall p{line-height:1.7}
 .updbanner{position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top,0px));z-index:40;max-width:616px;margin:0 auto;background:var(--accent);color:#17181c;border:2px solid #17181c;border-radius:14px;box-shadow:0 4px 0 #17181c;padding:10px 14px;font-size:13.5px;line-height:1.5}
 .updbanner b{display:block;font-size:15px}
 .updbanner[hidden]{display:none}
@@ -2688,11 +2747,14 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <div class="mbtns"><button class="btn pri" id="doneClose" type="button" disabled>閉じる</button></div>
   </div>
 </div>
+<div class="maintbar" id="maintBar" hidden><b>メンテナンス中</b><span id="maintMsg"></span> <a id="maintLink" href="#" hidden rel="noopener">新しいサイトを開く</a></div>
+<div class="maintwall" id="maintWall" hidden><div class="mbox"><h2>メンテナンス中</h2><p id="maintWallMsg"></p><p><a id="maintWallLink" class="btn pri" href="#" hidden rel="noopener" style="display:inline-block;padding:12px 18px;text-decoration:none">新しいサイトを開く</a></p><p class="sub">すでに支払い済み・保留中の注文がある方は、同じブラウザでこのページを開き直すと続きを確認できます。</p></div></div>
 <div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const MAINT={{ maint|tojson }};
 const TOTALS={{ totals|tojson }};
 const PRICES={{ prices|tojson }}, CRASH={{ crash_items|tojson }}, PAYMENTS={{ payments|tojson }};
 const HIGH={{ high|tojson }};
@@ -3457,7 +3519,7 @@ async function start(){
       const r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(runBody(t,c))});
       const j=await r.json();
       restore();
-      if(!r.ok){ $('#orderErr').textContent=j.error||'注文を作成できませんでした'; $('#orderErr').scrollIntoView({block:'center'}); return; }
+      if(!r.ok){ $('#orderErr').textContent=j.error||'注文を作成できませんでした'; if(j.code==='maintenance'){ applyMaint({on:true,message:j.error,url:j.url||''},false); } $('#orderErr').scrollIntoView({block:'center'}); return; }
       if(j.order){ openPay(j.order,j.amount,j.breakdown,j.skipped,j.state); return; }
       setRunning(true); show('status'); jobStart=Date.now(); watch(j.job);
     }catch(e){ restore(); $('#orderErr').textContent='サーバーに接続できませんでした。少し待ってからもう一度お試しください。'; }
@@ -3542,6 +3604,7 @@ const PAY_MSG={
   link_restricted:['パスコード付きのリンクは使えません','パスコードなしで送金リンクを作り直してください。'],
   link_blocked:['PayPay側で保留中のリンクです','PayPayアプリで保留を解除してから、もう一度ボタンを押してください（再送金は不要です）。'],
   updating:['アップデート中です','自動で続きます。このままお待ちください。'],
+  maintenance:['メンテナンス中です','新規のご注文は、作業が終わるまでお待ちください。'],
   expired:['リンクの期限切れ','新しい送金リンクを作り直してください。'],
   already_received:['受け取り済みのリンクです','すでに使われたリンクです。新しいリンクを作ってください。'],
   link_cancelled:['リンクが取り消されています','新しい送金リンクを作ってください。'],
@@ -3668,6 +3731,14 @@ function watchOrders(on){
   if(!on&&watchTimer){ clearInterval(watchTimer); watchTimer=null; }
 }
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&watchTimer) loadResume(true); });
+function applyMaint(m,hasOrders){
+  if(!m||!m.on){ $('#maintBar').hidden=true; $('#maintWall').hidden=true; return; }
+  const msg=m.message||'ただいまメンテナンス中です。新規のご注文は、作業が終わるまでお待ちください。';
+  $('#maintMsg').textContent=msg; $('#maintWallMsg').textContent=msg;
+  [['#maintLink'],['#maintWallLink']].forEach(([id])=>{ const a=$(id); if(m.url){ a.href=m.url; a.hidden=false; } else a.hidden=true; });
+  $('#maintBar').hidden=false;
+  $('#maintWall').hidden=!!hasOrders;   /* 未完了の注文がある人には、続きを見られるよう全面表示にしない */
+}
 async function loadResume(quiet){
   try{
     const r=quiet?await fetch('/api/orders/mine',{cache:'no-store'}):await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
@@ -3690,6 +3761,7 @@ async function loadResume(quiet){
     // 支払い画面を開いている注文が「支払い済み」になった → その場で開始ボタンに切り替える
     if(payOrder){ const me=list.find(o=>o.order===payOrder); if(me&&me.state==='paid'&&!$('#payPanel').hidden&&$('#payGo').textContent!=='支払い済み・実行を開始'){ payDead=false; clearInterval(holdTimer); holdTimer=null; $('#payLinkField').hidden=true; $('#payGo').disabled=false; $('#payGo').textContent='支払い済み・実行を開始'; $('#payErr').hidden=true; $('#payInfo').textContent='お支払いが確認できました。ボタンを押すと実行を開始します（再送金は不要です）。'; } }
     watchOrders(list.some(o=>['unpaid','hold','paid','dead','starting','paying'].includes(o.state)||(o.state==='started'&&o.job)));
+    applyMaint(j.maint,list.some(o=>o.state!=='unpaid'));
     const box=$('#resumeList'); box.textContent='';
     $('#resumePanel').hidden=!list.length;
     list.forEach(o=>{
@@ -3727,6 +3799,7 @@ $('#claimGo').addEventListener('click',async()=>{
   }catch(e){ toast('接続できませんでした'); }
 });
 const draft0=restoreDraft();
+applyMaint(MAINT,false);
 show(draft0&&draft0.view&&draft0.view!=='status'&&TABS.includes(draft0.view)?draft0.view:'input'); refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
 draftReady=true;
 openHelp(); /* 開くたびに確認と使い方を表示 */

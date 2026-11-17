@@ -519,5 +519,55 @@ class OrderPersistence(unittest.TestCase):
         self.assertEqual(A._order_from_json(o)["state"], "unpaid")
 
 
+
+class MaintenanceMode(unittest.TestCase):
+    def setUp(self):
+        import tempfile, os
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ps = [patch.object(A, "_MAINT_FILE", os.path.join(self.tmp.name, "m.json")), patch.object(A, "PAYMENTS_ENABLED", True),
+                   patch.dict(A._orders, {}, clear=True), patch.object(G, "history_upsert"), patch.object(G, "save_orders")]
+        for p in self.ps: p.start()
+        A._maint_cache.update(mtime=None)
+        self.c = A.app.test_client()
+
+    def tearDown(self):
+        for p in reversed(self.ps): p.stop()
+        self.tmp.cleanup()
+
+    def test_blocks_new_orders_and_unpaid_payments_but_not_existing_ones(self):
+        o = self.c.post("/run", json={"items": ["XP"]}).get_json()["order"]
+        paid = self.c.post("/run", json={"items": ["NP"]}).get_json()["order"]
+        A._orders[paid]["state"] = "paid"
+        A._set_maint(True, "移行中です", "https://example.com/new")
+        r = self.c.post("/run", json={"items": ["XP"]})
+        self.assertEqual((r.status_code, r.get_json()["code"], r.get_json()["url"]), (503, "maintenance", "https://example.com/new"))
+        r = self.c.post(f"/api/orders/{o}/pay", json={"link": "x"})
+        self.assertEqual((r.status_code, r.get_json()["code"]), (503, "maintenance"))
+        with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JM")):
+            self.assertEqual(self.c.post(f"/api/orders/{paid}/pay", json={}).get_json()["job"], "JM")  # 支払い済みは進められる
+        m = self.c.get("/api/orders/mine").get_json()["maint"]
+        self.assertEqual((m["on"], m["url"]), (True, "https://example.com/new"))
+        self.assertIn("メンテナンス中", self.c.get("/").get_data(as_text=True))
+        A._set_maint(False, "", "")
+        self.assertEqual(self.c.post("/run", json={"items": ["XP"]}).status_code, 200)
+
+    def test_url_must_be_https_and_admin_can_toggle(self):
+        with self.assertRaises(ValueError):
+            A._set_maint(True, "x", "javascript:alert(1)")
+        with self.assertRaises(ValueError):
+            A._set_maint(True, "x", "http://example.com")
+        admin = A.app.test_client()
+        with patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(G, "status", return_value={}), patch.object(G, "history_list", return_value=[]):
+            admin.get("/admin")
+            with admin.session_transaction() as s: csrf = s["admin_csrf"]
+            admin.post("/admin", data={"action": "unlock", "csrf": csrf, "passcode": "adm"})
+            with admin.session_transaction() as s: csrf = s["admin_csrf"]
+            page = admin.post("/admin", data={"action": "maint_save", "csrf": csrf, "on": "1", "message": "テスト", "url": "https://new.example/"}).get_data(as_text=True)
+            self.assertIn("オンにしました", page)
+            self.assertTrue(A._maint()["on"])
+            bad = admin.post("/admin", data={"action": "maint_save", "csrf": csrf, "on": "1", "message": "", "url": "http://x"}).get_data(as_text=True)
+            self.assertIn("https://", bad)
+
+
 if __name__ == "__main__":
     unittest.main()
