@@ -28,4 +28,4 @@ jobs:
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
             "cd /opt/catsdaiko && docker compose exec -T app python3 -" < /tmp/d.py
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
-            "cd /opt/catsdaiko && docker compose logs --since 40m app 2>&1 | grep -iE 'error|exception|traceback|timeout|killed' | tail -20" || true
+            "cd /opt/catsdaiko && echo '--- app log (tail) ---' && docker compose logs --tail 60 app 2>&1 | cut -c1-220 && echo '--- processes ---' && docker compose top app 2>&1 | cut -c1-200 && echo '--- stats ---' && docker stats --no-stream 2>&1 | cut -c1-160 && echo '--- disk/mem ---' && df -h / | tail -1 && free -m | sed -n 2p" || true
