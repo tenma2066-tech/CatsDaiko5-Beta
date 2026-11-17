@@ -53,6 +53,43 @@ ADMIN_PASSWORD = _read_admin_password()
 PAYMENTS_ENABLED = os.environ.get("PAYMENTS_ENABLED", "1") != "0"  # 0 = 決済なし（動作確認用）
 # 料金（円）
 PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25}
+PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
+                "clone": "アカウント複製", "other": "それ以外のメニュー（1件）"}
+_PRICES_FILE = os.path.join(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay"), "prices.json")
+
+
+def _load_prices() -> None:
+    """管理画面で変更した料金を読み込む（なければ既定値のまま）。"""
+    try:
+        with open(_PRICES_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        for k in PRICES:
+            v = data.get(k)
+            if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 100000:
+                PRICES[k] = v
+    except (OSError, ValueError):
+        pass
+
+
+def _save_prices(new: dict) -> None:
+    clean = {}
+    for k in PRICES:
+        raw = str(new.get(k, "")).strip()
+        if not (raw.isascii() and raw.isdigit()):
+            raise ValueError(f"「{PRICE_LABELS[k]}」は半角の数字で入力してください。")
+        v = int(raw)
+        if not 1 <= v <= 100000:
+            raise ValueError(f"「{PRICE_LABELS[k]}」は 1〜100,000 円で入力してください。")
+        clean[k] = v
+    os.makedirs(os.path.dirname(_PRICES_FILE) or ".", exist_ok=True)
+    tmp = _PRICES_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(clean, f)
+    os.replace(tmp, _PRICES_FILE)
+    PRICES.update(clean)  # 以後の新しい注文から反映（作成済みの注文の金額は変わらない）
+
+
+_load_prices()
 CRASH_ITEMS = ("ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正")
 ORDER_TTL = 1800
 
@@ -1151,9 +1188,24 @@ def _pp(coro):
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
-    msg = ""
+    msg = session.pop("admin_flash", "") if request.method == "GET" else ""
     token = session.setdefault("admin_csrf", secrets.token_urlsafe(32))
     if request.method == "POST":
+        resp = _admin_post(token)
+        if resp is not None:
+            return resp
+    return _admin_page(msg)
+
+
+ADMIN_TAB = {"pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
+             "maint_save": "settings", "price_save": "settings", "order_recheck": "orders", "order_start": "orders",
+             "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
+
+
+def _admin_post(token):
+    """管理画面の操作。結果は次の画面（GET）で表示する＝再読み込みしても同じ操作が二重に送られない。"""
+    msg = ""
+    if True:
         provided = request.form.get("csrf", "")
         if not hmac.compare_digest(provided.encode(), token.encode()):
             return "不正なリクエストです。", 403
@@ -1248,6 +1300,40 @@ def admin():
         elif action == "lock":
             session.pop("admin", None)
             return redirect("/admin")
+        elif action == "pp_refresh":
+            try:
+                asyncio.run(paypay_gateway.refresh_session())
+                msg = "PayPayの接続を更新しました（保存済みの情報でログインし直しました）。"
+            except paypay_gateway.PayPayError as exc:
+                msg = {"otp_required": "PayPayがSMS認証を求めています。届いた4桁のコードを「② SMS 認証」に入力してください。",
+                       "login_required": "PayPayが未接続です。「① ログイン」から電話番号とパスワードで接続してください。"}.get(exc.code, exc.message)
+            except Exception:
+                _log_orders.exception("paypay refresh failed")
+                msg = "PayPayの接続を更新できませんでした。少し待ってからもう一度お試しください。"
+        elif action == "pp_recheck_all":
+            with _orders_lock:
+                targets = [k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
+                           if o["state"] in ("hold", "dead") and o.get("link_code")]
+            results = {}
+            for k in targets[:20]:
+                r = _recheck_and_start(k, "admin")
+                key = "開始" if r == "started" else ("支払い済み（開始待ち）" if r == "paid" else ("まだ保留" if r.startswith("wait") else ("要確認" if r.startswith("stop") else "対象外")))
+                results[key] = results.get(key, 0) + 1
+            msg = ("保留・要確認の注文 {} 件をPayPayに確認しました：".format(len(targets[:20])) + "、".join(f"{k} {v}件" for k, v in results.items())) if targets else "再確認が必要な注文（保留・要確認で送金リンクのあるもの）はありません。"
+        elif action == "price_save":
+            try:
+                _save_prices(request.form)
+                msg = "料金を変更しました。これからの新しい注文から反映されます（作成済みの注文の金額は変わりません）。"
+            except (ValueError, OSError) as exc:
+                msg = str(exc) or "保存できませんでした。"
+    if request.form.get("action") == "unlock" and not session.get("admin"):
+        session["admin_flash"] = msg
+        return redirect("/admin")
+    session["admin_flash"] = msg
+    return redirect("/admin#" + ADMIN_TAB.get(request.form.get("action"), "home"))
+
+
+def _admin_page(msg):
     unlocked = bool(session.get("admin"))
     pp = {}
     if unlocked:
@@ -1305,7 +1391,7 @@ def admin():
                 "counts": counts, "open_orders": len(orders)}
     return render_template_string(ADMIN_HTML, maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
-                                  prices=PRICES, payments=PAYMENTS_ENABLED)
+                                  prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED)
 
 
 # ---------------------------------------------------------------- 注文（決済してから実行）
@@ -2169,7 +2255,14 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <section class="view" id="sec-paypay">
 <div class="card"><h2>PayPay 受取アカウント</h2>
 <p><span class="chip {{ 'ok' if pp.ready else ('warn' if pp.connected else 'bad') }}">{% if pp.ready %}接続済み（有効）{% elif pp.connected %}接続済み（セッション期限切れ。次の決済時に再認証）{% else %}未接続{% endif %}</span></p>
-<p class="sub">① 電話番号とパスワードでログイン → ② SMS で届いた4桁のコードを入力、の順です。</p>
+<h3>手動での更新</h3>
+<p class="sub">それぞれ別々に使えます。押したあと画面を再読み込みしても、同じ操作がもう一度送られることはありません。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
+<button class="btn full" name="action" value="pp_refresh" onclick="return confirm('保存済みの電話番号・パスワードでPayPayにログインし直します。SMS認証を求められることがあります。よろしいですか？')">🔄 PayPayの接続を更新（ログインし直す）</button>
+<button class="btn full" name="action" value="pp_recheck_all" onclick="return confirm('保留・要確認の注文を、いますぐ全部PayPayに確認します。入金済みのものは実行まで進みます。よろしいですか？')">🔍 保留中の注文をまとめて再確認</button>
+</form>
+<a class="btn full" href="/admin#paypay" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">↻ 状態を表示し直す（何も送らない）</a>
+<p class="sub" style="margin-top:12px">初めて接続するとき・接続が切れたときは、① 電話番号とパスワードでログイン → ② SMS で届いた4桁のコードを入力、の順です。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_login">
 <h3>① ログイン</h3>
 <label for="ph">電話番号</label><input id="ph" name="phone" type="tel" inputmode="tel" autocomplete="off" required>
@@ -2190,10 +2283,12 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <label for="mu">新しいサイトのURL（移行後に入れると、押せるリンクが出ます）</label><input id="mu" name="url" type="url" value="{{ maint.url }}" placeholder="https://..." maxlength="300">
 <button class="btn pri full">保存</button></form></div>
 <div class="card"><h2>料金（決済{{ "あり" if payments else "なし" }}）</h2>
-<table class="price"><tr><td>キャラ指定（レベル・形態・本能を1項目ずつ）</td><td>{{ prices.chara }}円</td></tr>
-<tr><td>クラッシュ解除（1件）</td><td>{{ prices.crash }}円</td></tr><tr><td>バン保証</td><td>{{ prices.ban_guarantee }}円</td></tr>
-<tr><td>アカウント複製</td><td>{{ prices.clone }}円</td></tr><tr><td>それ以外（1件）</td><td>{{ prices.other }}円</td></tr></table>
-<p class="sub" style="margin-top:8px">料金は <code>app.py</code> の <code>PRICES</code> で変更します。</p></div>
+<p class="sub">変更は、保存したあとの<b>新しい注文から</b>反映されます。作成済み・支払い中の注文の金額は変わりません。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="price_save">
+{% for k, label in price_labels.items() %}
+<label for="pr-{{ k }}">{{ label }}（円）</label><input id="pr-{{ k }}" name="{{ k }}" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ prices[k] }}" required maxlength="6">
+{% endfor %}
+<button class="btn pri full" onclick="return confirm('料金を変更します。これからの新しい注文から反映されます。よろしいですか？')">料金を保存</button></form></div>
 <div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button class="btn full">管理者モードを終了</button></form></div>
 </section>
 

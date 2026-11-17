@@ -600,6 +600,14 @@ def history_list(limit: int = 200, user_id: str = ""):
         return [dict(r) for r in db.execute(sql, args).fetchall()]
 
 
+async def refresh_session():
+    """管理画面の「PayPayの接続を更新」: 保存済みの電話番号・パスワードでログインし直す（期限内でも）。
+    SMS認証を求められたら otp_required（その後は管理画面のSMS認証欄で続きを入力できる）。"""
+    with _LOCK:
+        account = await _fresh_account(force=True)
+    return {"expires_at": int(account.get("expires_at", 0))}
+
+
 def link_order_id(code: str):
     """台帳で、このリンクがどの注文のものとして記録されているか。"""
     if not isinstance(code, str) or not CODE_RE.fullmatch(code):

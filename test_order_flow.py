@@ -139,7 +139,7 @@ class OrderFlow(unittest.TestCase):
                 A._jobs["JR"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
                 return A.jsonify(job="JR")
             with patch.object(A, "_start_job", side_effect=real_like_start) as st:
-                page = admin.post("/admin", data={"action": "order_paid", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
+                page = admin.post("/admin", follow_redirects=True, data={"action": "order_paid", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
             mp.assert_called_once()
             st.assert_called_once()  # 管理者が支払い済みにした時点で実行が始まる
             self.assertIn("実行を開始しました", page)
@@ -162,7 +162,7 @@ class OrderFlow(unittest.TestCase):
             with admin.session_transaction() as s:
                 csrf = s["admin_csrf"]
             with patch.object(A, "_start_job", side_effect=lambda *a: (A.jsonify(error="busy"), 429)):
-                page = admin.post("/admin", data={"action": "order_paid", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
+                page = admin.post("/admin", follow_redirects=True, data={"action": "order_paid", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
         self.assertIn("待機枠がいっぱい", page)
         self.assertEqual(A._orders[j["order"]]["state"], "paid")
         self.assertEqual(self.c.get("/api/orders/mine").get_json()["orders"][0]["state"], "paid")
@@ -394,7 +394,7 @@ class OrderFlow(unittest.TestCase):
             self.assertIn("PayPayに再確認する", admin.get("/admin").get_data(as_text=True))
             with patch.object(G, "confirm_received", AsyncMock(return_value="d")), \
                  patch.object(A, "_start_job", side_effect=lambda *a: (A.jsonify(error="busy"), 429)):
-                page = admin.post("/admin", data={"action": "order_recheck", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
+                page = admin.post("/admin", follow_redirects=True, data={"action": "order_recheck", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
             self.assertIn("入金を確認しました", page)
             self.assertEqual(A._orders[j["order"]]["state"], "paid")
             self.assertIn("実行を開始する", page)
@@ -402,9 +402,87 @@ class OrderFlow(unittest.TestCase):
                 A._jobs["JS"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
                 return A.jsonify(job="JS")
             with patch.object(A, "_start_job", side_effect=start):
-                page = admin.post("/admin", data={"action": "order_start", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
+                page = admin.post("/admin", follow_redirects=True, data={"action": "order_start", "csrf": csrf, "order": j["order"]}).get_data(as_text=True)
             self.assertIn("実行を開始しました", page)
         self.assertEqual(A._orders[j["order"]]["state"], "started")
+
+    def _admin(self):
+        admin = A.app.test_client()
+        admin.get("/admin")
+        with admin.session_transaction() as s:
+            csrf = s["admin_csrf"]
+        admin.post("/admin", data={"action": "unlock", "csrf": csrf, "passcode": "adm"})
+        with admin.session_transaction() as s:
+            return admin, s["admin_csrf"]
+
+    def test_admin_actions_redirect_so_reload_does_not_resend(self):
+        j = self.order()
+        A._orders[j["order"]].update(state="paid")
+        with patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(G, "status", return_value={}), patch.object(G, "history_list", return_value=[]):
+            admin, csrf = self._admin()
+            calls = []
+            def start(*a):
+                calls.append(1)
+                A._jobs["JP"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
+                return A.jsonify(job="JP")
+            with patch.object(A, "_start_job", side_effect=start):
+                r = admin.post("/admin", data={"action": "order_start", "csrf": csrf, "order": j["order"]})
+                self.assertEqual(r.status_code, 302)
+                self.assertTrue(r.headers["Location"].endswith("/admin#orders"))
+                page = admin.get("/admin").get_data(as_text=True)   # 結果は次の画面で1回だけ表示
+                self.assertIn("実行を開始しました", page)
+                again = admin.get("/admin").get_data(as_text=True)  # 再読み込み = GET。操作はもう送られない
+                self.assertNotIn("実行を開始しました", again)
+            self.assertEqual(len(calls), 1)
+
+    def test_admin_paypay_refresh_and_recheck_all(self):
+        j = self.order(); k = self.order()
+        A._orders[j["order"]].update(state="hold", link_code="abcDEF123456")
+        A._orders[k["order"]].update(state="dead", link_code="zzzZZZ999999")
+        with patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(G, "status", return_value={}), patch.object(G, "history_list", return_value=[]):
+            admin, csrf = self._admin()
+            with patch.object(G, "_fresh_account", AsyncMock(return_value={"uuid": "u", "session_cookie": "c", "expires_at": 9})) as fa:
+                page = admin.post("/admin", follow_redirects=True, data={"action": "pp_refresh", "csrf": csrf}).get_data(as_text=True)
+            self.assertIn("接続を更新しました", page)
+            self.assertEqual(fa.await_args.kwargs.get("force"), True)
+            with patch.object(G, "_fresh_account", AsyncMock(side_effect=G.PayPayError("otp_required", "x"))):
+                page = admin.post("/admin", follow_redirects=True, data={"action": "pp_refresh", "csrf": csrf}).get_data(as_text=True)
+            self.assertIn("SMS認証を求めています", page)
+            def start(*a):
+                A._jobs["JA"] = {"finished": None, "created": __import__("time").time(), "status": "running", "error": None, "result": None}
+                return A.jsonify(job="JA")
+            results = {"abcDEF123456": None, "zzzZZZ999999": G.PayPayError("temporary_hold", "x")}
+            async def fake_confirm(code, oid, amount):
+                if results[code]: raise results[code]
+                return "d"
+            with patch.object(G, "confirm_received", side_effect=fake_confirm), patch.object(A, "_start_job", side_effect=start):
+                page = admin.post("/admin", follow_redirects=True, data={"action": "pp_recheck_all", "csrf": csrf}).get_data(as_text=True)
+            self.assertIn("2 件をPayPayに確認しました", page)
+            self.assertIn("開始 1件", page)
+            self.assertIn("まだ保留 1件", page)
+        self.assertEqual((A._orders[j["order"]]["state"], A._orders[k["order"]]["state"]), ("started", "hold"))
+
+    def test_admin_price_change_applies_to_new_orders_only(self):
+        import tempfile, os
+        old = self.order()
+        self.assertEqual(old["amount"], 25)
+        with tempfile.TemporaryDirectory() as d, patch.object(A, "_PRICES_FILE", os.path.join(d, "p.json")), \
+             patch.dict(A.PRICES, dict(A.PRICES)), patch.object(A, "ADMIN_PASSWORD", "adm"), patch.object(G, "status", return_value={}), \
+             patch.object(G, "history_list", return_value=[]):
+            admin, csrf = self._admin()
+            form = {"action": "price_save", "csrf": csrf, "chara": "60", "crash": "50", "ban_guarantee": "600", "clone": "100", "other": "30"}
+            page = admin.post("/admin", follow_redirects=True, data=form).get_data(as_text=True)
+            self.assertIn("料金を変更しました", page)
+            self.assertEqual(self.c.post("/run", json={"items": ["XP"]}).get_json()["amount"], 30)     # 新しい注文は新料金
+            self.assertEqual(A._orders[old["order"]]["amount"], 25)                                      # 作成済みは変わらない
+            self.assertIn("30円", self.c.get("/").get_data(as_text=True))                                 # 利用者の画面にも反映
+            bad = admin.post("/admin", follow_redirects=True, data=dict(form, other="0")).get_data(as_text=True)
+            self.assertIn("1〜100,000 円", bad)
+            bad = admin.post("/admin", follow_redirects=True, data=dict(form, other="abc")).get_data(as_text=True)
+            self.assertIn("半角の数字", bad)
+            self.assertEqual(A.PRICES["other"], 30)
+            # 再起動しても残る
+            A.PRICES["other"] = 25; A._load_prices(); self.assertEqual(A.PRICES["other"], 30)
 
     def test_hold_failed_kills_order(self):
         j = self.order()
@@ -562,10 +640,10 @@ class MaintenanceMode(unittest.TestCase):
             with admin.session_transaction() as s: csrf = s["admin_csrf"]
             admin.post("/admin", data={"action": "unlock", "csrf": csrf, "passcode": "adm"})
             with admin.session_transaction() as s: csrf = s["admin_csrf"]
-            page = admin.post("/admin", data={"action": "maint_save", "csrf": csrf, "on": "1", "message": "テスト", "url": "https://new.example/"}).get_data(as_text=True)
+            page = admin.post("/admin", follow_redirects=True, data={"action": "maint_save", "csrf": csrf, "on": "1", "message": "テスト", "url": "https://new.example/"}).get_data(as_text=True)
             self.assertIn("オンにしました", page)
             self.assertTrue(A._maint()["on"])
-            bad = admin.post("/admin", data={"action": "maint_save", "csrf": csrf, "on": "1", "message": "", "url": "http://x"}).get_data(as_text=True)
+            bad = admin.post("/admin", follow_redirects=True, data={"action": "maint_save", "csrf": csrf, "on": "1", "message": "", "url": "http://x"}).get_data(as_text=True)
             self.assertIn("https://", bad)
 
 
