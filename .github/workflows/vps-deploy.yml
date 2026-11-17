@@ -87,18 +87,18 @@ jobs:
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
-          for i in $(seq 1 36); do
-            if curl -fsS -m 10 "https://$SITE_HOST/health" >/dev/null 2>&1; then echo "OK: https://$SITE_HOST/"; exit 0; fi
-            if [ $((i % 6)) -eq 1 ]; then
-              echo "try $i:"; curl -sS -m 10 -o /dev/null -w "  https: %{http_code} (connect %{time_connect}s)\n" "https://$SITE_HOST/health" 2>&1 | tail -2
-              curl -sS -m 10 -o /dev/null -w "  http: %{http_code}\n" "http://$SITE_HOST/health" 2>&1 | tail -2
-              getent hosts "$SITE_HOST" | head -2 | sed 's/^/  dns: /' || echo "  dns: (resolve failed)"
+          # GitHub のサーバー（海外）から 443 番が届かない場合があるため、外からの確認とサーバー内からの確認を両方行う
+          for i in $(seq 1 18); do
+            if curl -fsS -m 10 "https://$SITE_HOST/health" >/dev/null 2>&1; then echo "OK (外から): https://$SITE_HOST/"; exit 0; fi
+            IN=$($SSH_CMD "$TARGET" "curl -s -m 5 -o /dev/null -w '%{http_code}' --resolve $SITE_HOST:443:127.0.0.1 https://$SITE_HOST/health" 2>/dev/null || true)
+            HTTP=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://$SITE_HOST/health" || true)
+            if [ "$IN" = "200" ] && [ "$HTTP" = "308" ]; then
+              echo "OK (サーバー内からの HTTPS 確認: 200 / 外からの HTTP: 308)"
+              echo "::notice::サイトは起動しています。GitHub（海外）からは 443 番に届きませんでした。国内からは開けるはずです: https://$SITE_HOST/"
+              exit 0
             fi
             sleep 10
           done
-          echo "::warning::https://$SITE_HOST/health に接続できません。サーバー管理画面のパケットフィルターで 80番・443番 を許可しているか確認してください。"
-          echo "--- サーバー内の状態（コンテナ） ---"
+          echo "::warning::サイトの起動を確認できません（サーバー内 HTTPS: ${IN:-?} / 外から HTTP: ${HTTP:-?}）。サーバー管理画面のパケットフィルターで 80番・443番 を許可しているか確認してください。"
           $SSH_CMD "$TARGET" "cd /opt/catsdaiko && docker compose ps && docker compose logs --tail 25 app" 2>&1 | tail -40 || true
-          echo "--- サーバー内から直接確認 ---"
-          $SSH_CMD "$TARGET" "curl -s -m 5 -o /dev/null -w 'app health via caddy(local): %{http_code}\n' --resolve $SITE_HOST:443:127.0.0.1 -k https://$SITE_HOST/health" 2>&1 | tail -2 || true
           exit 1
