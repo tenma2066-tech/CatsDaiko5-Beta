@@ -34,3 +34,9 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+
+networks:
+  default:
+    driver_opts:
+      # VPS のネットワーク（MTU 1442 など）より大きいと、TLS の接続で大きなパケットが捨てられて通信が止まる
+      com.docker.network.driver.mtu: "1400"

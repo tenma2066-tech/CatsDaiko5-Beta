@@ -81,6 +81,12 @@ if docker compose ps --status running --services 2>/dev/null | grep -qx app; the
 fi
 
 # 7) 入れ替え
+# ネットワークの設定（MTU）が変わった場合は、作り直しが必要（コンテナを一度止める。処理中がないことは上で確認済み）
+CUR_MTU=$(docker network inspect catsdaiko_default --format '{{index .Options "com.docker.network.driver.mtu"}}' 2>/dev/null || true)
+if [ -n "$(docker network ls -q -f name=^catsdaiko_default$)" ] && [ "$CUR_MTU" != "1400" ]; then
+  echo "network MTU '$CUR_MTU' -> 1400 (recreate)"
+  docker compose down --remove-orphans
+fi
 docker compose up -d --remove-orphans
 # 新しいコンテナ（または変更なしで動き続けたコンテナ）で、実行の開始を再び受け付ける
 for i in $(seq 1 30); do

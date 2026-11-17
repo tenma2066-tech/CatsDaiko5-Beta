@@ -887,6 +887,10 @@ def _issue_codes_once(job: dict, handler, label: str):
             continue
         break
     job["issuing_codes"] = False
+    if _NET["last_fail"] == "connect":
+        # 3回とも「接続の段階」で失敗＝何も送っていない。結果不明にはせず、支払い済みのまま再実行できるようにする。
+        raise RuntimeError(label + "：ゲームのサーバーにつながらず、コードを発行できませんでした（データは送っていません）。"
+                           "お支払いは有効です。少し待ってから、再送金なしでもう一度実行できます。")
     job["outcome_unknown"] = True
     raise RuntimeError(label + "のコード発行結果を確認できませんでした。サーバー側で処理済みの可能性があるため、自動再試行はしていません。再実行する前にゲーム側の状態を確認してください。")
 

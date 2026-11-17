@@ -684,9 +684,11 @@ class NetworkTimeouts(unittest.TestCase):
                 A._issue_codes_once(job, h, "x")
             self.assertEqual((h.calls, job.get("outcome_unknown")), (1, True))  # 送った後の失敗はやり直さない
             h = H(["connect", "connect", "connect"]); job = {"log": []}
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError) as e:
                 A._issue_codes_once(job, h, "x")
             self.assertEqual(h.calls, 3)
+            self.assertFalse(job.get("outcome_unknown"))  # 何も送っていない → 結果不明にしない（支払い済みに戻って再実行できる）
+            self.assertIn("再送金なし", str(e.exception))
 
 
 if __name__ == "__main__":
