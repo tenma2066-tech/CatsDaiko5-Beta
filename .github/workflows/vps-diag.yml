@@ -2,6 +2,9 @@ name: VPS diagnostics
 # 調査用。注文・決済の状態（状態名・金額・経過時間・メモ）だけを出す。リンク・引継ぎコード・名前は出さない。
 on:
   workflow_dispatch:
+  push:
+    branches: [claude/zealous-ritchie-5o2epn]
+    paths: [".github/workflows/vps-diag.yml"]
 
 jobs:
   diag:
