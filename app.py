@@ -1213,8 +1213,11 @@ def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, ca
     plain_qty = {k for k in qty if k != PT_KEY}
     plain_others = [x for x in others if x not in CRASH_ITEMS and x != RESTART_KEY]
     # 種類ごとの数量指定（「マタタビ#3」など）は、元の項目1件としてまとめて数える
-    other_n = len(set(items) | {str(k).split("#")[0] for k in plain_qty}) + len(subs) + len(plain_others)
+    legend = [x for x in subs if x in engine.LEGEND_TIERS]
+    legend_units = sum(engine.LEGEND_TIERS[x][1] for x in legend)   # レジェンドは段階が上がるごとに1件分（+25円）ずつ高くなる
+    other_n = len(set(items) | {str(k).split("#")[0] for k in plain_qty}) + len(subs) - len(legend) + len(plain_others)
     rows = [("初期垢作成（リスタートパック）", 1 if restart else 0, PRICES["restart"]),
+            ("レジェンドストーリー（段階ごとに1件分）", legend_units, PRICES["other"]),
             ("キャラ指定（レベル・形態・本能など1項目ずつ）", chara_units(cat_nums, cat_settings), PRICES["chara"]),
             ("クラッシュ解除", len(crash), PRICES["crash"]),
             ("プレイ時間（10分ごと）", pt_min // 10, PRICES["playtime10"]),
@@ -1804,12 +1807,12 @@ def index():
         ("items", "アイテム", f"選んだものを最大値まで付与します（1項目 {p['other']}円）", ITEMS),
         ("qty", "数量指定", f"個数を決めて付与します。空欄は変更しません（1項目 {p['other']}円）", ITEMS),
         ("chars", "キャラ", f"キャラを選び、レベル・形態・本能を1体ずつ設定します（1体・1項目ごとに {p['chara']}円）", []),
-        ("subs", "サブ", f"キャラ・ステージなどをまとめて解放・強化します（1項目 {p['other']}円）", SUBS),
+        ("subs", "サブ", f"キャラ・ステージなどをまとめて解放・強化します（1項目 {p['other']}円。レジェンドストーリーは段階が上がるごとに +{p['other']}円）", SUBS),
         ("others", "その他", f"会員状態やミッションなどを設定します（1項目 {p['other']}円・クラッシュ修正は {p['crash']}円）", OTHERS),
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
-        MAIN_HTML, is_admin=bool(session.get("admin")) and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
+        MAIN_HTML, legend_levels={k: v[1] for k, v in engine.LEGEND_TIERS.items()}, is_admin=bool(session.get("admin")) and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
@@ -2977,6 +2980,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .ptrow{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
 .ptrow input{width:110px;font:inherit;font-size:16px;padding:9px 10px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .ptrow select{font:inherit;font-size:16px;padding:9px 8px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.lp{margin-left:8px;padding:0 7px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;font-weight:700;color:var(--muted);white-space:nowrap}
 .soon{margin-left:6px;padding:0 8px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;color:var(--muted)}
 .modecard:disabled{opacity:.55;cursor:not-allowed}
 .couponbox{margin:12px 0;padding:12px;border:2px dashed var(--line);border-radius:14px;background:var(--soft)}
@@ -3179,7 +3183,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
         <span class="count" id="n-{{ key }}">0 / {{ totals[key] }}</span>
       </div>
       <div class="list">
-        {% for x in lst %}<label class="opt"><input type="checkbox" name="{{ key }}" value="{{ x }}"><span>{{ x }}</span></label>{% endfor %}
+        {% for x in lst %}<label class="opt"><input type="checkbox" name="{{ key }}" value="{{ x }}"><span>{{ x }}{% if key == 'subs' and x in legend_levels %}<em class="lp">{{ prices.other * legend_levels[x] }}円</em>{% endif %}</span></label>{% endfor %}
       </div>
       {% endif %}
     </div>
@@ -3370,6 +3374,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <li>バン保証（サブ→特別メニュー）：{{ prices.ban_guarantee }}円</li>
       <li>アカウント複製（サブ→特別メニュー）：{{ prices.clone }}円</li>
       <li>それ以外の項目：1件 {{ prices.other }}円（試運転も同額）</li>
+      <li>旧レジェンド・真レジェンド（サブ）：冠1クリア {{ prices.other }}円から、段階が上がるごとに +{{ prices.other }}円（冠4まで {{ prices.other * 4 }}円・イディ／ノーヴァまで {{ prices.other * 5 }}円）</li>
     </ul>
     <h3>よくある質問</h3>
     <details><summary>BANされませんか？</summary><p>アイテムの多くは問題が起きにくいものですが、絶対ではありません。猫缶・レアチケなどは特に注意が必要な項目で、「安全モード」をオンにすると自動で外せます。心配な場合は、検査と修復を行う「バン保証」もご利用ください。</p></details>
@@ -3563,6 +3568,8 @@ function qtyMap(){
 /* 旧レジェンド・真レジェンドの段階は、それぞれ1つだけ（上の段階が下を含む） */
 const LEG=/^(旧|真)レジェンド (?:冠([1-4])|イディ|ノーヴァ)/;
 const legLv=k=>k[2]?+k[2]:5;
+/* サブの件数（レジェンドは段階の数だけ数える＝段階ごとに +1件分） */
+function subUnits(list){ return (list||picked('subs')).reduce((n,x)=>{ const k=LEG.exec(x); return n+(k?legLv(k):1); },0); }
 document.addEventListener('change',e=>{
   const t=e.target; if(!(t&&t.name==='subs'&&t.checked)) return; const m=LEG.exec(t.value); if(!m) return;
   document.querySelectorAll('input[name=subs]').forEach(x=>{ const k=LEG.exec(x.value); if(x!==t&&k&&k[1]===m[1]) x.checked=false; });
@@ -3826,7 +3833,7 @@ function estimate(pc,qm){
   if($('#clone').checked) return PRICES.clone;
   const oth=picked('others');
   const crash=oth.filter(x=>CRASH.includes(x)).length;
-  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])]).size+picked('subs').length+oth.length-crash;
+  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])]).size+subUnits()+oth.length-crash;
   let units=0;
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
   return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other+(restartOn()?PRICES.restart:0)+Math.floor(ptMin().min/10)*PRICES.playtime10;
@@ -3860,7 +3867,7 @@ function renderCart(pc,qm){
     const qbase=[...new Set(qkeys.map(k=>k.split('#')[0]))].filter(x=>!items.includes(x));
     if(items.length) { total+=items.length*PRICES.other; line('アイテム（最大まで）',items.join('・'),yen(items.length*PRICES.other,PRICES.other,items.length),'items'); }
     if(qbase.length){ total+=qbase.length*PRICES.other; line('アイテム（数量指定）',qkeys.map(k=>{ const e=document.querySelector('input.q[data-item="'+CSS.escape(k)+'"]'); return (e&&e.dataset.label||k)+' '+Number(qm[k]).toLocaleString('ja-JP'); }).join('・'),yen(qbase.length*PRICES.other,PRICES.other,qbase.length),'qty'); }
-    const subs=picked('subs'); if(subs.length){ total+=subs.length*PRICES.other; line('サブ',subs.join('・'),yen(subs.length*PRICES.other,PRICES.other,subs.length),'subs'); }
+    const subs=picked('subs'); if(subs.length){ const su=subUnits(subs); total+=su*PRICES.other; line('サブ',subs.join('・'),yen(su*PRICES.other,PRICES.other,su),'subs'); }
     const oth=picked('others'), crash=oth.filter(x=>CRASH.includes(x)), rest=oth.filter(x=>!CRASH.includes(x));
     if(crash.length){ total+=crash.length*PRICES.crash; line('クラッシュ修正',crash.join('・'),yen(crash.length*PRICES.crash,PRICES.crash,crash.length),'others'); }
     if(rest.length){ total+=rest.length*PRICES.other; line('その他',rest.join('・'),yen(rest.length*PRICES.other,PRICES.other,rest.length),'others'); }

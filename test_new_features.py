@@ -121,7 +121,11 @@ class NewFeatures(unittest.TestCase):
         subs = ["旧レジェンド 冠1クリア", "旧レジェンド 冠3までクリア", "真レジェンド 冠2までクリア", "にゃんこ塔全クリア"]
         self.assertEqual(A._one_legend_tier(subs), ["旧レジェンド 冠3までクリア", "真レジェンド 冠2までクリア", "にゃんこ塔全クリア"])
         r = self.run_({"subs": subs}).get_json()
-        self.assertEqual(r["amount"], 75)      # 旧（冠3）・真（冠2）・塔 の3件だけ
+        self.assertEqual(r["amount"], 75 + 50 + 25)      # 旧 冠3=75円・真 冠2=50円・塔=25円（下の段階は含まれるので数えない）
+        f = A.compute_amount
+        for name, price in (("旧レジェンド 冠1クリア", 25), ("旧レジェンド 冠2までクリア", 50), ("旧レジェンド 冠3までクリア", 75),
+                            ("旧レジェンド 冠4までクリア", 100), ("旧レジェンド イディまでクリア", 125), ("真レジェンド ノーヴァまでクリア", 125)):
+            self.assertEqual(f([], [name], [], {}, [], False, False)[0], price, name)
 
 
     def _admin_client(self):
