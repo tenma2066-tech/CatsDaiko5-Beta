@@ -54,6 +54,36 @@ def warp_ready() -> bool:
 PROFILE_LOCK = threading.Lock()   # 同じプロフィールを2つのブラウザで同時に開かない
 
 
+CHAT = "https://x.com/i/chat"
+
+
+class DMBrowser:
+    """DM（チャット）用：iPhone 側のログイン情報をパソコン（Chromium）側に写して開く。"""
+
+    def __enter__(self):
+        if (store.get("engine") or "iphone") == "iphone":
+            with Browser(engine="iphone") as b0:
+                ck = b0.ctx.cookies(["https://x.com"])
+            self.b = Browser(engine="pc").__enter__()
+            names = {c["name"] for c in self.b.ctx.cookies(["https://x.com"])}
+            if "auth_token" not in names or any(c["name"] == "auth_token" for c in ck):
+                self.b.ctx.add_cookies(ck)
+        else:
+            self.b = Browser(engine="pc").__enter__()
+        return self.b
+
+    def __exit__(self, *exc):
+        return self.b.__exit__(*exc)
+
+
+def chat_pin_visible(page) -> bool:
+    try:
+        el = page.query_selector('[data-testid="pin-code-input-container"]')
+        return bool(el and el.is_visible())
+    except Exception:
+        return False
+
+
 class NotLoggedIn(Exception):
     pass
 

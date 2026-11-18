@@ -78,18 +78,28 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <label>ct0</label><input type="password" name="ct0" autocomplete="off" autocapitalize="off" spellcheck="false">
 <button class="btn pri full">取り込む</button></form></div></div>
 
+{% elif view == 'chatpin' %}
+<div class="wrap"><header><h1>チャットの暗証番号<small>番号は保存しません</small></h1><a class="btn sm" href="/?tab=dm">戻る</a></header>
+{% if err %}<div class="card"><p class="err">{{ err }}</p></div>{% endif %}
+<div class="card"><h2>4桁の暗証番号を入力</h2>
+<p class="sub">X の新しいチャット（DM）は暗号化されていて、新しい端末で開くと4桁の暗証番号を求められます。<b>X アプリでチャットを始めたときに決めた番号</b>です。一度通れば、サーバーのブラウザが覚えるので、次からは不要です。</p>
+<div class="note">何度も間違えるとロックされることがあります。分からないときは、X アプリの「設定とプライバシー → プライバシーと安全 → ダイレクトメッセージ（チャット）」で確認してください。「暗証番号を忘れた」でリセットすると、<b>これまでのチャットが消える</b>ことがあるので注意してください。</div>
+<form method="post" action="/chatpin" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>暗証番号（4桁）</label><input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" required>
+<button class="btn pri full">入力する</button></form></div></div>
+
 {% elif view == 'xstatus' %}
 {% if st.state == 'running' %}<meta http-equiv="refresh" content="3">{% endif %}
-<div class="wrap"><header><h1>ログイン情報の取り込み<small>{{ '自動で更新しています…' if st.state == 'running' else '' }}</small></h1><a class="btn sm" href="/">ホームへ</a></header>
+<div class="wrap"><header><h1>{{ title }}<small>{{ '自動で更新しています…' if st.state == 'running' else '' }}</small></h1><a class="btn sm" href="/">ホームへ</a></header>
 <div class="card">
-{% if st.state == 'idle' %}<h2>取り込みは行っていません</h2><a class="btn pri full" href="/xcookie">ログイン情報を貼り付ける</a>
+{% if st.state == 'idle' %}<h2>いまは行っていません</h2><a class="btn pri full" href="{{ again }}">はじめる</a>
 {% else %}
-<h2>{{ '✅ ログインできました' if st.state=='done' else ('⚠️ ログインできませんでした' if st.state=='failed' else '⏳ 確認しています（30秒ほど）') }}</h2>
+<h2>{{ '✅ 完了しました' if st.state=='done' else ('⚠️ うまくいきませんでした' if st.state=='failed' else '⏳ 進めています（30秒〜1分ほど）') }}</h2>
 <ol class="steplist">{% for t in steps %}{% set n = loop.index %}
 <li class="{{ 'ok' if n < st.step or (n == st.step and st.state == 'done') else ('now' if n == st.step and st.state == 'running' else ('bad' if n == st.step and st.state == 'failed' else '')) }}">
 <i>{{ '✓' if n < st.step or (n == st.step and st.state == 'done') else ('!' if n == st.step and st.state == 'failed' else n) }}</i><span>{{ t }}</span></li>{% endfor %}</ol>
 <p class="{{ 'err' if st.state == 'failed' else 'sub' }}" style="margin-top:8px">{{ st.label }}{% if st.state == 'running' %}（{{ st.elapsed or 0 }}秒）{% endif %}</p>
-{% if st.state == 'failed' %}<a class="btn pri full" href="/xcookie">もう一度貼り付ける</a>{% endif %}
+{% if st.state == 'failed' %}<a class="btn pri full" href="{{ again }}">もう一度やる</a>{% endif %}
 {% if st.state == 'done' %}<a class="btn pri full" href="/">ホームへ</a>{% endif %}
 {% endif %}</div>
 {% if st.shot %}<div class="card"><h2>サーバーから見た X の画面</h2><img src="{{ st.shot }}" style="width:100%;border-radius:10px;border:1.5px solid var(--line)" alt=""></div>{% endif %}
@@ -184,6 +194,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 {% elif tab == 'dm' %}
 <div class="card"><h2>DM自動返信</h2>
 <p class="sub">いまは <b>{{ 'オン' if s.dm_enabled else 'オフ' }}</b> です。{{ s.dm_interval_min }}分ごとにDMを確認し、下のルールに当てはまったら返信します（1時間 {{ s.max_replies_hour }}件まで・同じ相手には {{ s.reply_cooldown_hours }}時間あけます）。</p>
+{% if not st.chat_unlocked %}<div class="note">🔒 X の新しいチャットは、最初に<b>4桁の暗証番号</b>の入力が必要です。<a class="btn pri full" href="/chatpin" style="margin-top:8px">チャットの暗証番号を入力する</a></div>{% endif %}
 <form method="post" action="/action/check_dm"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="dm"><button class="btn pri full">📩 今すぐDMを確認する</button></form>
 <p class="sub" style="margin-top:6px">最後の確認：{{ fmt(st.last_dm_check) }}{% if st.last_dm_check %}（会話 {{ st.dm_checked or 0 }}件・{{ '下書き' if s.dry_run else '返信' }} {{ st.dm_replied or 0 }}件）{% endif %}。自動返信がオフでも、このボタンでは確認できます。</p>
 <form method="post" action="/action/{{ 'dm_off' if s.dm_enabled else 'dm_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full">{{ 'DM自動返信をオフにする' if s.dm_enabled else 'DM自動返信をオンにする' }}</button></form></div>

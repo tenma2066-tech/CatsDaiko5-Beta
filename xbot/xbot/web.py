@@ -187,7 +187,34 @@ def xcookie_status():
         st = xlogin.call("cookie_status")
     except Exception as e:  # noqa: BLE001
         st = {"state": "failed", "step": 4, "label": f"常駐プロセスにつながりませんでした（{type(e).__name__}）。"}
-    return render_template_string(PAGE, view="xstatus", st=st, steps=xlogin.STEPS, csrf=csrf())
+    return render_template_string(PAGE, view="xstatus", st=st, steps=xlogin.STEPS, csrf=csrf(), title="ログイン情報の取り込み", again="/xcookie")
+
+
+@app.route("/chatpin", methods=["GET", "POST"])
+def chatpin():
+    err = None
+    if request.method == "POST":
+        pin = (request.form.get("pin") or "").strip()
+        if not (pin.isascii() and pin.isdigit() and len(pin) == 4):
+            err = "暗証番号は4桁の数字で入れてください。"
+        else:
+            try:
+                xlogin.call("pin", pin)
+                pin = None
+                return redirect("/chatpin/status")
+            except Exception as e:  # noqa: BLE001
+                err = f"常駐プロセスにつながりませんでした（{type(e).__name__}）。"
+    return render_template_string(PAGE, view="chatpin", err=err, csrf=csrf())
+
+
+@app.get("/chatpin/status")
+def chatpin_status():
+    try:
+        st = xlogin.call("pin_status")
+    except Exception as e:  # noqa: BLE001
+        st = {"state": "failed", "step": 4, "label": f"常駐プロセスにつながりませんでした（{type(e).__name__}）。"}
+    return render_template_string(PAGE, view="xstatus", st=st, steps=st.get("steps") or xlogin.PIN_STEPS, csrf=csrf(),
+                                  title="チャットの暗証番号", again="/chatpin")
 
 
 @app.post("/xlogin/cancel")

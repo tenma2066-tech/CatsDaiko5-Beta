@@ -275,7 +275,60 @@ class Importer:
             self._set(state="failed", step=4, label=f"うまくいきませんでした：{str(e)[:200]}")
 
 
+PIN_STEPS = ["受け付けました", "サーバーのブラウザでチャットを開いています", "暗証番号を入力しています", "結果"]
+
+
+class PinJob(Importer):
+    """チャットの暗証番号を入れる（番号は保存しない）。"""
+
+    def start(self, pin):
+        if self.running():
+            return dict(self.st)
+        self.st = {"state": "running", "step": 1, "label": PIN_STEPS[0], "started": time.time(), "steps": PIN_STEPS}
+        threading.Thread(target=self._run_pin, args=(str(pin or ""),), daemon=True).start()
+        return dict(self.st)
+
+    def _run_pin(self, pin):
+        from .browser import CHAT, DMBrowser, chat_pin_visible
+        try:
+            self._set(step=2, label=PIN_STEPS[1])
+            with DMBrowser() as b:
+                p = b.page
+                p.goto(CHAT, wait_until="domcontentloaded")
+                for _ in range(30):
+                    if chat_pin_visible(p):
+                        break
+                    time.sleep(1)
+                if not chat_pin_visible(p):
+                    shot = Session._shot(b)
+                    self._set(state="done", step=4, shot=shot, label="暗証番号の画面は出ませんでした（すでに入力済みか、不要です）。")
+                    store.update_status(chat_unlocked=True)
+                    return
+                self._set(step=3, label=PIN_STEPS[2])
+                boxes = [e for e in p.query_selector_all('[data-testid="pin-code-input-container"] input') if e.is_visible()]
+                if boxes:
+                    boxes[0].click()
+                p.keyboard.type(pin, delay=150)
+                pin = None
+                for _ in range(20):
+                    time.sleep(1)
+                    if not chat_pin_visible(p):
+                        break
+                time.sleep(4)
+                ok = not chat_pin_visible(p)
+                shot = Session._shot(b)
+            store.update_status(chat_unlocked=ok)
+            store.log("info" if ok else "warn", "dm", "チャットの暗証番号：" + ("通りました（このサーバーで DM を読めるようになりました）" if ok else "通りませんでした"))
+            self._set(state="done" if ok else "failed", step=4, shot=shot,
+                      label="通りました。これで DM を読めるようになりました。" if ok else
+                      "通りませんでした。番号が違う可能性があります。X アプリの「設定 → チャット」で暗証番号を確認してください（何度も間違えるとロックされることがあります）。")
+        except Exception as e:  # noqa: BLE001
+            store.log("error", "dm", f"チャットの暗証番号を入れられませんでした: {e}")
+            self._set(state="failed", step=4, label=f"うまくいきませんでした：{str(e)[:200]}")
+
+
 IMPORTER = Importer()
+PINJOB = PinJob()
 
 
 class Manager:
@@ -287,13 +340,17 @@ class Manager:
         return bool(self.s and self.s.alive)
 
     def active(self):
-        return self.active_session() or IMPORTER.running()
+        return self.active_session() or IMPORTER.running() or PINJOB.running()
 
     def handle(self, op, value):
         if op == "cookies":
             return IMPORTER.start(value or [])
         if op == "cookie_status":
             return IMPORTER.status()
+        if op == "pin":
+            return PINJOB.start(value)
+        if op == "pin_status":
+            return PINJOB.status()
         with self.lock:
             if op == "start":
                 if not self.active_session():
@@ -325,7 +382,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             body = {}
         op = body.get("op")
-        if op not in ("cancel", "cookies", "cookie_status"):   # 自動入力ログインは使わない（X に止められるため）
+        if op not in ("cancel", "cookies", "cookie_status", "pin", "pin_status"):   # 自動入力ログインは使わない（X に止められるため）
             self.send_response(400)
             self.end_headers()
             return
