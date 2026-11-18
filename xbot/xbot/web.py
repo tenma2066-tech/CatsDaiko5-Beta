@@ -377,6 +377,8 @@ def settings_browser():
 @app.post("/action/<op>")
 def action(op):
     tab = "home"
+    if op == "check_dm" and request.form.get("back") not in (None, "", "home", "dm"):
+        abort(400)
     if op == "pause":
         store.put("paused", True); flash("一時停止しました。予約投稿もDM返信も止まります。")
     elif op == "resume":
@@ -391,6 +393,10 @@ def action(op):
         store.put("dm_enabled", False); flash("DM自動返信をオフにしました。"); tab = "dm"
     elif op in ("check_login", "snapshot"):
         store.put("request", op); flash("確認を依頼しました。1分ほどで結果が出ます（画面を再読み込みしてください）。")
+    elif op == "check_dm":
+        store.put("request", "check_dm"); tab = request.form.get("back") or "dm"
+        flash("DMの確認を始めました。1〜2分で結果が出ます（画面を再読み込みしてください）。"
+              + ("いまは下書きモードなので、返信は送らずに下書きだけ確認します。" if store.get("dry_run") else ""))
     elif op == "login_start":
         store.put("vnc_password", secrets.token_hex(4))
         store.put("login_until", time.time() + 15 * 60)

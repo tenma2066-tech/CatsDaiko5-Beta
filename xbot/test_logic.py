@@ -139,6 +139,9 @@ class Web(unittest.TestCase):
         self.assertTrue(store.get("paused"))
         self.c.post("/action/resume", data={"csrf": csrf})
         self.assertFalse(store.get("paused"))
+        r = self.c.post("/action/check_dm", data={"csrf": csrf, "back": "dm"})
+        self.assertEqual((store.get("request"), r.headers["Location"]), ("check_dm", "/?tab=dm"))
+        store.put("request", "")
 
     def test_post_with_image_and_validation(self):
         csrf = self.login()

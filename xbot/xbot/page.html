@@ -141,6 +141,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <div class="row">
 <form method="post" action="/action/{{ 'resume' if s.paused else 'pause' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn {{ 'pri' if s.paused else 'danger' }}">{{ '▶ 再開する' if s.paused else '⏸ 一時停止' }}</button></form>
 <form method="post" action="/action/check_login"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn">ログインを確認</button></form>
+<form method="post" action="/action/check_dm"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="home"><button class="btn">📩 今すぐDMを確認</button></form>
 <form method="post" action="/action/snapshot"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn">画面の記録を撮る</button></form>
 </div></div>
 
@@ -183,7 +184,9 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 {% elif tab == 'dm' %}
 <div class="card"><h2>DM自動返信</h2>
 <p class="sub">いまは <b>{{ 'オン' if s.dm_enabled else 'オフ' }}</b> です。{{ s.dm_interval_min }}分ごとにDMを確認し、下のルールに当てはまったら返信します（1時間 {{ s.max_replies_hour }}件まで・同じ相手には {{ s.reply_cooldown_hours }}時間あけます）。</p>
-<form method="post" action="/action/{{ 'dm_off' if s.dm_enabled else 'dm_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full {{ '' if s.dm_enabled else 'pri' }}">{{ 'DM自動返信をオフにする' if s.dm_enabled else 'DM自動返信をオンにする' }}</button></form></div>
+<form method="post" action="/action/check_dm"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="dm"><button class="btn pri full">📩 今すぐDMを確認する</button></form>
+<p class="sub" style="margin-top:6px">最後の確認：{{ fmt(st.last_dm_check) }}{% if st.last_dm_check %}（会話 {{ st.dm_checked or 0 }}件・{{ '下書き' if s.dry_run else '返信' }} {{ st.dm_replied or 0 }}件）{% endif %}。自動返信がオフでも、このボタンでは確認できます。</p>
+<form method="post" action="/action/{{ 'dm_off' if s.dm_enabled else 'dm_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full">{{ 'DM自動返信をオフにする' if s.dm_enabled else 'DM自動返信をオンにする' }}</button></form></div>
 
 <div class="card"><h2>ルールを追加</h2><p class="sub">上から順（優先度の数字が小さい順）に見て、最初に当てはまったルールの文を返します。</p>
 <form method="post" action="/rule/new"><input type="hidden" name="csrf" value="{{ csrf }}">

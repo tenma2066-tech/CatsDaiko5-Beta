@@ -118,9 +118,12 @@ def already(conv, h):
         return d.execute("SELECT 1 FROM replied WHERE conv=? AND msg_hash=?", (conv, h)).fetchone() is not None
 
 
-def run_dms(s):
+def run_dms(s, manual=False):
     rs = rules()
     if not rs:
+        store.update_status(last_dm_check=time.time(), dm_checked=0, dm_replied=0)
+        if manual:
+            store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
         return
     dry = bool(s["dry_run"])
     done = 0
@@ -157,6 +160,8 @@ def run_dms(s):
             store.log("info", "dm", f"ルール「{rule['name']}」で{'返信を下書きしました（送っていません）' if dry else '返信しました'}")
             time.sleep(random.uniform(20, 60))   # 続けて返さない
     store.update_status(last_dm_check=time.time(), dm_checked=len(convs), dm_replied=done)
+    if manual or done:
+        store.log("info", "dm", f"DMを確認しました：会話 {len(convs)}件を確認、{'下書き' if dry else '返信'} {done}件")
 
 
 # ---------------------------------------------------------------------- ログイン画面（Xvfb + x11vnc + noVNC）
@@ -269,6 +274,15 @@ def main():
                 check_login()
             elif req == "snapshot":
                 snapshot()
+            elif req == "check_dm":            # 管理サイトの「今すぐDMを確認」
+                try:
+                    run_dms(s, manual=True)
+                except NotLoggedIn as e:
+                    store.update_status(logged_in=False)
+                    store.log("error", "login", str(e))
+                except Exception as e:  # noqa: BLE001
+                    store.log("error", "dm", f"DMの確認に失敗しました: {e}")
+                next_dm = time.time() + max(2, int(s["dm_interval_min"])) * 60
             if s["paused"]:
                 time.sleep(TICK)
                 continue
