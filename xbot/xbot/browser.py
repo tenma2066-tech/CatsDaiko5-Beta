@@ -51,7 +51,8 @@ class Browser:
             store.PROFILE_DIR, headless=self.headless, user_agent=UA,
             executable_path=os.environ.get("XBOT_CHROMIUM") or None, locale="ja-JP", timezone_id="Asia/Tokyo",
             viewport={"width": 1100, "height": 900} if self.headless else None,
-            args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--disable-dev-shm-usage"],
+            args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--disable-dev-shm-usage"]
+                 + ([] if self.headless else ["--window-position=0,0", "--window-size=430,900", "--force-device-scale-factor=1"]),
             env=env)
         self.ctx.set_default_timeout(30000)
         self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()

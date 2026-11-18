@@ -1,3 +1,2 @@
-caddy
-tnshop-xbot.duckdns.org
+install
 #2
