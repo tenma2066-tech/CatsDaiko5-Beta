@@ -290,6 +290,7 @@ def main():
                             print(f"[probe] {name}: url={path} rows={info['rows']} tabs={info['tabs']} hrefs={info['hrefs']}", flush=True)
                             print(f"[probe] {name}: testids={top}", flush=True)
                             print(f"[probe] {name}: main_keywords={info.get('kw_main')} detail={info.get('detail')} errors={info.get('errors')}", flush=True)
+                            print(f"[probe] {name}: shadow={info.get('shadow')}", flush=True)
                             for fr in info.get("frames", []):
                                 print(f"[probe] {name}: frame={fr}", flush=True)
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())

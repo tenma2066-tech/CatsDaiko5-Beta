@@ -295,6 +295,14 @@ class Browser:
                     overlay_children: o ? o.querySelectorAll('*').length : -1, paywall_visible: pw ? !!(pw.offsetWidth||pw.offsetHeight) : null,
                     body_text: document.body.innerText.length, iframes: document.querySelectorAll('iframe').length,
                     has_crypto_subtle: !!(window.crypto && crypto.subtle), has_wasm: typeof WebAssembly === 'object', has_idb: !!window.indexedDB}; }""")
+        info["shadow"] = p.evaluate(r"""() => { let hosts = 0, text = 0, inputs = 0, tids = {};
+            const walk = (root) => { root.querySelectorAll('*').forEach(e => { if (e.shadowRoot) { hosts++; text += (e.shadowRoot.textContent||'').length;
+                inputs += e.shadowRoot.querySelectorAll('input,textarea,[contenteditable]').length;
+                e.shadowRoot.querySelectorAll('[data-testid]').forEach(x => { const k=x.getAttribute('data-testid'); tids[k]=(tids[k]||0)+1; }); walk(e.shadowRoot); } }); };
+            walk(document); const ifr = document.querySelector('iframe');
+            return {hosts, text, inputs, tids: Object.entries(tids).slice(0,30), iframe_src: ifr ? (ifr.getAttribute('src')||'').replace(/[0-9]+/g,'#').slice(0,80) : null,
+                    iframe_size: ifr ? [ifr.offsetWidth, ifr.offsetHeight] : null, paywall_text: (document.querySelector('[data-testid=paywallScrim]')||{}).innerText ? document.querySelector('[data-testid=paywallScrim]').innerText.length : 0,
+                    title: document.title.replace(/[0-9]+/g,'#').slice(0,40)}; }""")
         info["errors"] = [e for e in errs if e.startswith("pageerror")][:5] + [f"console_errors={errs.count('error')}"]
         # 覆い（有料案内など）が出ているか
         info["kw_main"] = [k for k in ("パスコード", "暗証", "Premium", "プレミアム", "認証済み", "購読", "Subscribe", "チャット", "暗号") if k in (p.inner_text("body") or "")]
