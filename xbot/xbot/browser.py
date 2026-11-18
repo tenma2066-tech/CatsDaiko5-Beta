@@ -404,7 +404,9 @@ class Browser:
         return last["text"], bool(last["mine"]), not any(m["mine"] for m in info)
 
     def dm_open_request(self, key):
-        self.page.locator(f'[data-testid="dm-message-request-item-{key}"]').first.click()
+        item = self.page.locator(f'[data-testid="dm-message-request-item-{key}"]').first
+        item.wait_for(state="visible", timeout=15000)
+        item.click(timeout=15000)
         self.page.wait_for_selector('[data-testid="dm-message-request-accept-button"]', timeout=20000)
         return self._last_message()
 

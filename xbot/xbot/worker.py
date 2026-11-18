@@ -157,22 +157,32 @@ def run_dms(s, manual=False):
             store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
         return
     with DMBrowser() as b:
-        # 1) メッセージリクエスト：許可して、ルールに合えば返信
+        # 1) メッセージリクエスト：許可して、ルールに合えば返信（失敗しても、ふつうの会話の確認は続ける）
         if s.get("dm_accept_requests", True):
-            b.dm_open_inbox(requests=True)
-            keys = b.dm_request_keys()
-            counts["requests"] = len(keys)
-            for key in keys[:5]:
-                if dry:
-                    break   # 下書きモードでは許可しない（件数だけ知らせる）
+            try:
                 b.dm_open_inbox(requests=True)
-                got = b.dm_open_request(key)
-                b.dm_accept()
-                counts["accepted"] += 1
-                store.log("info", "dm", "メッセージリクエストを許可しました")
-                if rs:
-                    _handle(b, s, rs, key, got, dry, counts)
-                time.sleep(random.uniform(5, 15))
+                keys = b.dm_request_keys()
+                counts["requests"] = len(keys)
+                seen = set()
+                for _ in range(0 if dry else min(5, len(keys))):   # 下書きモードでは許可しない（件数だけ知らせる）
+                    b.dm_open_inbox(requests=True)
+                    cur = [k for k in b.dm_request_keys() if k not in seen]   # 許可すると一覧が変わるので、毎回読み直す
+                    if not cur:
+                        break
+                    key = cur[0]
+                    seen.add(key)
+                    got = b.dm_open_request(key)
+                    b.dm_accept()
+                    counts["accepted"] += 1
+                    store.log("info", "dm", "メッセージリクエストを許可しました")
+                    if rs:
+                        _handle(b, s, rs, key, got, dry, counts)
+                    time.sleep(random.uniform(5, 15))
+            except ChatLocked:
+                raise
+            except Exception as e:  # noqa: BLE001
+                b.shot("dm-request-fail")
+                store.log("warn", "dm", f"メッセージリクエストの処理でつまずきました（{type(e).__name__}）。ふつうの会話の確認は続けます")
         # 2) ふつうの会話
         if rs:
             b.dm_open_inbox()

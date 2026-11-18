@@ -308,6 +308,19 @@ class Worker(unittest.TestCase):
         self.w.run_dms(s)                     # 同じメッセージには二度返さない
         self.assertEqual(len(self.sent), 1)
 
+    def test_request_failure_does_not_stop_chats(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, keywords, reply, created) VALUES('料金','keyword','料金','料金表です',?)", (time.time(),))
+        fb = self.fake_browser([{"conv": "1:9"}], {"1:9": ("料金は？", False, True)}, requests={"5:9": ("x", False, True)})
+        class Broken(fb):
+            def dm_open_request(self, key): raise TimeoutError("boom")
+            def shot(self, name): return None
+        self.w.DMBrowser = Broken
+        self.w.random.uniform = lambda a, b: 0
+        self.w.time.sleep = lambda x: None
+        self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
+        self.assertEqual(self.sent, [("1:9", "料金表です", False)])          # リクエストで失敗しても、会話には返信する
+
     def test_requests_accepted_and_answered(self):
         with store.db() as d:
             d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('はじめて','first_time','ようこそ',?)", (time.time(),))
