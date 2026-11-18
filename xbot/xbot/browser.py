@@ -255,6 +255,21 @@ class Browser:
         human_pause(1.5, 2.5)
         return self.shot("dm")
 
+    def probe(self, url):
+        """DM画面の作りを調べる（本文・名前は取らず、部品の名前と数だけ）。"""
+        import re
+        p = self.page
+        p.goto(url, wait_until="domcontentloaded")
+        time.sleep(8)
+        info = p.evaluate(r"""() => {
+          const c = {}; document.querySelectorAll('[data-testid]').forEach(e => { const k = e.getAttribute('data-testid'); c[k] = (c[k]||0)+1; });
+          const hrefs = {}; document.querySelectorAll('a[href]').forEach(a => { const h = a.getAttribute('href').replace(/[0-9]+/g,'#').replace(/\/[A-Za-z0-9_]{3,15}$/,'/@'); if (/messages|chat|request/i.test(h)) hrefs[h]=(hrefs[h]||0)+1; });
+          const tabs = [...document.querySelectorAll('[role=tab],[role=link],button')].map(e => (e.getAttribute('aria-label')||e.innerText||'').trim()).filter(t => /リクエスト|request|受信|Inbox|未読|すべて|All|チャット|Chat|メッセージ|Message/i.test(t) && t.length < 30);
+          return {testids: c, hrefs, tabs: [...new Set(tabs)].slice(0,15), rows: document.querySelectorAll('[role=listitem],[role=row],[role=option]').length};
+        }""")
+        path = re.sub(r"[0-9]+", "#", p.url.split("?")[0])
+        return path, info, self.shot("probe")
+
     def snapshot(self):
         """画面の確認用：ホーム・投稿画面・DM画面の記録を撮る（何も送らない）。"""
         shots = []

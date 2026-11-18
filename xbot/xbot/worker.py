@@ -274,6 +274,21 @@ def main():
                 check_login()
             elif req == "snapshot":
                 snapshot()
+            elif req == "dm_probe":            # DM画面の作りを調べる（診断用・何も送らない）
+                try:
+                    with Browser() as b:
+                        shots = []
+                        for name, url in (("inbox", "https://x.com/messages"), ("requests", "https://x.com/messages/requests"),
+                                          ("chat", "https://x.com/i/chat")):
+                            path, info, shot = b.probe(url)
+                            shots.append(shot)
+                            top = sorted(info["testids"].items(), key=lambda kv: -kv[1])[:40]
+                            print(f"[probe] {name}: url={path} rows={info['rows']} tabs={info['tabs']} hrefs={info['hrefs']}", flush=True)
+                            print(f"[probe] {name}: testids={top}", flush=True)
+                        store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
+                    store.log("info", "check", "DM画面を調べました（何も送っていません）")
+                except Exception as e:  # noqa: BLE001
+                    store.log("error", "check", f"DM画面を調べられませんでした: {e}")
             elif req == "check_dm":            # 管理サイトの「今すぐDMを確認」
                 try:
                     run_dms(s, manual=True)
