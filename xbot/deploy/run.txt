@@ -1,2 +1,2 @@
-caddy
-tnshop-xbot.duckdns.org
+status
+

@@ -52,7 +52,7 @@ jobs:
               $SSH "XBOT_DOMAIN='$XBOT_DOMAIN' bash -s" < xbot/deploy/caddy-site.sh
               ;;
             status)
-              $SSH "systemctl --no-pager status xbot-web xbot-worker 2>&1 | grep -E '●|Active:|Memory:' ; journalctl -u xbot-worker -n 30 --no-pager 2>&1 | cut -c1-200; free -m | sed -n 2p" || true
+              $SSH "systemctl --no-pager status xbot-web xbot-worker 2>&1 | grep -E '●|Active:|Memory:' ; journalctl -u xbot-worker -n 30 --no-pager 2>&1 | cut -c1-200; free -m | sed -n 2p; echo '--- caddy (xbot) ---'; ls /opt/catsdaiko/caddy-sites; cd /opt/catsdaiko && docker compose logs --tail 200 caddy 2>&1 | grep -iE 'tnshop-xbot|error|obtain|certificate' | tail -25 | cut -c1-300" || true
               ;;
             *) echo "step は install / caddy / status"; exit 1;;
           esac
