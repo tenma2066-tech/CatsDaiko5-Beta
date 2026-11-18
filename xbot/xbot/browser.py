@@ -267,6 +267,23 @@ class Browser:
           const tabs = [...document.querySelectorAll('[role=tab],[role=link],button')].map(e => (e.getAttribute('aria-label')||e.innerText||'').trim()).filter(t => /リクエスト|request|受信|Inbox|未読|すべて|All|チャット|Chat|メッセージ|Message/i.test(t) && t.length < 30);
           return {testids: c, hrefs, tabs: [...new Set(tabs)].slice(0,15), rows: document.querySelectorAll('[role=listitem],[role=row],[role=option]').length};
         }""")
+        frames = []
+        for f in p.frames[1:][:6]:
+            try:
+                fi = f.evaluate(r"""() => {
+                  const c = {}; document.querySelectorAll('[data-testid]').forEach(e => { const k = e.getAttribute('data-testid'); c[k] = (c[k]||0)+1; });
+                  const t = document.body ? document.body.innerText : '';
+                  const kw = ['パスコード','暗証','PIN','passcode','Passcode','プレミアム','Premium','認証','リクエスト','Request','未読','暗号','encrypt','設定','Set up','作成','入力'].filter(k => t.includes(k));
+                  return {testids: Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,40), keywords: kw, buttons: document.querySelectorAll('button,[role=button]').length,
+                          inputs: [...document.querySelectorAll('input')].map(i => (i.type||'')+':'+(i.getAttribute('inputmode')||'')+':'+(i.maxLength||'')).slice(0,8),
+                          items: document.querySelectorAll('[role=listitem],[role=row],[role=option],li').length};
+                }""")
+                frames.append({"url": re.sub(r"[0-9]+", "#", f.url.split("?")[0])[:80], **fi})
+            except Exception as e:  # noqa: BLE001
+                frames.append({"url": f.url[:60], "error": type(e).__name__})
+        info["frames"] = frames
+        # 覆い（有料案内など）が出ているか
+        info["kw_main"] = [k for k in ("パスコード", "暗証", "Premium", "プレミアム", "認証済み", "購読", "Subscribe", "チャット", "暗号") if k in (p.inner_text("body") or "")]
         path = re.sub(r"[0-9]+", "#", p.url.split("?")[0])
         return path, info, self.shot("probe")
 

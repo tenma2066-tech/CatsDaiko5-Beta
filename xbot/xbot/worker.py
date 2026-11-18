@@ -285,6 +285,9 @@ def main():
                             top = sorted(info["testids"].items(), key=lambda kv: -kv[1])[:40]
                             print(f"[probe] {name}: url={path} rows={info['rows']} tabs={info['tabs']} hrefs={info['hrefs']}", flush=True)
                             print(f"[probe] {name}: testids={top}", flush=True)
+                            print(f"[probe] {name}: main_keywords={info.get('kw_main')}", flush=True)
+                            for fr in info.get("frames", []):
+                                print(f"[probe] {name}: frame={fr}", flush=True)
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
