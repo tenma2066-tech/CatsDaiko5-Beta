@@ -276,26 +276,19 @@ def main():
                 snapshot()
             elif req == "dm_probe":            # DM画面の作りを調べる（診断用・何も送らない）
                 try:
-                    with Browser(engine="iphone") as b0:      # iPhone 側のログイン情報を、パソコン（Chromium）側にも写す
-                        ck = [c for c in b0.ctx.cookies(["https://x.com"])]
-                    with Browser(engine="pc") as b:
-                        b.ctx.clear_cookies()
-                        b.ctx.add_cookies(ck)
-                        ck = None
+                    from .browser import CHAT, DMBrowser
+                    with DMBrowser() as b:
                         shots = []
-                        for name, url in (("chat-pc", "https://x.com/i/chat"),):
-                            path, info, shot = b.probe(url)
-                            shots.append(shot)
-                            top = sorted(info["testids"].items(), key=lambda kv: -kv[1])[:40]
-                            print(f"[probe] {name}: url={path} rows={info['rows']} tabs={info['tabs']} hrefs={info['hrefs']}", flush=True)
-                            print(f"[probe] {name}: testids={top}", flush=True)
-                            print(f"[probe] {name}: main_keywords={info.get('kw_main')} detail={info.get('detail')} errors={info.get('errors')}", flush=True)
-                            print(f"[probe] {name}: shadow={info.get('shadow')}", flush=True)
-                            for fr in info.get("frames", []):
-                                print(f"[probe] {name}: frame={fr}", flush=True)
+                        for name, url in (("chat", CHAT), ("requests", CHAT + "/requests")):
+                            b.page.goto(url, wait_until="domcontentloaded")
+                            time.sleep(15)
+                            info = b.deep_probe()
+                            print(f"[probe] {name}: url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:20]} editable={info['editable']} unreadish={info['unreadish']}", flush=True)
+                            print(f"[probe] {name}: tids={info['tids']}", flush=True)
+                            print(f"[probe] {name}: roles={info['roles']} labels={info['labels']}", flush=True)
+                            print(f"[probe] {name}: hrefs={info['hrefs']}", flush=True)
+                            shots.append(b.shot("probe-" + name))
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
-                    with Browser() as b2:   # パソコン版で開いたあとも、iPhone 側でログインが続いているか
-                        print(f"[probe] after: iphone logged_in={b2.logged_in()}", flush=True)
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
                     store.log("error", "check", f"DM画面を調べられませんでした: {e}")
