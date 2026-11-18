@@ -49,7 +49,8 @@ jobs:
               ;;
             caddy)
               [ -n "$XBOT_DOMAIN" ] || { echo "domain を入れてください"; exit 1; }
-              $SSH "XBOT_DOMAIN='$XBOT_DOMAIN' bash -s" < xbot/deploy/caddy-site.sh
+              $SSH "cat > /tmp/xbot-caddy-site.sh" < xbot/deploy/caddy-site.sh
+              $SSH "XBOT_DOMAIN='$XBOT_DOMAIN' bash /tmp/xbot-caddy-site.sh < /dev/null; rc=\$?; rm -f /tmp/xbot-caddy-site.sh; exit \$rc"
               ;;
             status)
               $SSH "systemctl --no-pager status xbot-web xbot-worker 2>&1 | grep -E '●|Active:|Memory:' ; journalctl -u xbot-worker -n 30 --no-pager 2>&1 | cut -c1-200; free -m | sed -n 2p; echo '--- caddy (xbot) ---'; ls /opt/catsdaiko/caddy-sites; cd /opt/catsdaiko && docker compose logs --tail 200 caddy 2>&1 | grep -iE 'tnshop-xbot|error|obtain|certificate' | tail -25 | cut -c1-300; echo '--- inside caddy ---'; docker compose exec -T caddy ls -la /etc/caddy/sites; docker compose exec -T caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null | grep -o 'tnshop-xbot[a-z.]*' | sort -u; echo -n 'running config has xbot: '; docker compose exec -T caddy wget -qO- http://localhost:2019/config/ | grep -c 'tnshop-xbot'; docker inspect catsdaiko-caddy-1 --format '{{json .HostConfig.ExtraHosts}} {{range .Mounts}}{{.Source}}->{{.Destination}} {{end}}'" || true
