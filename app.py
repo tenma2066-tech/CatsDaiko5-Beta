@@ -1225,6 +1225,9 @@ def restart_pack() -> dict:
         has = bool(items or cats or subs or facility_level)
         return {"enabled": bool(d.get("enabled")) and has, "items": items, "cats": cats, "subs": subs, "cat_level": cat_level,
                 "facility_level": facility_level, "note": str(d.get("note", ""))[:300]}
+    except FileNotFoundError:   # 管理画面でまだ保存していない → 公式と同じ中身で選べる状態にする
+        return dict(RESTART_OFFICIAL, items=dict(RESTART_OFFICIAL["items"]), cats=list(RESTART_OFFICIAL["cats"]),
+                    subs=list(RESTART_OFFICIAL["subs"]), enabled=True)
     except (OSError, ValueError, TypeError):
         return {"enabled": False, "items": {}, "cats": [], "subs": [], "cat_level": 0, "facility_level": 0, "note": ""}
 

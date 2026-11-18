@@ -60,7 +60,11 @@ class NewFeatures(unittest.TestCase):
         self.assertEqual(save.officer_pass.play_time, 2147483647)
 
     # ---------------- 初期垢作成
-    def test_restart_disabled_until_admin_sets_it(self):
+    def test_restart_default_is_official_and_admin_can_disable(self):
+        r = self.run_({"restart_pack": True})          # 未設定なら公式と同じ中身で選べる
+        self.assertEqual((r.status_code, r.get_json()["amount"]), (200, 50))
+        self.assertEqual(A.restart_pack()["cats"], A.RESTART_OFFICIAL["cats"])
+        A._save_restart(A._parse_restart_form("XP=1", "", False, ""))   # 管理者が「準備中」にした
         self.assertEqual(self.run_({"restart_pack": True}).status_code, 400)
 
     def test_restart_price_and_transfer_must_be_empty(self):
