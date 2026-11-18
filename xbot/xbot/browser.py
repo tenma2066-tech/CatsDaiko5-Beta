@@ -25,6 +25,8 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
       "Chrome/131.0.0.0 Safari/537.36")
 IPHONE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
              "Version/18.5 Mobile/15E148 Safari/604.1")
+MAC_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+          "Version/18.5 Safari/605.1.15")
 WARP_PROXY = os.environ.get("XBOT_WARP_PROXY", "socks5://127.0.0.1:40000")
 
 
@@ -88,14 +90,16 @@ class Browser:
         self.engine_used = engine
         self._pw = sync_playwright().start()
         try:
-            if engine == "iphone" and self.headless:
+            if engine in ("iphone", "mac") and self.headless:
+                mac = engine == "mac"   # DM（チャット）はスマホ版のサイトでは表示されないため、同じログインのままパソコン版で開く
                 # iPhone の Safari と同じ種類のブラウザで、画面サイズ・タッチ操作も iPhone に合わせる
                 prof = store.PROFILE_DIR + "-iphone"
                 os.makedirs(prof, mode=0o700, exist_ok=True)
                 os.chmod(prof, 0o700)
                 self.ctx = self._pw.webkit.launch_persistent_context(
-                    prof, headless=True, user_agent=ua or IPHONE_UA, locale="ja-JP", timezone_id="Asia/Tokyo",
-                    viewport={"width": 390, "height": 844}, device_scale_factor=3, is_mobile=True, has_touch=True,
+                    prof, headless=True, user_agent=MAC_UA if mac else (ua or IPHONE_UA), locale="ja-JP", timezone_id="Asia/Tokyo",
+                    viewport={"width": 1280, "height": 900} if mac else {"width": 390, "height": 844},
+                    device_scale_factor=2 if mac else 3, is_mobile=not mac, has_touch=not mac,
                     proxy=proxy, env=env)
             else:
                 os.makedirs(store.PROFILE_DIR, mode=0o700, exist_ok=True)

@@ -276,9 +276,9 @@ def main():
                 snapshot()
             elif req == "dm_probe":            # DM画面の作りを調べる（診断用・何も送らない）
                 try:
-                    with Browser() as b:
+                    with Browser(engine="mac") as b:
                         shots = []
-                        for name, url in (("chat", "https://x.com/i/chat"),):
+                        for name, url in (("chat-mac", "https://x.com/i/chat"),):
                             path, info, shot = b.probe(url)
                             shots.append(shot)
                             top = sorted(info["testids"].items(), key=lambda kv: -kv[1])[:40]
@@ -288,6 +288,8 @@ def main():
                             for fr in info.get("frames", []):
                                 print(f"[probe] {name}: frame={fr}", flush=True)
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
+                    with Browser() as b2:   # パソコン版で開いたあとも、iPhone 側でログインが続いているか
+                        print(f"[probe] after: iphone logged_in={b2.logged_in()}", flush=True)
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
                     store.log("error", "check", f"DM画面を調べられませんでした: {e}")
