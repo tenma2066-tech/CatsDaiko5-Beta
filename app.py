@@ -2659,6 +2659,19 @@ header{padding:calc(14px + env(safe-area-inset-top,0px)) 0 10px}
 h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .top a{font-size:13px;color:var(--muted)}
 .pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+#p-data,#p-job[data-s=idle]{display:none}
+.brand{display:flex;flex-direction:column;line-height:1.15}.brand small{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em}.brand small b{color:var(--ink)}
+.lead{font-size:14.5px;line-height:1.7;margin:4px 0 12px}
+.promise{display:grid;gap:8px;margin:0 0 14px}
+.promise>div{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:2px solid var(--line);border-radius:14px;background:var(--soft)}
+.promise i{font-style:normal;font-size:20px;line-height:1.2}.promise p{margin:0}.promise b{display:block;font-size:14.5px}.promise span{display:block;font-size:12.5px;color:var(--muted);line-height:1.55}
+.steps4{list-style:none;counter-reset:s;padding:0;margin:6px 0 14px;display:grid;gap:6px}
+.steps4 li{counter-increment:s;display:flex;gap:10px;align-items:baseline;font-size:14px}
+.steps4 li::before{content:counter(s);flex:none;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#17181c;border:2px solid var(--line);font-weight:800;font-size:13px;display:inline-flex;align-items:center;justify-content:center}
+.steps4 b{flex:none}.steps4 span{color:var(--muted);font-size:13px}
+.notice small{display:block;margin-top:8px;font-size:12px;color:var(--muted);line-height:1.6}
+.foot{margin:28px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}.foot p{margin:0}
+.paysteps{margin:10px 0 4px;padding:10px 12px 10px 30px;border-radius:12px;background:var(--soft);font-size:13.5px;line-height:1.7}
 .pill{display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border:2px solid var(--line);
   border-radius:999px;background:var(--panel);font-size:13px;font-weight:700;white-space:nowrap}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--idle);flex:none}
@@ -2979,7 +2992,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 </style></head><body>
 
 <div class="wrap"><header>
-  <div class="top"><h1>にゃんこ代行</h1><button type="button" class="btn" id="helpBtn">使い方</button><a href="/admin">管理者</a></div>
+  <div class="top"><div class="brand"><h1>にゃんこ代行</h1><small>by <b>TN SHOP</b></small></div><button type="button" class="btn" id="helpBtn">使い方・よくある質問</button></div>
   <div class="pills" aria-live="polite">
     <span class="pill" id="p-conn" data-s="wait"><i class="dot"></i><span>接続を確認中</span></span>
     <span class="pill" id="p-data" data-s="idle"><i class="dot"></i><span>ゲームデータ</span></span>
@@ -3028,13 +3041,13 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <div class="modes" role="radiogroup" aria-label="内容">
         <button type="button" class="modecard" role="radio" data-mode="normal"><b>メニューから選ぶ</b><small>アイテム・キャラ・ステージなどを選んで付与・強化します。1項目 {{ prices.other }}円から</small></button>
         <button type="button" class="modecard" role="radio" data-mode="integrity"><b>バン保証</b><small>セーブを検査し、既知のエラーキャラなどを修復します。<em>{{ prices.ban_guarantee }}円</em>・引継ぎコード必須</small></button>
-        <button type="button" class="modecard" role="radio" data-mode="clone"><b>アカウント複製</b><small>実験機能。元と複製の2アカウントのコードを出します。<em>{{ prices.clone }}円</em>・引継ぎコード必須</small></button>
+        <button type="button" class="modecard" role="radio" data-mode="clone"><b>アカウント複製</b><small>試験提供。元と複製の2アカウントのコードを出します。<em>{{ prices.clone }}円</em>・引継ぎコード必須</small></button>
       </div>
       <details class="more"><summary>くわしい説明</summary>
       <label class="sw specialsw"><input type="checkbox" id="integrity">
         <span><b>バン保証（セーブの検査・既知異常の自動修復）　{{ prices.ban_guarantee }}円</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
       <label class="sw specialsw"><input type="checkbox" id="clone">
-        <span><b>アカウント複製（実験機能）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。PONOS非公式の方法で、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
+        <span><b>アカウント複製（試験提供）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。公式の機能ではないため、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
       </details>
     </div>
   </section>
@@ -3150,7 +3163,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <details class="panel more">
       <summary><b>オプション</b><small>安全モード・試運転・結果の保存</small></summary>
       <label class="sw"><input type="checkbox" id="safe">
-        <span><b>安全モード</b><small>bcsfeの配布元に「BANされることがある」と書かれている項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
+        <span><b>安全モード</b><small>ゲーム側に見つかるとBANされる可能性がある項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
       <label class="sw"><input type="checkbox" id="dry">
         <span><b>試運転（コードを発行しない）</b><small>書き換えまで行い、変更内容だけ見せます。アップロードはしません。</small></span></label>
       <label class="sw"><input type="checkbox" id="keepResults" checked>
@@ -3245,6 +3258,11 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     </details>
   </section>
 
+<footer class="foot">
+  <p><b>にゃんこ代行</b> ・ © TN SHOP 作成</p>
+  <p>お問い合わせ：<a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a></p>
+  <p>ユーザーID <code>{{ uid }}</code>（お問い合わせのときにお伝えください）</p>
+</footer>
 </main>
 
 <div class="bar"><div class="in">
@@ -3257,40 +3275,52 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="modal" id="payPanel" role="dialog" aria-modal="true" aria-labelledby="payTitle" hidden>
   <div class="mbox">
     <h2 id="payTitle">PayPayでお支払い</h2>
-    <p class="ordno">注文番号 <code id="payOrderNo"></code> <button type="button" class="btn mini" id="payCopy">コピー</button><br><small>画面を閉じても、この番号で支払い・実行を再開できます。控えておいてください。</small></p>
+    <p class="ordno">受付番号 <code id="payOrderShort"></code> <button type="button" class="btn mini" id="payCopy">番号をコピー</button><code id="payOrderNo" hidden></code><br><small>画面を閉じても、コピーした番号で再開できます。お問い合わせのときもこの番号をお伝えください。</small></p>
     <div class="payamt"><b id="payAmount"></b><span>円</span></div>
     <ul class="paylist" id="payList"></ul>
     <div class="payerr" id="paySkip" data-lv="wait" hidden><b>安全モードのため実行されない項目</b><span id="paySkipList"></span><span>これらは料金に含まれません。実行したい場合は「やめる」→入力画面で安全モードをオフにしてください（BANの恐れがあります）。</span></div>
+    <ol class="paysteps" id="paySteps">
+      <li>PayPay アプリの<b>「送る」</b>を開く</li>
+      <li><b>送金リンク</b>を作る（金額は<b>上の金額ちょうど</b>・<b>パスコードなし</b>）</li>
+      <li>できたリンクを<b>コピー</b>して、下に貼り付ける</li>
+    </ol>
     <p class="sub" id="payInfo"></p>
-    <label class="field" id="payLinkField"><span>送金リンク</span>
+    <label class="field" id="payLinkField"><span>送金リンクを貼り付け</span>
       <input id="payLink" type="url" inputmode="url" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048"></label>
     <div class="payerr" id="payErr" role="alert" hidden><b id="payErrTitle"></b><span id="payErrHint"></span></div>
     <div class="mbtns">
       <button class="btn" id="payCancel" type="button">やめる</button>
-      <button class="btn pri" id="payGo" type="button">送金リンクを送って実行</button>
+      <button class="btn pri" id="payGo" type="button">支払って実行する</button>
     </div>
   </div>
 </div>
 
 <div class="modal" id="helpPanel" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
   <div class="mbox">
-    <h2 id="helpTitle">使い方</h2>
-    <div class="notice" id="helpNotice">
-      <b>はじめに確認してください</b>
-      <ul>
-        <li>支払いはPayPayの<b>送金リンク</b>で、<b>表示金額ちょうど・パスコードなし</b>で作ってください。</li>
-        <li>PayPay側で<b>「保留」</b>になることがあります。その場合は<b>再送金せず</b>、PayPayアプリで保留を解除して、この画面を開いたままお待ちください。</li>
-        <li>支払い画面の<b>注文番号</b>を控えてください。画面を閉じても、その番号で再開できます。</li>
-        <li>完了後に出る<b>引継ぎコードと暗証番号</b>は必ず控えてください。</li>
-        <li>項目によってはBANなどの恐れがあります。<b>ご利用は自己責任</b>でお願いします。</li>
-      </ul>
+    <h2 id="helpTitle">にゃんこ代行へようこそ</h2>
+    <p class="lead"><b>TN SHOP</b> のにゃんこ大戦争データ代行です。メニューを選んで PayPay で払うと、自動で処理して<b>数分で引継ぎコード</b>をお渡しします。</p>
+    <div class="promise">
+      <div><i>✅</i><p><b>入金を確認してから実行</b><span>お支払いが確認できるまで、データには一切さわりません。</span></p></div>
+      <div><i>🔁</i><p><b>失敗しても再送金なし</b><span>うまくいかなかったときは、同じお支払いのまま無料でやり直せます。</span></p></div>
+      <div><i>🔒</i><p><b>引継ぎコードは処理にだけ使用</b><span>入力したコードは処理のためだけに使い、完了後に削除します。</span></p></div>
+      <div><i>💬</i><p><b>困ったらすぐ相談</b><span><a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a>のDMで受け付けています。</span></p></div>
     </div>
-    <ol class="howto">
-      <li><b>① アカウント</b>：引継ぎコードと暗証番号を入れ（新しく作るなら空欄）、「何をしますか？」から1つ選びます。</li>
-      <li><b>② メニュー</b>：アイテム・数量指定・キャラ・サブ・その他から選びます。下のバーに金額が出ます。</li>
-      <li><b>③ 確認・支払い</b>：注文内容と金額を確かめて「お支払いへ進む」。PayPayで<b>表示金額ちょうどの送金リンク</b>（パスコードなし）を作って貼り付けます。</li>
-      <li><b>④ 実行・受取</b>：支払いが確認できると自動で実行します。終わると<b>引継ぎコードと暗証番号</b>、ゲームでの引き継ぎ手順が出ます。</li>
+    <h3>かんたん4ステップ</h3>
+    <ol class="steps4">
+      <li><b>アカウント</b><span>引継ぎコードと暗証番号を入力（新しく作るなら空欄）</span></li>
+      <li><b>メニュー</b><span>欲しいものを選ぶ。下のバーに金額が出ます</span></li>
+      <li><b>確認・支払い</b><span>PayPay の送金リンクを貼り付け</span></li>
+      <li><b>受け取り</b><span>引継ぎコードと暗証番号が表示されます</span></li>
     </ol>
+    <div class="notice" id="helpNotice">
+      <b>お支払いの前に、3つだけ</b>
+      <ul>
+        <li>送金リンクは<b>表示金額ちょうど・パスコードなし</b>で作ってください。</li>
+        <li>PayPay で<b>「保留」</b>になっても<b>再送金は不要</b>です。アプリで保留を解除すると、自動で続きます。</li>
+        <li>完了後の<b>引継ぎコードと暗証番号</b>は、スクショなどで必ず控えてください。</li>
+      </ul>
+      <small>猫缶・レアチケなど一部の項目は、ゲーム側に見つかるとBANされる可能性があります。気になる方は確認画面の「安全モード」をオンにすると外せます。最終的な判断はご自身でお願いします。</small>
+    </div>
     <h3>料金</h3>
     <ul class="paylist">
       <li>キャラ指定：1体ごとに、レベル・形態・本能を1項目 {{ prices.chara }}円（設定なしの解放のみは1体 {{ prices.chara }}円）</li>
@@ -3300,14 +3330,16 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <li>それ以外の項目：1件 {{ prices.other }}円（試運転も同額）</li>
     </ul>
     <h3>よくある質問</h3>
+    <details><summary>BANされませんか？</summary><p>アイテムの多くは問題が起きにくいものですが、絶対ではありません。猫缶・レアチケなどは特に注意が必要な項目で、「安全モード」をオンにすると自動で外せます。心配な場合は、検査と修復を行う「バン保証」もご利用ください。</p></details>
+    <details><summary>失敗したらどうなりますか？</summary><p>お支払いはそのまま有効です。再送金なしで、もう一度実行できます。それでも解決しないときは、注文番号を添えて <a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a> にご連絡ください。</p></details>
     <details><summary>リンクがエラーになる</summary><p>金額が違う・パスコード付き・期限切れ・受け取り済みのリンクは使えません。金額を確認して、新しいリンクを作り直してください。</p></details>
     <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のその送金から、保留を解除してください。解除されると、サーバーが自動で確認して実行します（画面を閉じていても大丈夫です）。あとで同じブラウザで開くと、結果の引継ぎコードが表示されます。同じリンクを送り直したり、再送金したりしないでください。</p></details>
     <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
     <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
     <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、「① アカウント」画面の上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
       <div class="tools"><input type="text" id="claimNo" placeholder="注文番号" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn" id="claimGo">再開</button></div></details>
-    <p class="ordno">あなたのユーザーID: <code>{{ uid }}</code>（問い合わせのときに伝えてください）</p>
-    <div class="mbtns"><button class="btn pri" id="helpClose" type="button">確認しました</button></div>
+    <p class="ordno">お問い合わせ：<a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a>　あなたのユーザーID：<code>{{ uid }}</code></p>
+    <div class="mbtns"><button class="btn pri" id="helpClose" type="button">はじめる</button></div>
   </div>
 </div>
 <div class="modal" id="donePanel" role="dialog" aria-modal="true" aria-labelledby="doneTitle" hidden>
@@ -3699,7 +3731,7 @@ function renderChecks(pc,qm,total){
   const risky=[...new Set([...maxed,...qkeys])].filter(x=>HIGH.includes(x));
   if(risky.length){
     if(safe) add('warn','安全モードのため、'+risky.join('・')+' は今回スキップします。');
-    else add('warn',risky.join('・')+' は、bcsfeの配布元に「BANされることがある」と書かれている項目です。安全モードをオンにすると外せます。');
+    else add('warn',risky.join('・')+' は、ゲーム側に見つかるとBANされる可能性がある項目です。安全モードをオンにすると外せます。');
   }
   const over=overInputs().map(e=>e.dataset.label||e.dataset.item);
   if(over.length) add('bad','数量が上限を超えています：'+over.join('・'));
@@ -3830,10 +3862,10 @@ $$('[data-copy]').forEach(b=>b.addEventListener('click',async()=>{
 function renderState(){
   const age=Date.now()-lastOk;
   if(!lastOk||fails>=2){
-    pill('#p-conn',fails>=2?'bad':'wait',fails>=2?'接続できません':'接続を確認中');
+    pill('#p-conn',fails>=2?'bad':'wait',fails>=2?'ただいまつながりません':'つながりを確認中');
     $('#s-conn').textContent=fails>=2?'切断（休止中なら1分ほどで復帰します）':'確認中';
   }else{
-    pill('#p-conn','ok','接続OK'); $('#s-conn').textContent='接続OK';
+    pill('#p-conn','ok','営業中'); $('#s-conn').textContent='接続OK';
   }
   if(lastOk) $('#s-last').textContent=clock(new Date(lastOk));
   if(!state) return;
@@ -3864,7 +3896,7 @@ function renderState(){
   const pa=$('#p-api'); pa.hidden=!(am&&am.length);
   if(jobRunning) pill('#p-job','busy','自分の処理を実行中');
   else if(state.running_jobs>0) pill('#p-job','busy','他の処理 '+state.running_jobs+' 件が実行中');
-  else if(state.warmup_slots>0) pill('#p-job','wait','実行枠の準備中');
+  else if(state.warmup_slots>0) pill('#p-job','wait','準備中');
   else pill('#p-job','idle','待機中');
 }
 let lastCatalogVersion=null;
@@ -4111,7 +4143,7 @@ async function start(){
   } else if($('#clone').checked){
     if(!t||!c){ show('input'); $('#inputErr').textContent='複製には、引継ぎコードと暗証番号の両方が必要です。'; return; }
     if(!$('#dry').checked){
-      const accepted=window.confirm('【実験機能・本番サーバー接続】元アカウントと複製アカウントの2つを別々に登録します。PONOS非公式の方法で、独立プレイや継続利用は保証されません。引継ぎコードは1回限りで、ゲーム内で引継ぎを完了すると元端末のデータが初期化されます。失敗時は元アカウントのコードだけが発行される場合もあります。理解したうえで続行しますか？');
+      const accepted=window.confirm('【試験提供・本番サーバー接続】元アカウントと複製アカウントの2つを別々に登録します。公式の機能ではないため、独立プレイや継続利用は保証されません。引継ぎコードは1回限りで、ゲーム内で引継ぎを完了すると元端末のデータが初期化されます。失敗時は元アカウントのコードだけが発行される場合もあります。理解したうえで続行しますか？');
       if(!accepted) return;
     }
   } else {
@@ -4262,11 +4294,11 @@ function payError(j,fallback,lv){
 }
 function openPay(id,amount,breakdown,skipped,state){
   watchOrders(true);
-  payOrder=id; $('#payOrderNo').textContent=id; payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
+  payOrder=id; $('#payOrderNo').textContent=id; $('#payOrderShort').textContent='TN-'+String(id).slice(0,8); payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
   $('#payAmount').textContent=Number(amount).toLocaleString('ja-JP');
   const ul=$('#payList'); ul.textContent='';
   (breakdown||[]).forEach(r=>{ const li=document.createElement('li'); li.textContent=r.label+' '+r.count+'件 × '+r.unit+'円'; ul.append(li); });
-  $('#payInfo').textContent='PayPayアプリで上の金額ちょうどの「送金リンク」を作り（パスコードなし）、下に貼り付けて送信してください。確認でき次第、自動で実行します。';
+  $('#payInfo').textContent='入金が確認でき次第、自動で実行します（この画面は開いたままで大丈夫です）。';
   $('#paySkip').hidden=!(skipped&&skipped.length); $('#paySkipList').textContent=(skipped||[]).join('・');
   $('#payGo').disabled=false; document.body.style.overflow='hidden';
   if(state==='hold') setHold(true);
@@ -4275,7 +4307,7 @@ function openPay(id,amount,breakdown,skipped,state){
 }
 let holdTimer=null, holdTries=0;
 function setHold(on){
-  $('#payLinkField').hidden=on; $('#payGo').textContent=on?'今すぐ確認する':'送金リンクを送って実行';
+  $('#payLinkField').hidden=on; $('#payGo').textContent=on?'今すぐ確認する':'支払って実行する'; $('#paySteps').hidden=on;
   if(on) $('#payInfo').textContent='保留中です。送金した方がPayPayアプリで保留を解除（承認）すると、自動で確認して実行します。同じリンクを送り直したり、再送金したりしないでください。この画面を閉じても、サーバーが確認を続けます。あとで同じブラウザで開けば、結果（引継ぎコード）を見られます。';
   $('#payCancel').textContent=on?'閉じる（確認は続きます）':'やめる';
   if(!on){ clearInterval(holdTimer); holdTimer=null; holdTries=0; return; }
@@ -4421,7 +4453,7 @@ async function loadResume(quiet){
     });
   }catch(e){}
 }
-$('#payCopy').addEventListener('click',async()=>{ const ok=await copyText($('#payOrderNo').textContent); toast(ok?'注文番号をコピーしました':'コピーできませんでした'); });
+$('#payCopy').addEventListener('click',async()=>{ const ok=await copyText($('#payOrderNo').textContent); toast(ok?'受付番号をコピーしました':'コピーできませんでした'); });
 $('#claimGo').addEventListener('click',async()=>{
   const no=$('#claimNo').value.trim(); if(!no){ toast('注文番号を入れてください'); return; }
   try{
