@@ -322,24 +322,24 @@ def main():
                     with DMBrowser() as b:
                         shots = []
                         shots = []
-                        b.page.goto(CHAT + "/requests", wait_until="domcontentloaded")
-                        time.sleep(12)
-                        item = b.page.locator('[data-testid^="dm-message-request-item-"]').first
-                        print(f"[probe] request items={b.page.locator('[data-testid^=\"dm-message-request-item-\"]').count()}", flush=True)
-                        item.click()
+                        b.page.goto(CHAT, wait_until="domcontentloaded")
                         time.sleep(12)
                         info = b.deep_probe()
-                        print(f"[probe] open-request: editable={info['editable']}", flush=True)
-                        print(f"[probe] open-request: tids={info['tids']}", flush=True)
-                        print(f"[probe] open-request: roles={info['roles']} labels={info['labels']}", flush=True)
-                        btns = b.page.evaluate("""() => { const out = []; const walk = r => r.querySelectorAll('button,[role=button]').forEach(e => {
-                            const t = (e.innerText||e.getAttribute('aria-label')||'').trim(); const id = (e.getAttribute('data-testid')||'').replace(/[0-9]+/g,'#');
-                            if (t.length < 25 && !/@|[0-9]{3,}/.test(t)) out.push(id + '|' + t); }); walk(document);
-                            document.querySelectorAll('*').forEach(e => { if (e.shadowRoot) e.shadowRoot.querySelectorAll('button,[role=button]').forEach(x => {
-                              const t = (x.innerText||x.getAttribute('aria-label')||'').trim(); const id = (x.getAttribute('data-testid')||'').replace(/[0-9]+/g,'#');
-                              if (t.length < 25 && !/@|[0-9]{3,}/.test(t)) out.push(id + '|' + t); }); }); return [...new Set(out)].slice(0, 40); }""")
-                        print(f"[probe] open-request: buttons={btns}", flush=True)
-                        shots.append(b.shot("probe-request"))
+                        print(f"[probe] inbox: tids={[t for t in info['tids'] if 'request' in t[0] or 'inbox' in t[0]]}", flush=True)
+                        b.page.goto(CHAT + "/requests", wait_until="domcontentloaded")
+                        time.sleep(12)
+                        main_n = b.page.locator('[data-testid^="dm-message-request-item-"]').count()
+                        print(f"[probe] requests main items={main_n}", flush=True)
+                        shots.append(b.shot("probe-requests-main"))
+                        other = b.page.locator('[data-testid="dm-message-requests-other-button"]').first
+                        print(f"[probe] other button count={b.page.locator('[data-testid=\"dm-message-requests-other-button\"]').count()} text={(other.inner_text() or '')[:30]!r}", flush=True)
+                        other.click(timeout=15000)
+                        time.sleep(10)
+                        info = b.deep_probe()
+                        print(f"[probe] other: url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:30]}", flush=True)
+                        print(f"[probe] other: tids={[t for t in info['tids'] if t[0] not in ('BottomBar','premium-signup-tab','primaryColumn') and not t[0].startswith(('AppTabBar','SideNav','UserAvatar'))]}", flush=True)
+                        print(f"[probe] other: labels={info['labels']} roles={info['roles']}", flush=True)
+                        shots.append(b.shot("probe-requests-other"))
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
