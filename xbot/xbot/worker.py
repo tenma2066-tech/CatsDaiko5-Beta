@@ -276,9 +276,14 @@ def main():
                 snapshot()
             elif req == "dm_probe":            # DM画面の作りを調べる（診断用・何も送らない）
                 try:
-                    with Browser(engine="mac") as b:
+                    with Browser(engine="iphone") as b0:      # iPhone 側のログイン情報を、パソコン（Chromium）側にも写す
+                        ck = [c for c in b0.ctx.cookies(["https://x.com"])]
+                    with Browser(engine="pc") as b:
+                        b.ctx.clear_cookies()
+                        b.ctx.add_cookies(ck)
+                        ck = None
                         shots = []
-                        for name, url in (("chat-mac", "https://x.com/i/chat"),):
+                        for name, url in (("chat-pc", "https://x.com/i/chat"),):
                             path, info, shot = b.probe(url)
                             shots.append(shot)
                             top = sorted(info["testids"].items(), key=lambda kv: -kv[1])[:40]
