@@ -22,5 +22,10 @@ CADDY
 mv "$SITES/xbot.caddy.new" "$SITES/xbot.caddy"
 cd /opt/catsdaiko
 docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
-docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --address 127.0.0.1:2019 --force 2>&1 | tail -3
+sleep 3
+N=$(docker compose exec -T caddy wget -qO- http://127.0.0.1:2019/config/ | grep -o "$XBOT_DOMAIN" | wc -l)
+echo "動いている設定に $XBOT_DOMAIN が入っているか: $N"
+[ "$N" -gt 0 ] || { echo "反映できませんでした"; exit 1; }
+docker compose logs --since 1m caddy 2>&1 | grep -iE "tnshop|error|obtain" | tail -10 | cut -c1-300
 echo "Caddy に $XBOT_DOMAIN を追加しました（reload のみ・再起動なし）"
