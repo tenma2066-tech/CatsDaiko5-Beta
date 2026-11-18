@@ -110,7 +110,7 @@ def index():
         events = [dict(r) for r in d.execute("SELECT * FROM events ORDER BY id DESC LIMIT 150")]
         today = d.execute("SELECT COUNT(*) c FROM posts WHERE state='posted' AND done_at>=?", (logic.jst_day_start(time.time()),)).fetchone()["c"]
         hour = d.execute("SELECT COUNT(*) c FROM replied WHERE dry=0 AND at>=?", (time.time() - 3600,)).fetchone()["c"]
-        recent = [dict(r) for r in d.execute("SELECT r.*, u.name FROM replied r LEFT JOIN rules u ON u.id=r.rule_id WHERE r.rule_id IS NOT NULL ORDER BY r.at DESC LIMIT 30")]
+        recent = [dict(r) for r in d.execute("SELECT r.*, u.name FROM replied r LEFT JOIN rules u ON u.id=r.rule_id WHERE r.rule_id IS NOT NULL ORDER BY r.at DESC LIMIT 50")]
     for p in posts:
         p["rep"] = logic.describe_repeat(json.loads(p["repeat"])) if p.get("repeat") else ""
         p["imgs"] = json.loads(p["images"] or "[]")

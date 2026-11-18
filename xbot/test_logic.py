@@ -243,6 +243,7 @@ class Worker(unittest.TestCase):
             def dm_chat_keys(self, limit): return [c["conv"] for c in convs][:limit]
             def dm_open_chat(self, key): self.cur = key; return incoming.get(key)
             def dm_reply(self, text, dry): test.sent.append((self.cur, text, dry))
+            def dm_peer(self): return "テスト太郎（@taro_test）"
         return FB
 
     def test_post_respects_dry_and_limit(self):
@@ -305,6 +306,11 @@ class Worker(unittest.TestCase):
         s = dict(store.get_all(), dry_run=False, dm_accept_requests=False)
         self.w.run_dms(s)
         self.assertEqual(self.sent, [("1:9", "料金表です", False)])
+        with store.db() as d:
+            self.assertEqual(d.execute("SELECT who FROM replied WHERE rule_id IS NOT NULL").fetchone()["who"], "テスト太郎（@taro_test）")
+        from xbot import web
+        c = web.app.test_client(); c.post("/login", data={"password": "test-pass"})
+        self.assertIn("テスト太郎（@taro_test）", c.get("/?tab=dm").get_data(as_text=True))     # DM履歴に相手が出る
         self.w.run_dms(s)                     # 同じメッセージには二度返さない
         self.assertEqual(len(self.sent), 1)
 

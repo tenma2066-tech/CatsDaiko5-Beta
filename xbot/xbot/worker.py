@@ -118,7 +118,7 @@ def already(conv, h):
         return d.execute("SELECT 1 FROM replied WHERE conv=? AND msg_hash=?", (conv, h)).fetchone() is not None
 
 
-def _handle(b, s, rs, key, got, dry, counts):
+def _handle(b, s, rs, key, got, dry, counts, who=None):
     """1つの会話：最後が相手のメッセージで、ルールに合えば返信する。"""
     if not got:
         return
@@ -138,12 +138,14 @@ def _handle(b, s, rs, key, got, dry, counts):
         with store.db() as d:   # 当てはまるルールがない → 次からは見ない
             d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,1)", (key, h, None, time.time()))
         return
+    if who is None:
+        who = b.dm_peer()
     b.dm_reply(rule["reply"], dry)
     with store.db() as d:
-        d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,?)",
-                  (key, h, rule["id"], time.time(), 1 if dry else 0))
+        d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry, who) VALUES(?,?,?,?,?,?)",
+                  (key, h, rule["id"], time.time(), 1 if dry else 0, who or None))
     counts["replied"] += 1
-    store.log("info", "dm", f"ルール「{rule['name']}」で{'返信を下書きしました（送っていません）' if dry else '返信しました'}")
+    store.log("info", "dm", f"{who + ' に' if who else ''}ルール「{rule['name']}」で{'返信を下書きしました（送っていません）' if dry else '返信しました'}")
     time.sleep(random.uniform(20, 60))   # 続けて返さない
 
 
@@ -175,10 +177,11 @@ def run_dms(s, manual=False):
                         seen.add(key)
                         got = b.dm_open_request(key)
                         b.dm_accept()
+                        who = b.dm_peer()
                         counts["accepted"] += 1
-                        store.log("info", "dm", f"{scope}を許可しました")
+                        store.log("info", "dm", f"{scope}を許可しました{'：' + who if who else ''}")
                         if rs:
-                            _handle(b, s, rs, key, got, dry, counts)
+                            _handle(b, s, rs, key, got, dry, counts, who=who)
                         time.sleep(random.uniform(5, 15))
                 except ChatLocked:
                     raise

@@ -228,8 +228,9 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <form method="post" action="/rule/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm danger" onclick="return confirm('このルールを削除しますか？')">削除</button></form></div></div>
 {% else %}<p class="sub">まだありません。上から追加してください。</p>{% endfor %}</div>
 
-<div class="card"><h2>最近の返信</h2>
-{% for x in recent %}<div class="ev">{{ x.when }}　{{ x.name or '-' }}{{ '（下書き）' if x.dry }}</div>{% else %}<p class="sub">まだありません。</p>{% endfor %}</div>
+<div class="card"><h2>DM履歴</h2><p class="sub">新しい順に50件。相手の名前は、これから返信する分から記録されます。</p>
+{% for x in recent %}<div class="item"><div class="top"><b>{{ x.who or '（相手不明）' }}</b><span class="chip {{ 'warn' if x.dry else 'ok' }}">{{ '下書き' if x.dry else '返信済み' }}</span></div>
+<div class="sub" style="margin:2px 0 0">{{ x.when }}　ルール：{{ x.name or '-' }}</div></div>{% else %}<p class="sub">まだありません。</p>{% endfor %}</div>
 
 {% elif tab == 'settings' %}
 <div class="card"><h2>動かし方</h2>

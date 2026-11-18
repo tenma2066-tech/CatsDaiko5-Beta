@@ -1,6 +1,7 @@
 """Playwright で X の画面を操作する部分。X の画面の作りが変わったら、ここの SEL を直す。"""
 import os
 import random
+import re
 import threading
 import time
 
@@ -409,6 +410,30 @@ class Browser:
         item.click(timeout=15000)
         self.page.wait_for_selector('[data-testid="dm-message-request-accept-button"]', timeout=20000)
         return self._last_message()
+
+    def dm_peer(self) -> str:
+        """開いている会話の相手：「名前（@ユーザー名）」。読み取れなければ空。"""
+        p = self.page
+        try:
+            handle = ""
+            for sel in ('[data-testid="dm-message-request-profile-link"]', '[data-testid="dm-conversation-header"] a[href^="/"]',
+                        '[data-testid="dm-conversation-header-item"] a[href^="/"]'):
+                el = p.locator(sel).first
+                if el.count():
+                    seg = (el.get_attribute("href") or "").strip("/").split("/")[0]
+                    if re.fullmatch(r"[A-Za-z0-9_]{1,15}", seg) and seg not in ("i", "home", "messages", "explore", "notifications", "compose", "settings"):
+                        handle = "@" + seg
+                        break
+            name = ""
+            el = p.locator('[data-testid="dm-conversation-username"]').first
+            if el.count():
+                lines = [x.strip() for x in (el.inner_text() or "").splitlines() if x.strip()]
+                name = lines[0][:40] if lines else ""
+            if handle and name and handle[1:].lower() not in name.lower():
+                return f"{name}（{handle}）"
+            return handle or name
+        except Exception:  # noqa: BLE001
+            return ""
 
     def dm_accept(self):
         self.page.locator('[data-testid="dm-message-request-accept-button"]').first.click()
