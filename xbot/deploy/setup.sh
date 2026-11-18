@@ -33,7 +33,14 @@ echo "== 4. Python の専用環境（venv）と Chromium"
 export PLAYWRIGHT_BROWSERS_PATH="$APP/browsers"
 "$APP/venv/bin/python" -m playwright install-deps chromium >/dev/null
 "$APP/venv/bin/python" -m playwright install chromium >/dev/null
+"$APP/venv/bin/python" -m playwright install-deps webkit >/dev/null
+"$APP/venv/bin/python" -m playwright install webkit >/dev/null
 chmod -R a+rX "$APP/browsers"
+
+echo "== 4b. Cloudflare WARP（プロキシモード・xbot のブラウザだけが使う）"
+echo "  変更前の経路: $(ip route show default | head -1)"
+bash "$SRC/deploy/warp.sh" || echo "  WARP は入れられませんでした（直接つなぎます）"
+echo "  変更後の経路: $(ip route show default | head -1)"
 
 echo "== 5. 設定ファイル /etc/xbot/env（root と xbot だけが読める）"
 GW=$(ip -4 -o addr show docker0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
@@ -64,13 +71,17 @@ sleep 3
 systemctl --no-pager --lines=0 status xbot-web.service xbot-worker.service | grep -E "●|Active:" || true
 curl -fsS "http://$GW:8090/health" && echo "  管理サイト: 起動OK（$GW:8090）"
 
-echo "== 8. headless で Chromium が起動するか（x.com を開くだけ・何も送らない）"
+echo "== 8. ブラウザが起動するか（x.com を開くだけ・何も送らない）"
 cat > /tmp/xbot-check.py <<'PY'
 from xbot.browser import Browser
-with Browser() as b:
-    print("  Chromium 起動OK / Xにログイン済み:", b.logged_in())
+for eng in ("iphone", "pc"):
+    try:
+        with Browser(engine=eng) as b:
+            print("  ブラウザ", eng, "起動OK /", b.exit_info(), "/ Xにログイン済み:", b.logged_in())
+    except Exception as e:
+        print("  ブラウザ", eng, "起動できませんでした:", str(e)[:300])
 PY
 chmod 644 /tmp/xbot-check.py
-sudo -u xbot bash -c "set -a; . $ENVF; set +a; cd $APP && PYTHONPATH=$APP $APP/venv/bin/python /tmp/xbot-check.py" 2>&1 | tail -2
+sudo -u xbot bash -c "set -a; . $ENVF; set +a; cd $APP && PYTHONPATH=$APP $APP/venv/bin/python /tmp/xbot-check.py" 2>&1 | tail -4
 rm -f /tmp/xbot-check.py
 free -m | sed -n 2p

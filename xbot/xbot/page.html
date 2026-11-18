@@ -67,7 +67,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <li>Orion の拡張機能から <b>Cookie-Editor</b> を入れる</li>
 <li>Orion で <b>x.com</b> を開き、いつも通り自分でログイン</li>
 <li>x.com を開いたまま Cookie-Editor を開き、<b>Export → JSON</b> でコピー（または <code>auth_token</code> と <code>ct0</code> の値だけコピー）</li>
-<li>下に貼り付けて「取り込む」</li>
+<li><b>この管理サイトも Orion で開いて</b>、下に貼り付けて「取り込む」（サーバーのブラウザ名を Orion と同じにするため）</li>
 </ol>
 <div class="note">この値はパスワードと同じくらい大事です。チャットや他の人には見せないでください。X でログアウトすると無効になります。</div></div>
 <div class="card"><h2>貼り付け</h2>
@@ -219,6 +219,12 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <p class="sub">最初は<b>下書きモード</b>で、入力までの動きを「画面の記録」で確認してから本番にしてください。</p>
 <form method="post" action="/action/{{ 'dry_off' if s.dry_run else 'dry_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <button class="btn full {{ 'danger' if s.dry_run else 'pri' }}" onclick="return confirm('{{ '本番モードにすると、予約どおり実際に投稿・返信します。よろしいですか？' if s.dry_run else '下書きモードに戻しますか？' }}')">{{ '本番モードにする（実際に投稿・返信する）' if s.dry_run else '下書きモードに戻す' }}</button></form></div>
+<div class="card"><h2>サーバーのブラウザ</h2><p class="sub">X にログインを切られにくくする設定です。ログイン情報はブラウザの種類ごとに別なので、切り替えたら貼り付け直してください。</p>
+<form method="post" action="/settings/browser"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>ブラウザの種類</label><div class="sw"><label><input type="radio" name="engine" value="iphone" {{ 'checked' if s.engine != 'pc' }}>iPhone（おすすめ）</label><label><input type="radio" name="engine" value="pc" {{ 'checked' if s.engine == 'pc' }}>パソコン</label></div>
+<label>通信の出口</label><div class="sw"><label><input type="radio" name="network" value="warp" {{ 'checked' if s.network != 'direct' }}>WARP 経由</label><label><input type="radio" name="network" value="direct" {{ 'checked' if s.network == 'direct' }}>直接</label></div>
+<p class="sub" style="margin-top:6px">WARP：{{ '✅ 使えます' if warp_ok else '⚠️ 動いていません（直接つなぎます）' }}　iPhone のブラウザ名：{{ '貼り付けたときのものを使用' if s.ua else '標準の iPhone Safari' }}</p>
+<button class="btn pri full">保存</button></form></div>
 <div class="card"><h2>上限・間隔</h2><p class="sub">やりすぎると X に止められやすくなります。控えめがおすすめです。</p>
 <form method="post" action="/settings"><input type="hidden" name="csrf" value="{{ csrf }}">
 <label>1日の投稿数の上限</label><input type="number" name="max_posts_day" value="{{ s.max_posts_day }}" min="1" max="50" inputmode="numeric">

@@ -214,7 +214,8 @@ def check_login():
             shot = b.shot("login-check")
             names = sorted({c["name"] for c in b.ctx.cookies("https://x.com")})
             url = b.page.url.split("?")[0]
-        store.log("info", "login", f"ログイン確認：auth_token={'あり' if 'auth_token' in names else 'なし'} 項目={len(names)}件 画面={url}")
+            exit_ = b.exit_info()
+        store.log("info", "login", f"ログイン確認：auth_token={'あり' if 'auth_token' in names else 'なし'} 項目={len(names)}件 画面={url} {exit_}")
         store.update_status(logged_in=ok, login_checked=time.time(), login_shot=shot)
         store.log("info" if ok else "warn", "login", "Xにログインしています" if ok else "Xにログインしていません")
     except Exception as e:  # noqa: BLE001

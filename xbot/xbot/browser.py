@@ -23,6 +23,30 @@ COMPOSE = "https://x.com/compose/post"
 MESSAGES = "https://x.com/messages"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/131.0.0.0 Safari/537.36")
+IPHONE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+             "Version/18.5 Mobile/15E148 Safari/604.1")
+WARP_PROXY = os.environ.get("XBOT_WARP_PROXY", "socks5://127.0.0.1:40000")
+
+
+def settings_for_browser():
+    s = store.get_all()
+    engine = s.get("engine") or "iphone"
+    ua = s.get("ua") or ""
+    if engine == "iphone" and "iPhone" not in ua:
+        ua = IPHONE_UA
+    proxy = {"server": WARP_PROXY} if s.get("network") == "warp" and warp_ready() else None
+    return engine, ua, proxy
+
+
+def warp_ready() -> bool:
+    """WARP（プロキシ）が動いているか。動いていなければ直接つなぐ。"""
+    import socket
+    try:
+        host, port = WARP_PROXY.split("://")[1].rsplit(":", 1)
+        with socket.create_connection((host, int(port)), timeout=2):
+            return True
+    except OSError:
+        return False
 
 
 PROFILE_LOCK = threading.Lock()   # 同じプロフィールを2つのブラウザで同時に開かない
@@ -39,9 +63,10 @@ def human_pause(a=0.6, b=1.8):
 class Browser:
     """使うときだけ起動して、終わったら閉じる（メモリを使いっぱなしにしない）。"""
 
-    def __init__(self, headless=True, display=None):
+    def __init__(self, headless=True, display=None, engine=None):
         self.headless = headless
         self.display = display
+        self.engine = engine
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
@@ -54,22 +79,50 @@ class Browser:
             raise
 
     def _open(self, sync_playwright):
-        os.makedirs(store.PROFILE_DIR, mode=0o700, exist_ok=True)
-        os.chmod(store.PROFILE_DIR, 0o700)
         env = dict(os.environ)
         if self.display:
             env["DISPLAY"] = self.display
+        engine, ua, proxy = settings_for_browser()
+        if self.engine:
+            engine = self.engine
+        self.engine_used = engine
         self._pw = sync_playwright().start()
-        self.ctx = self._pw.chromium.launch_persistent_context(
-            store.PROFILE_DIR, headless=self.headless, user_agent=UA,
-            executable_path=os.environ.get("XBOT_CHROMIUM") or None, locale="ja-JP", timezone_id="Asia/Tokyo",
-            viewport={"width": 1100, "height": 900} if self.headless else None,
-            args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--disable-dev-shm-usage"]
-                 + ([] if self.headless else ["--window-position=0,0", "--window-size=430,900", "--force-device-scale-factor=1"]),
-            env=env)
+        try:
+            if engine == "iphone" and self.headless:
+                # iPhone の Safari と同じ種類のブラウザで、画面サイズ・タッチ操作も iPhone に合わせる
+                prof = store.PROFILE_DIR + "-iphone"
+                os.makedirs(prof, mode=0o700, exist_ok=True)
+                os.chmod(prof, 0o700)
+                self.ctx = self._pw.webkit.launch_persistent_context(
+                    prof, headless=True, user_agent=ua or IPHONE_UA, locale="ja-JP", timezone_id="Asia/Tokyo",
+                    viewport={"width": 390, "height": 844}, device_scale_factor=3, is_mobile=True, has_touch=True,
+                    proxy=proxy, env=env)
+            else:
+                os.makedirs(store.PROFILE_DIR, mode=0o700, exist_ok=True)
+                os.chmod(store.PROFILE_DIR, 0o700)
+                self.ctx = self._pw.chromium.launch_persistent_context(
+                    store.PROFILE_DIR, headless=self.headless, user_agent=UA,
+                    executable_path=os.environ.get("XBOT_CHROMIUM") or None,
+                    locale="ja-JP", timezone_id="Asia/Tokyo",
+                    viewport={"width": 1100, "height": 900} if self.headless else None,
+                    args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--disable-dev-shm-usage"]
+                         + ([] if self.headless else ["--window-position=0,0", "--window-size=430,900", "--force-device-scale-factor=1"]),
+                    proxy=proxy, env=env)
+        except BaseException:
+            self._pw.stop()
+            raise
         self.ctx.set_default_timeout(30000)
         self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
         return self
+
+    def exit_info(self):
+        """X から見えるこのブラウザの出口（WARP 経由か、どの地域か）。"""
+        try:
+            self.page.goto("https://www.cloudflare.com/cdn-cgi/trace", wait_until="domcontentloaded", timeout=20000)
+            kv = dict(l.split("=", 1) for l in (self.page.inner_text("body") or "").splitlines() if "=" in l)
+            return f"WARP={kv.get('warp', '?')} 地域={kv.get('loc', '?')}"
+        except Exception as e:  # noqa: BLE001
+            return f"出口を確認できませんでした（{type(e).__name__}）"
 
     def __exit__(self, *exc):
         try:

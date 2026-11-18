@@ -126,7 +126,15 @@ def index():
         PAGE, view="main", tab=tab, s=s, st=st, alive=alive, posts=posts, rules=rules, events=events, recent=recent,
         today=today, hour=hour, kinds=logic.KINDS, csrf=csrf(), msg=session.pop("flash", ""), fmt=logic.fmt_jst,
         login_open=time.time() < float(s["login_until"] or 0), now_local=time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + 600)),
-        max_len=logic.MAX_POST_LEN)
+        max_len=logic.MAX_POST_LEN, warp_ok=_warp_ok())
+
+
+def _warp_ok():
+    from .browser import warp_ready
+    try:
+        return warp_ready()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 @app.get("/img/<name>")
@@ -160,6 +168,9 @@ def xcookie():
     if request.method == "POST":
         try:
             ck = xcookies.parse(request.form.get("json", ""), request.form.get("auth_token", ""), request.form.get("ct0", ""))
+            ua = request.headers.get("User-Agent", "")[:400]
+            if "iPhone" in ua:          # 貼り付けた iPhone のブラウザ名に合わせる（Orion で開いていれば同じになる）
+                store.put("ua", ua)
             xlogin.call("cookies", ck)
             ck = None   # 入力内容はここで手放す（サーバーのブラウザの中だけに残る）
             return redirect("/xcookie/status")
@@ -348,6 +359,18 @@ def settings():
             return back("settings")
         store.put(k, int(v))
     flash("設定を保存しました。")
+    return back("settings")
+
+
+@app.post("/settings/browser")
+def settings_browser():
+    eng = request.form.get("engine")
+    net = request.form.get("network")
+    if eng in ("iphone", "pc"):
+        store.put("engine", eng)
+    if net in ("warp", "direct"):
+        store.put("network", net)
+    flash("ブラウザの設定を保存しました。ログイン情報は、ブラウザの種類ごとに別々です（切り替えたら貼り付け直してください）。")
     return back("settings")
 
 
