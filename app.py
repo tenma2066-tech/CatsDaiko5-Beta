@@ -2671,6 +2671,13 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .steps4 b{flex:none}.steps4 span{color:var(--muted);font-size:13px}
 .notice small{display:block;margin-top:8px;font-size:12px;color:var(--muted);line-height:1.6}
 .foot{margin:28px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}.foot p{margin:0}
+.safe{margin:8px 0 0;padding:8px 10px;border-radius:10px;background:var(--soft);font-size:13px}
+.nowmsg{margin:4px 0 8px;font-size:15.5px;font-weight:700;line-height:1.6}
+.nowmsg[data-s=error]{color:var(--bad)}.nowmsg[data-s=done]{color:var(--ok)}
+.pbar{height:10px;border:2px solid var(--line);border-radius:999px;background:var(--soft);overflow:hidden;margin-bottom:12px}
+.pbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .6s ease}
+.pbar i[data-s=done]{background:var(--ok)}.pbar i[data-s=error]{background:var(--bad)}
+.logbox{margin-top:10px;font-size:13px}.logbox summary{cursor:pointer;color:var(--muted);font-weight:700}
 .paysteps{margin:10px 0 4px;padding:10px 12px 10px 30px;border-radius:12px;background:var(--soft);font-size:13.5px;line-height:1.7}
 .pill{display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border:2px solid var(--line);
   border-radius:999px;background:var(--panel);font-size:13px;font-weight:700;white-space:nowrap}
@@ -3003,8 +3010,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 
 <div class="tabs"><div class="wrap">
   <nav class="stepper" aria-label="手順">
-    <button class="step tab" type="button" id="t-input" data-tab="input" data-n="1"><i>1</i><span>アカウント</span></button>
-    <button class="step tab" type="button" id="t-menu" data-tab="items" data-n="2"><i>2</i><span>メニュー</span></button>
+    <button class="step tab" type="button" id="t-menu" data-tab="start" data-n="1"><i>1</i><span>メニュー</span></button>
+    <button class="step tab" type="button" id="t-input" data-tab="input" data-n="2"><i>2</i><span>アカウント</span></button>
     <button class="step tab" type="button" id="t-confirm" data-tab="confirm" data-n="3"><i>3</i><span>確認・支払い</span></button>
     <button class="step tab" type="button" id="t-status" data-tab="status" data-n="4"><i>4</i><span>実行・受取</span><span class="live"></span></button>
   </nav>
@@ -3017,38 +3024,42 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 
 <main class="wrap">
 
-  <section class="view" id="v-input" role="tabpanel" aria-labelledby="t-input">
+  <section class="view" id="v-start" role="tabpanel" aria-labelledby="t-menu">
     <div class="panel resume" id="resumePanel" hidden>
       <h2>未完了の注文があります</h2>
       <div id="resumeList"></div>
     </div>
     <div class="panel">
-      <h2>引継ぎ情報</h2>
-      <p class="sub">両方空欄にすると、初期アカウントから作ります。</p>
-      <label class="field"><span>引継ぎコード</span>
-        <input type="text" id="transfer" placeholder="例：aBcD1234e" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></label>
-      <label class="field"><span>暗証番号</span>
-        <input type="text" id="confirm" placeholder="例：1234" autocomplete="off" inputmode="numeric"></label>
-      <div class="mode" id="mode"></div>
-      {% if payments %}<label class="sw" id="restartWrap" style="margin-top:12px"><input type="checkbox" id="restart" {{ "" if restart.enabled else "disabled" }}>
-        <span><b>初期垢作成（リスタートパック）　{{ prices.restart }}円〜{% if not restart.enabled %}<em class="soon">準備中</em>{% endif %}</b>
-        <small>新しいアカウントを作り、公式のリスタートパックと同じ内容を入れた状態で始めます。引継ぎコード・暗証番号は空欄のまま使います。ほかのメニューも一緒に選べます（その分の料金が足されます）。{% if restart.note %}<br>{{ restart.note }}{% endif %}</small></span></label>{% endif %}
-      <div class="err" id="inputErr" role="alert"></div>
-    </div>
-    <div class="panel">
       <h2>何をしますか？</h2>
-      <p class="sub">いずれか1つを選んでください。</p>
+      <p class="sub">いずれか1つを選んでください。引継ぎコードは、このあとの「アカウント」で入力します。</p>
       <div class="modes" role="radiogroup" aria-label="内容">
         <button type="button" class="modecard" role="radio" data-mode="normal"><b>メニューから選ぶ</b><small>アイテム・キャラ・ステージなどを選んで付与・強化します。1項目 {{ prices.other }}円から</small></button>
         <button type="button" class="modecard" role="radio" data-mode="integrity"><b>バン保証</b><small>セーブを検査し、既知のエラーキャラなどを修復します。<em>{{ prices.ban_guarantee }}円</em>・引継ぎコード必須</small></button>
         <button type="button" class="modecard" role="radio" data-mode="clone"><b>アカウント複製</b><small>試験提供。元と複製の2アカウントのコードを出します。<em>{{ prices.clone }}円</em>・引継ぎコード必須</small></button>
       </div>
+      {% if payments %}<label class="sw" id="restartWrap" style="margin-top:12px"><input type="checkbox" id="restart" {{ "" if restart.enabled else "disabled" }}>
+        <span><b>初期垢作成（リスタートパック）　{{ prices.restart }}円〜{% if not restart.enabled %}<em class="soon">準備中</em>{% endif %}</b>
+        <small>新しいアカウントを作り、公式のリスタートパックと同じ内容を入れた状態で始めます。引継ぎコード・暗証番号は空欄のまま使います。ほかのメニューも一緒に選べます（その分の料金が足されます）。{% if restart.note %}<br>{{ restart.note }}{% endif %}</small></span></label>{% endif %}
       <details class="more"><summary>くわしい説明</summary>
       <label class="sw specialsw"><input type="checkbox" id="integrity">
         <span><b>バン保証（セーブの検査・既知異常の自動修復）　{{ prices.ban_guarantee }}円</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
       <label class="sw specialsw"><input type="checkbox" id="clone">
         <span><b>アカウント複製（試験提供）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。公式の機能ではないため、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
       </details>
+    </div>
+  </section>
+
+  <section class="view" id="v-input" role="tabpanel" aria-labelledby="t-input" hidden>
+    <div class="panel">
+      <h2>アカウント（引継ぎ情報）</h2>
+      <p class="sub">いま遊んでいるデータを使う場合は、ゲームで発行した<b>引継ぎコード</b>と<b>暗証番号</b>を入れてください。<b>新しいアカウントで始めるなら、両方空欄のまま</b>「次へ」でOKです。</p>
+      <p class="safe">🔒 入力したコードは処理にだけ使い、完了後に削除します。</p>
+      <label class="field"><span>引継ぎコード</span>
+        <input type="text" id="transfer" placeholder="例：aBcD1234e" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+      <label class="field"><span>暗証番号</span>
+        <input type="text" id="confirm" placeholder="例：1234" autocomplete="off" inputmode="numeric"></label>
+      <div class="mode" id="mode"></div>
+      <div class="err" id="inputErr" role="alert"></div>
     </div>
   </section>
 
@@ -3192,6 +3203,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <div class="locknote" id="lockNote" hidden>処理中です。終わるまで、この画面のまま（ほかのタブやページを開かずに）お待ちください。完了すると引継ぎコードが表示されます。</div>
     <div class="panel">
       <h2>実行の進み具合</h2>
+      <p class="nowmsg" id="nowMsg">ご注文を受け付けると、ここに進み具合が表示されます。</p>
+      <div class="pbar" aria-hidden="true"><i id="pbar"></i></div>
       <ol class="steps" id="steps">
         <li data-s="idle"><i>1</i>準備</li>
         <li data-s="idle"><i>2</i>取得</li>
@@ -3199,11 +3212,11 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
         <li data-s="idle"><i>4</i>発行</li>
       </ol>
       <div class="meta">
-        <div>実行枠<b id="job-slot">割り当て確認中</b></div>
+        <div hidden>実行枠<b id="job-slot">割り当て確認中</b></div>
         <div>経過時間<b id="elapsed">--:--</b></div>
         <div>最終更新<b id="updated">--:--:--</b></div>
       </div>
-      <div id="log" aria-live="polite"></div>
+      <details class="logbox"><summary>くわしい記録</summary><div id="log" aria-live="polite"></div></details>
       <button class="btn" id="cancel-queue" type="button" hidden>待機を取り消す</button>
       <div class="warnbox" id="warn" hidden></div>
       <div class="rep" id="rep" hidden></div>
@@ -3307,8 +3320,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     </div>
     <h3>かんたん4ステップ</h3>
     <ol class="steps4">
-      <li><b>アカウント</b><span>引継ぎコードと暗証番号を入力（新しく作るなら空欄）</span></li>
       <li><b>メニュー</b><span>欲しいものを選ぶ。下のバーに金額が出ます</span></li>
+      <li><b>アカウント</b><span>引継ぎコードと暗証番号を入力（新しく作るなら空欄）</span></li>
       <li><b>確認・支払い</b><span>PayPay の送金リンクを貼り付け</span></li>
       <li><b>受け取り</b><span>引継ぎコードと暗証番号が表示されます</span></li>
     </ol>
@@ -3336,7 +3349,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のその送金から、保留を解除してください。解除されると、サーバーが自動で確認して実行します（画面を閉じていても大丈夫です）。あとで同じブラウザで開くと、結果の引継ぎコードが表示されます。同じリンクを送り直したり、再送金したりしないでください。</p></details>
     <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
     <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
-    <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、「① アカウント」画面の上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
+    <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、「① メニュー」画面の上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
       <div class="tools"><input type="text" id="claimNo" placeholder="注文番号" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn" id="claimGo">再開</button></div></details>
     <p class="ordno">お問い合わせ：<a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a>　あなたのユーザーID：<code>{{ uid }}</code></p>
     <div class="mbtns"><button class="btn pri" id="helpClose" type="button">はじめる</button></div>
@@ -3388,7 +3401,7 @@ function couponCode(){ const c=$('#coupon'); return c?c.value.normalize('NFKC').
 const HIGH={{ high|tojson }};
 const ERRNUMS={{ error_nums|tojson }};
 const GROUPS=['items','subs','others'];
-const TABS=['input','items','qty','chars','subs','others','confirm','status'];
+const TABS=['start','input','items','qty','chars','subs','others','confirm','status'];
 const MENU=['items','qty','chars','subs','others'];
 let curView='input', lastMenu='items';
 const STEP_TEXT=['準備','取得','書き換え','発行'];
@@ -3399,21 +3412,21 @@ const NAMEOF=new Map();
 
 /* ---------- タブ ---------- */
 function special(){ return $('#integrity').checked||$('#clone').checked; }
-function stepOf(v){ return v==='input'?1:MENU.includes(v)?2:v==='confirm'?3:4; }
+function stepOf(v){ return (v==='start'||MENU.includes(v))?1:v==='input'?2:v==='confirm'?3:4; }
 function show(t){
   if(jobRunning&&t!=='status'){ toast('処理が終わるまで、この画面のままお待ちください'); t='status'; }
-  if(MENU.includes(t)&&special()){ t='confirm'; }
+  if(MENU.includes(t)&&special()){ t='start'; }
   TABS.forEach(k=>{
     const on=k===t;
     $('#v-'+k).hidden=!on;
-    $('#t-'+k).setAttribute('aria-selected',on?'true':'false');
+    const tb=$('#t-'+(k==='start'?'menu':k)); if(tb) tb.setAttribute('aria-selected',on?'true':'false');
   });
   curView=t; if(MENU.includes(t)) lastMenu=t;
   if(typeof saveDraft==='function') saveDraft();
   const cur=stepOf(t);
   $$('.step').forEach(b=>{
     const n=+b.dataset.n;
-    b.dataset.state=n===cur?'current':(n===2&&special()&&cur>1?'skip':(n<cur?'done':'todo'));
+    b.dataset.state=n===cur?'current':(n<cur?'done':'todo');
     b.setAttribute('aria-current',n===cur?'step':'false');
   });
   $('#subnav').hidden=!MENU.includes(t);
@@ -3425,10 +3438,11 @@ function show(t){
 function updateBar(){
   const v=curView, st=stepOf(v);
   const back=$('#back'), next=$('#next'), go=$('#go');
-  back.hidden=!(st===2||st===3)||jobRunning;
+  back.hidden=!((st===1&&v!=='start')||st===2||st===3)||jobRunning;
   go.hidden=!(st===3||jobRunning);
   next.hidden=st===3||jobRunning||(st===4);
-  if(st===1) next.textContent=special()?'次へ：確認':'次へ：メニュー';
+  if(v==='start') next.textContent=special()?'次へ：アカウント':'次へ：メニューを選ぶ';
+  else if(st===1) next.textContent='次へ：アカウント';
   else if(st===2) next.textContent='次へ：確認';
   if(st===4&&!jobRunning){ next.hidden=false; next.textContent='新しく注文する'; }
   if(st===4){
@@ -3438,25 +3452,28 @@ function updateBar(){
 }
 function goNext(){
   const st=stepOf(curView);
-  if(st===4){ show('input'); return; }
+  if(st===4){ show('start'); return; }
+  if(curView==='start'){ show(special()?'input':lastMenu); return; }
   if(st===1){
-    const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
-    if(!t!==!c){ $('#inputErr').textContent='引継ぎコードと暗証番号は「両方入力」か「両方空欄」にしてください。'; $('#transfer').focus(); return; }
-    if(special()&&!(t&&c)){ $('#inputErr').textContent=($('#integrity').checked?'バン保証':'アカウント複製')+'には、引継ぎコードと暗証番号の両方が必要です。'; $('#transfer').focus(); return; }
-    show(special()?'confirm':lastMenu); return;
-  }
-  if(st===2){
     if(parseNums($('#chars').value).err){ show('chars'); toast('キャラ番号を確認してください'); return; }
     if(refresh()===0){ toast('メニューを1つ以上選んでください'); return; }
     const bad=overInputs()[0];
     if(bad){ show('qty'); const d=bad.closest('details'); if(d) d.open=true; toast('「'+(bad.dataset.label||bad.dataset.item)+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
+    const ptv=ptMin(); if(ptv.err){ show('others'); toast(ptv.err); return; }
+    show('input'); return;
+  }
+  if(st===2){
+    const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
+    if(!t!==!c){ $('#inputErr').textContent='引継ぎコードと暗証番号は「両方入力」か「両方空欄」にしてください。'; $('#transfer').focus(); return; }
+    if(special()&&!(t&&c)){ $('#inputErr').textContent=($('#integrity').checked?'バン保証':'アカウント複製')+'には、引継ぎコードと暗証番号の両方が必要です。'; $('#transfer').focus(); return; }
+    if(restartOn()&&(t||c)){ $('#inputErr').textContent='初期垢作成は新しいアカウントで行います。引継ぎコードと暗証番号を空欄にしてください。'; return; }
     show('confirm');
   }
 }
-function goBack(){ const st=stepOf(curView); if(st===3) show(special()?'input':lastMenu); else if(st===2) show('input'); }
+function goBack(){ const st=stepOf(curView); if(st===3) show('input'); else if(st===2) show(special()?'start':lastMenu); else if(st===1&&curView!=='start') show('start'); }
 $('#next').addEventListener('click',goNext);
 $('#back').addEventListener('click',goBack);
-$('#t-menu').addEventListener('click',e=>{ e.stopImmediatePropagation(); if(special()){ toast('バン保証・アカウント複製では、メニューの選択はありません'); return; } show(lastMenu); },true);
+$('#t-menu').addEventListener('click',e=>{ e.stopImmediatePropagation(); show('start'); },true);
 /* 何をしますか */
 function syncModes(){
   const m=$('#integrity').checked?'integrity':$('#clone').checked?'clone':'normal';
@@ -3948,8 +3965,19 @@ function renderSteps(j){
     li.dataset.s=s; li.firstElementChild.textContent=mark;
   });
 }
+function resetNow(){ const m=$('#nowMsg'), b=$('#pbar'); if(m){ m.textContent='開始しています…'; m.dataset.s=''; } if(b){ b.style.width='3%'; b.dataset.s=''; } }
+const NOW_MSG=['準備しています…','アカウントのデータを受け取っています…','ご注文の内容を反映しています…','新しい引継ぎコードを発行しています…'];
+function renderNow(j){
+  const m=$('#nowMsg'), bar=$('#pbar'); if(!m) return;
+  let t, p;
+  if(j.status==='queued'){ t='順番待ちです（あと '+j.queue_position+' 件）。このままお待ちください。'; p=4; }
+  else if(j.status==='done'){ t=j.dry?'試運転が終わりました（コードは発行していません）。':'完了しました！下の引継ぎコードと暗証番号を控えてください。'; p=100; }
+  else if(j.status==='error'){ t='うまくいきませんでした。'+(PAYMENTS?'お支払いはそのまま有効です（再送金は不要）。内容を直して、もう一度実行できます。':''); p=100; }
+  else { const k=Math.max(1,Math.min(4,j.step||1)); t=NOW_MSG[k-1]+' 画面はこのままでお待ちください。'; p=Math.round((k-0.5)/4*100); }
+  m.textContent=t; m.dataset.s=j.status; bar.style.width=p+'%'; bar.dataset.s=j.status;
+}
 function renderJob(j){
-  renderSteps(j);
+  renderSteps(j); renderNow(j);
   $('#log').textContent=j.status==='queued'?'待機中（順番: '+j.queue_position+'）':j.log.join('\n');
   $('#job-slot').textContent=j.status==='running'&&j.slot?'実行枠 '+j.slot+'/'+j.max_concurrent_jobs+' を使用中':j.status==='queued'?'空き枠待ち（順番: '+j.queue_position+'）':'実行枠は使用していません';
   $('#cancel-queue').hidden=j.status!=='queued';
@@ -4012,7 +4040,7 @@ async function poll(){
       stopJob(); setTimeout(loadResume,1500);
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
       if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); if(PAYMENTS) fetchCoupon(curJob); $('#transfer').value=''; $('#confirm').value=''; refresh(); }
-      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① アカウント」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
+      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① メニュー」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'バン保証の検査が完了しました'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
   }catch(e){fails++; renderState();} /* 一時的な通信エラーは次回に再試行 */
@@ -4156,7 +4184,7 @@ async function start(){
   if(bad){ show('qty'); const d=bad.closest('details'); if(d) d.open=true; toast('「'+(bad.dataset.label||bad.dataset.item)+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
   }
   $('#fail').hidden=true; $('#res').hidden=true; $('#warn').hidden=true; $('#rep').hidden=true; $('#log').textContent=''; $('#keepNote').textContent='';
-  renderSteps(null); $('#elapsed').textContent='00:00'; $('#updated').textContent='--:--:--';
+  renderSteps(null); resetNow(); $('#elapsed').textContent='00:00'; $('#updated').textContent='--:--:--';
   $('#orderErr').textContent='';
   if(PAYMENTS){ /* 支払い前は「実行中」の画面に切り替えない（注文を作るだけ） */
     const go=$('#go'); go.disabled=true; go.textContent='注文を確認中…';
@@ -4315,7 +4343,7 @@ function setHold(on){
   holdTimer=setInterval(()=>{ if(!payOrder||payDead||$('#payPanel').hidden||++holdTries>20){ clearInterval(holdTimer); holdTimer=null; if(holdTries>20) $('#payInfo').textContent='保留の解除を待っています。サーバーが引き続き自動で確認します（この画面は閉じても大丈夫です）。解除したあとすぐ進めたいときは「今すぐ確認する」を押してください。'; return; } if(!$('#payGo').disabled) $('#payGo').click(); },45000);
 }
 function closePay(){ setTimeout(loadResume,300); clearInterval(holdTimer); holdTimer=null; payOrder=null; $('#payPanel').hidden=true; document.body.style.overflow=''; }
-$('#payCancel').addEventListener('click',()=>{ closePay(); show('input'); });
+$('#payCancel').addEventListener('click',()=>{ closePay(); show('confirm'); });
 $('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
 $('#payGo').addEventListener('click',async()=>{
   if(!payOrder||payDead) return;
@@ -4464,7 +4492,7 @@ $('#claimGo').addEventListener('click',async()=>{
 });
 const draft0=restoreDraft();
 applyMaint(MAINT,false);
-show(draft0&&draft0.view&&draft0.view!=='status'&&TABS.includes(draft0.view)?draft0.view:'input'); refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
+show(draft0&&draft0.view&&draft0.view!=='status'&&TABS.includes(draft0.view)?draft0.view:'start'); refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
 draftReady=true;
 openHelp(); /* 開くたびに確認と使い方を表示 */
 const saved=sessionStorage.getItem('job');
