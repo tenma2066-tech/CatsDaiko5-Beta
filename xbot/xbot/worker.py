@@ -10,6 +10,7 @@ import traceback
 
 from . import logic, store
 from .browser import Browser, NotLoggedIn
+from . import xlogin
 
 TICK = 20                 # 何秒ごとに見るか
 VNC_BIND = os.environ.get("XBOT_VNC_BIND", "127.0.0.1")   # noVNC（websockify）を待ち受けるIP
@@ -231,12 +232,16 @@ def main():
     signal.signal(signal.SIGTERM, _sig)
     signal.signal(signal.SIGINT, _sig)
     store.log("info", "start", "常駐プロセスを起動しました")
+    xlogin.serve()   # 管理サイトから入力してログインするための窓口（127.0.0.1 のみ）
     screen = LoginScreen()
     next_dm = 0
     while not _stop:
         try:
             s = store.get_all()
             store.update_status(heartbeat=time.time())
+            if xlogin.MANAGER.active():      # ログイン中はブラウザ（プロフィール）を使わない
+                time.sleep(2)
+                continue
             req = s.get("request") or ""
             if req:
                 store.put("request", "")

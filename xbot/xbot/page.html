@@ -51,6 +51,23 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <form method="post"><label for="pw">パスワード</label><input id="pw" type="password" name="password" autocomplete="current-password" required>
 <button class="btn pri full">ログイン</button></form>{% if msg %}<p class="err">{{ msg }}</p>{% endif %}</div></div>
 
+{% elif view == 'xlogin' %}
+<div class="wrap"><header><h1>X にログイン<small>入力した内容は保存しません</small></h1><a class="btn sm" href="/">戻る</a></header>
+<div class="card">
+{% if r.state == 'ask' %}
+<h2>{{ r.label }}</h2>{% if r.heading and r.heading != r.label %}<p class="{{ 'err' if ('見つかりません' in r.heading or '正しくありません' in r.heading or 'できません' in r.heading or '間違' in r.heading) else 'sub' }}">画面の表示：{{ r.heading }}</p>{% endif %}
+<form method="post" action="/xlogin/input"><input type="hidden" name="csrf" value="{{ csrf }}">
+<input name="value" type="{{ 'password' if r.kind == 'password' else 'text' }}" autocomplete="{{ 'current-password' if r.kind == 'password' else 'off' }}" autocapitalize="off" autocorrect="off" spellcheck="false" required autofocus>
+<button class="btn pri full" onclick="this.textContent='送信中…（10秒ほどかかります）';this.form.submit();this.disabled=true;">次へ</button></form>
+{% elif r.state in ('wait','busy') %}<h2>読み込み中</h2><p class="sub">{{ r.label }}</p>
+{% elif r.state == 'closed' %}<h2>閉じています</h2><p class="sub">{{ r.label or 'もう一度「X にログインする」から始めてください。' }}</p>
+{% else %}<h2>うまくいきませんでした</h2><p class="err">{{ r.label }}</p>{% endif %}
+<div class="row"><a class="btn" href="/xlogin">画面を更新</a>
+<form method="post" action="/xlogin/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn danger">やめる</button></form></div>
+<p class="sub" style="margin-top:10px">次へ進まないときは「画面を更新」を押してください。10分なにもしないと自動で閉じます。</p></div>
+{% if r.shot %}<div class="card"><h2>サーバーのブラウザの画面</h2><p class="sub">いまの X の画面です（文字の確認用）。</p><img src="{{ r.shot }}" style="width:100%;border-radius:10px;border:1.5px solid var(--line)" alt="X の画面"></div>{% endif %}
+</div>
+
 {% elif view == 'vnc' %}
 <div class="vnc"><div class="bar"><span>あなた自身で X にログインしてください（パスワードはこのツールに保存されません）。{{ until }} に自動で閉じます。</span>
 <form method="post" action="/action/login_stop"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn pri sm">ログインできた・閉じる</button></form></div>
@@ -84,13 +101,8 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 </div></div>
 
 <div class="card"><h2>X へのログイン</h2>
-<p class="sub">ボタンを押すと、サーバー上のブラウザが iPhone に表示されます。<b>ご自身で</b> X にログインしてください。パスワードはこのツールに保存されず、ログインした状態だけがサーバーに残ります。画面は15分で自動的に閉じます。</p>
-{% if login_open %}
-<a class="btn pri full" href="/login-screen">ログイン画面を開く</a>
-<form method="post" action="/action/login_stop"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full">ログイン画面を閉じる</button></form>
-{% else %}
-<form method="post" action="/action/login_start"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn pri full" onclick="return confirm('ログイン画面を15分だけ開きます。よろしいですか？')">ログイン画面を準備する</button></form>
-{% endif %}</div>
+<p class="sub">このページで、X のユーザー名・パスワード（求められたら確認コード）を入力すると、サーバーのブラウザがログインします。入力した内容は<b>保存しません</b>（ログインした状態だけが残ります）。</p>
+<a class="btn pri full" href="/xlogin">X にログインする</a></div>
 
 {% if st.snapshots %}<div class="card"><h2>画面の記録</h2><p class="sub">{{ fmt(st.snapshot_at) }} に撮影（何も送っていません）</p>
 <div class="shots">{% for x in st.snapshots %}<a href="/shot/{{ x }}" target="_blank"><img src="/shot/{{ x }}" alt=""></a>{% endfor %}</div></div>{% endif %}

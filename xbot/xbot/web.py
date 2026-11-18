@@ -9,7 +9,7 @@ from datetime import datetime
 
 from flask import Flask, abort, redirect, render_template_string, request, send_from_directory, session
 
-from . import logic, store
+from . import logic, store, xlogin
 
 ADMIN_PASSWORD = os.environ.get("XBOT_ADMIN_PASSWORD", "")
 app = Flask(__name__)
@@ -146,6 +146,40 @@ def login_screen():
         flash("ログイン画面は閉じています。")
         return back("home")
     return render_template_string(PAGE, view="vnc", pw=s["vnc_password"], until=logic.fmt_jst(s["login_until"]), csrf=csrf())
+
+
+# ---------------------------------------------------------------------- X へのログイン（入力した内容でサーバーがログイン）
+@app.get("/xlogin")
+def xlogin_page():
+    try:
+        res = xlogin.call("start")
+    except Exception as e:  # noqa: BLE001
+        res = {"state": "error", "label": f"常駐プロセスにつながりませんでした（{type(e).__name__}）。少し待ってからもう一度お試しください。"}
+    if res.get("state") == "done":
+        flash("Xにログインできました。")
+        return back("home")
+    return render_template_string(PAGE, view="xlogin", r=res, csrf=csrf())
+
+
+@app.post("/xlogin/input")
+def xlogin_input():
+    value = request.form.get("value", "")
+    try:
+        xlogin.call("input", value)
+    except Exception:  # noqa: BLE001
+        pass
+    value = None   # 入力内容はここで手放す（保存しない）
+    return redirect("/xlogin")   # 再読み込みでパスワードが再送されないようにする
+
+
+@app.post("/xlogin/cancel")
+def xlogin_cancel():
+    try:
+        xlogin.call("cancel")
+    except Exception:  # noqa: BLE001
+        pass
+    flash("ログインをやめました。")
+    return back("home")
 
 
 # ---------------------------------------------------------------------- 予約投稿
