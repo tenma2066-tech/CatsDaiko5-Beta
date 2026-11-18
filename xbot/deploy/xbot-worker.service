@@ -11,7 +11,7 @@ WorkingDirectory=/opt/xbot
 ExecStart=/opt/xbot/venv/bin/python -m xbot.worker
 Restart=on-failure
 RestartSec=10
-KillMode=mixed
+KillMode=control-group
 TimeoutStopSec=30
 # にゃんこ代行に影響しないよう、メモリとCPUに上限をかける
 MemoryMax=1200M

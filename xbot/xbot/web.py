@@ -151,43 +151,32 @@ def login_screen():
 # ---------------------------------------------------------------------- X へのログイン（入力した内容でサーバーがログイン）
 @app.get("/xlogin")
 def xlogin_page():
-    try:
-        res = xlogin.call("start")
-    except Exception as e:  # noqa: BLE001
-        res = {"state": "error", "label": f"常駐プロセスにつながりませんでした（{type(e).__name__}）。少し待ってからもう一度お試しください。"}
-    if res.get("state") == "done":
-        flash("Xにログインできました。")
-        return back("home")
-    return render_template_string(PAGE, view="xlogin", r=res, csrf=csrf())
-
-
-@app.post("/xlogin/input")
-def xlogin_input():
-    value = request.form.get("value", "")
-    try:
-        xlogin.call("input", value)
-    except Exception:  # noqa: BLE001
-        pass
-    value = None   # 入力内容はここで手放す（保存しない）
-    return redirect("/xlogin")   # 再読み込みでパスワードが再送されないようにする
+    return redirect("/xcookie")   # 自動入力ログインはやめた（X に止められるため）
 
 
 @app.route("/xcookie", methods=["GET", "POST"])
 def xcookie():
-    res = None
+    err = None
     if request.method == "POST":
         try:
             ck = xcookies.parse(request.form.get("json", ""), request.form.get("auth_token", ""), request.form.get("ct0", ""))
-            res = xlogin.call("cookies", ck)
+            xlogin.call("cookies", ck)
+            ck = None   # 入力内容はここで手放す（サーバーのブラウザの中だけに残る）
+            return redirect("/xcookie/status")
         except ValueError as e:
-            res = {"state": "error", "label": str(e)}
+            err = str(e)
         except Exception as e:  # noqa: BLE001
-            res = {"state": "error", "label": f"常駐プロセスにつながりませんでした（{type(e).__name__}）。少し待ってからもう一度お試しください。"}
-        ck = None   # 入力内容はここで手放す（サーバーのブラウザの中だけに残る）
-        if res.get("state") == "done":
-            flash("X にログインできました。")
-            return back("home")
-    return render_template_string(PAGE, view="xcookie", r=res, csrf=csrf())
+            err = f"常駐プロセスにつながりませんでした（{type(e).__name__}）。少し待ってからもう一度お試しください。"
+    return render_template_string(PAGE, view="xcookie", err=err, csrf=csrf())
+
+
+@app.get("/xcookie/status")
+def xcookie_status():
+    try:
+        st = xlogin.call("cookie_status")
+    except Exception as e:  # noqa: BLE001
+        st = {"state": "failed", "step": 4, "label": f"常駐プロセスにつながりませんでした（{type(e).__name__}）。"}
+    return render_template_string(PAGE, view="xstatus", st=st, steps=xlogin.STEPS, csrf=csrf())
 
 
 @app.post("/xlogin/cancel")

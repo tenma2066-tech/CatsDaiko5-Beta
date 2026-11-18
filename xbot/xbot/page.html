@@ -45,6 +45,13 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 .vnc{position:fixed;inset:0;display:flex;flex-direction:column;background:#000}.vnc .bar{display:flex;gap:8px;align-items:center;padding:calc(8px + env(safe-area-inset-top,0px)) 10px 8px;background:var(--panel)}
 .vnc .bar span{flex:1;font-size:12.5px}.vnc iframe{flex:1;border:0;width:100%}
 .gate{max-width:380px;margin:16vh auto 0}
+.steplist{list-style:none;padding:0;margin:10px 0 0;display:grid;gap:8px}
+.steplist li{display:flex;gap:10px;align-items:center;font-size:14.5px;color:var(--muted)}
+.steplist i{flex:none;width:26px;height:26px;border-radius:50%;border:2px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-weight:800;font-size:13px;background:var(--panel)}
+.steplist li.ok{color:var(--ink)}.steplist li.ok i{background:var(--ok);border-color:var(--ok);color:#fff}
+.steplist li.now{color:var(--ink);font-weight:700}.steplist li.now i{background:var(--accent);border-color:var(--accent);color:#fff;animation:pl 1s ease-in-out infinite}
+.steplist li.bad{color:var(--bad);font-weight:700}.steplist li.bad i{background:var(--bad);border-color:var(--bad);color:#fff}
+@keyframes pl{50%{opacity:.5}}
 </style></head><body>
 {% if view == 'login' %}
 <div class="wrap gate"><div class="card"><h2>X 自動化 管理サイト</h2><p class="sub">TN SHOP 専用。管理パスワードを入れてください。</p>
@@ -53,7 +60,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 
 {% elif view == 'xcookie' %}
 <div class="wrap"><header><h1>ログイン情報の貼り付け<small>パスワードはサーバーに渡しません</small></h1><a class="btn sm" href="/">戻る</a></header>
-{% if r %}<div class="card"><h2>{{ '✅ ' if r.state=='done' else '⚠️ ' }}{{ r.label }}</h2>{% if r.shot %}<img src="{{ r.shot }}" style="width:100%;border-radius:10px;border:1.5px solid var(--line);margin-top:6px" alt="">{% endif %}</div>{% endif %}
+{% if err %}<div class="card"><h2>⚠️ 入力を確認してください</h2><p class="err">{{ err }}</p></div>{% endif %}
 <div class="card"><h2>やり方</h2>
 <ol style="padding-left:20px;margin:6px 0;font-size:14px;line-height:1.8">
 <li>App Store で <b>Orion Browser</b>（無料）を入れる</li>
@@ -69,7 +76,24 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <p class="sub" style="margin:10px 0 0">または B. 値を1つずつ</p>
 <label>auth_token</label><input type="password" name="auth_token" autocomplete="off" autocapitalize="off" spellcheck="false">
 <label>ct0</label><input type="password" name="ct0" autocomplete="off" autocapitalize="off" spellcheck="false">
-<button class="btn pri full" onclick="this.textContent='確認中…（30秒ほどかかります）';this.form.submit();this.disabled=true;">取り込む</button></form></div></div>
+<button class="btn pri full">取り込む</button></form></div></div>
+
+{% elif view == 'xstatus' %}
+{% if st.state == 'running' %}<meta http-equiv="refresh" content="3">{% endif %}
+<div class="wrap"><header><h1>ログイン情報の取り込み<small>{{ '自動で更新しています…' if st.state == 'running' else '' }}</small></h1><a class="btn sm" href="/">ホームへ</a></header>
+<div class="card">
+{% if st.state == 'idle' %}<h2>取り込みは行っていません</h2><a class="btn pri full" href="/xcookie">ログイン情報を貼り付ける</a>
+{% else %}
+<h2>{{ '✅ ログインできました' if st.state=='done' else ('⚠️ ログインできませんでした' if st.state=='failed' else '⏳ 確認しています（30秒ほど）') }}</h2>
+<ol class="steplist">{% for t in steps %}{% set n = loop.index %}
+<li class="{{ 'ok' if n < st.step or (n == st.step and st.state == 'done') else ('now' if n == st.step and st.state == 'running' else ('bad' if n == st.step and st.state == 'failed' else '')) }}">
+<i>{{ '✓' if n < st.step or (n == st.step and st.state == 'done') else ('!' if n == st.step and st.state == 'failed' else n) }}</i><span>{{ t }}</span></li>{% endfor %}</ol>
+<p class="{{ 'err' if st.state == 'failed' else 'sub' }}" style="margin-top:8px">{{ st.label }}{% if st.state == 'running' %}（{{ st.elapsed or 0 }}秒）{% endif %}</p>
+{% if st.state == 'failed' %}<a class="btn pri full" href="/xcookie">もう一度貼り付ける</a>{% endif %}
+{% if st.state == 'done' %}<a class="btn pri full" href="/">ホームへ</a>{% endif %}
+{% endif %}</div>
+{% if st.shot %}<div class="card"><h2>サーバーから見た X の画面</h2><img src="{{ st.shot }}" style="width:100%;border-radius:10px;border:1.5px solid var(--line)" alt=""></div>{% endif %}
+</div>
 
 {% elif view == 'xlogin' %}
 <div class="wrap"><header><h1>X にログイン<small>入力した内容は保存しません</small></h1><a class="btn sm" href="/">戻る</a></header>

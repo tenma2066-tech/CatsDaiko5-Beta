@@ -45,7 +45,8 @@ class Browser:
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
-        PROFILE_LOCK.acquire()
+        if not PROFILE_LOCK.acquire(timeout=90):
+            raise RuntimeError("ほかの処理がブラウザを使っています。1〜2分待ってからもう一度お試しください。")
         try:
             return self._open(sync_playwright)
         except BaseException:

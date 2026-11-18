@@ -98,10 +98,16 @@ class Cookies(unittest.TestCase):
         c.post("/login", data={"password": "test-pass"}); c.get("/")
         with c.session_transaction() as ss:
             csrf = ss["csrf"]
-        with mock.patch.object(web.xlogin, "call", return_value={"state": "done", "label": "ok"}) as call:
+        with mock.patch.object(web.xlogin, "call", return_value={"state": "running", "step": 2, "label": "x"}) as call:
             r = c.post("/xcookie", data={"csrf": csrf, "auth_token": "a" * 40, "ct0": "b" * 64})
-        self.assertEqual(r.status_code, 302)
-        self.assertEqual(call.call_args.args[0], "cookies")
+            self.assertEqual(r.headers["Location"], "/xcookie/status")
+            self.assertEqual(call.call_args.args[0], "cookies")
+            page = c.get("/xcookie/status").get_data(as_text=True)
+            self.assertIn('http-equiv="refresh"', page)       # 進行中は自動で更新
+        with mock.patch.object(web.xlogin, "call", return_value={"state": "done", "step": 4, "label": "ok"}):
+            page = c.get("/xcookie/status").get_data(as_text=True)
+            self.assertIn("ログインできました", page)
+            self.assertNotIn('http-equiv="refresh"', page)
         page = c.post("/xcookie", data={"csrf": csrf, "auth_token": "x"}).get_data(as_text=True)
         self.assertIn("形が正しくありません", page)
 

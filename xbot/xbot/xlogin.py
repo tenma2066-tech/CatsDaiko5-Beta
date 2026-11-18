@@ -208,47 +208,91 @@ class Session:
         p.keyboard.press("Enter")
 
 
-def import_cookies(cookies):
-    """Cookie をサーバーのブラウザに入れて、ログインできているか確かめる。"""
-    from .browser import Browser
-    with Browser() as b:
-        b.ctx.clear_cookies()
-        b.ctx.add_cookies(cookies)
-        ok = b.logged_in()
-        time.sleep(2)
-        shot = Session._shot(b)
-    store.update_status(logged_in=ok, login_checked=time.time())
-    store.log("info" if ok else "warn", "login", "ログイン情報を取り込みました：" + ("Xにログインできています" if ok else "ログインできていません（値が古いか、間違っている可能性）"))
-    return {"state": "done" if ok else "error", "label": "ログインできました。" if ok else
-            "ログインできませんでした。iPhone の Orion で x.com にログインし直してから、もう一度取り出して貼ってください。", "shot": shot}
+STEPS = ["受け付けました", "サーバーのブラウザを起動しています", "x.com を開いて、ログインできているか確認しています", "結果"]
+
+
+class Importer:
+    """Cookie の取り込みを裏で行い、いまどの段階かを返す。"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.st = {"state": "idle"}
+
+    def running(self):
+        return self.st.get("state") == "running"
+
+    def _set(self, **kw):
+        with self.lock:
+            self.st.update(kw)
+
+    def start(self, cookies):
+        if self.running():
+            return dict(self.st)
+        self.st = {"state": "running", "step": 1, "label": STEPS[0], "started": time.time()}
+        threading.Thread(target=self._run, args=(cookies,), daemon=True).start()
+        return dict(self.st)
+
+    def status(self):
+        with self.lock:
+            st = dict(self.st)
+        if st.get("started"):
+            st["elapsed"] = int(time.time() - st["started"])
+        return st
+
+    def _run(self, cookies):
+        from .browser import Browser
+        try:
+            if MANAGER.active_session():      # 前の「自動入力ログイン」のブラウザが残っていたら閉じる
+                MANAGER.handle("cancel", None)
+            self._set(step=2, label=STEPS[1])
+            with Browser() as b:
+                b.ctx.clear_cookies()
+                b.ctx.add_cookies(cookies)
+                cookies = None
+                self._set(step=3, label=STEPS[2])
+                ok = b.logged_in()
+                time.sleep(2)
+                shot = Session._shot(b)
+            store.update_status(logged_in=ok, login_checked=time.time())
+            store.log("info" if ok else "warn", "login", "ログイン情報を取り込みました：" + ("Xにログインできています" if ok else "ログインできていません"))
+            self._set(state="done" if ok else "failed", step=4, shot=shot,
+                      label="ログインできました。予約投稿・DM返信が使えます。" if ok else
+                      "ログインできませんでした。値が古いか、コピーが途中で切れている可能性があります。Orion で x.com を開き直してから、もう一度コピーして貼ってください。")
+        except Exception as e:  # noqa: BLE001
+            store.log("error", "login", f"ログイン情報を取り込めませんでした: {e}")
+            self._set(state="failed", step=4, label=f"うまくいきませんでした：{str(e)[:200]}")
+
+
+IMPORTER = Importer()
 
 
 class Manager:
     def __init__(self):
         self.s = None
         self.lock = threading.Lock()
-        self.importing = False
+
+    def active_session(self):
+        return bool(self.s and self.s.alive)
 
     def active(self):
-        return bool(self.s and self.s.alive) or self.importing
+        return self.active_session() or IMPORTER.running()
 
     def handle(self, op, value):
         if op == "cookies":
-            self.importing = True
-            try:
-                return import_cookies(value or [])
-            except Exception as e:  # noqa: BLE001
-                return {"state": "error", "label": f"取り込めませんでした：{str(e)[:200]}"}
-            finally:
-                self.importing = False
+            return IMPORTER.start(value or [])
+        if op == "cookie_status":
+            return IMPORTER.status()
         with self.lock:
             if op == "start":
-                if not self.active():
+                if not self.active_session():
                     self.s = Session()
                 return self.s.call("state", timeout=90)
-            if not self.active():
+            if not self.active_session():
                 return {"state": "closed", "label": "ログインの画面は閉じています。"}
-            return self.s.call(op, value, timeout=90)
+            res = self.s.call(op, value, timeout=90)
+            if op == "cancel":
+                self.s.done.wait(30)
+            return res
 
 
 MANAGER = Manager()
@@ -269,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             body = {}
         op = body.get("op")
-        if op not in ("start", "state", "input", "cancel", "cookies"):
+        if op not in ("cancel", "cookies", "cookie_status"):   # 自動入力ログインは使わない（X に止められるため）
             self.send_response(400)
             self.end_headers()
             return
