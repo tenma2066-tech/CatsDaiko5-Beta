@@ -85,7 +85,7 @@ def is_own_preview(preview: str) -> bool:
     return p.startswith(("you:", "あなた:", "you sent", "あなたが送信", "あなたが"))
 
 
-MAX_POST_LEN = 280   # 全角は2として数える（Xの数え方に近い簡易版）
+MAX_POST_LEN = 295   # 全角は2として数える（管理サイトで入力できる上限）
 
 
 def post_length(text: str) -> int:
