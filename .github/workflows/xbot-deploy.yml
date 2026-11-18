@@ -1,0 +1,48 @@
+name: xbot deploy
+# X 自動化ツール（xbot）を VPS に入れる / 更新する。手動でだけ動く（push では動かない）。
+# 必要なシークレット: VPS_HOST, VPS_PASSWORD, XBOT_ADMIN_PASSWORD
+# step: install = 入れる・更新する（お店には触らない） / caddy = 管理サイトのURLをCaddyに追加（reloadのみ） / status = 状態を見るだけ
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "install / caddy / status"
+        required: true
+        default: "status"
+      domain:
+        description: "管理サイトのドメイン（caddy のときだけ。例: tnshop-xbot.duckdns.org）"
+        required: false
+        default: ""
+
+concurrency: xbot-deploy
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      SSHPASS: ${{ secrets.VPS_PASSWORD }}
+      XBOT_ADMIN_PASSWORD: ${{ secrets.XBOT_ADMIN_PASSWORD }}
+      STEP: ${{ github.event.inputs.step }}
+      XBOT_DOMAIN: ${{ github.event.inputs.domain }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run
+        run: |
+          sudo apt-get install -y sshpass >/dev/null
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no root@$VPS_HOST"
+          case "$STEP" in
+            install)
+              [ -n "$XBOT_ADMIN_PASSWORD" ] || { echo "XBOT_ADMIN_PASSWORD のシークレットがありません"; exit 1; }
+              tar czf - -C xbot . | $SSH "rm -rf /tmp/xbot-src && mkdir -p /tmp/xbot-src && tar xzf - -C /tmp/xbot-src"
+              printf '%s' "$XBOT_ADMIN_PASSWORD" | $SSH "read -r P; XBOT_ADMIN_PASSWORD=\"\$P\" bash /tmp/xbot-src/deploy/setup.sh /tmp/xbot-src; rm -rf /tmp/xbot-src"
+              ;;
+            caddy)
+              [ -n "$XBOT_DOMAIN" ] || { echo "domain を入れてください"; exit 1; }
+              $SSH "XBOT_DOMAIN='$XBOT_DOMAIN' bash -s" < xbot/deploy/caddy-site.sh
+              ;;
+            status)
+              $SSH "systemctl --no-pager status xbot-web xbot-worker 2>&1 | grep -E '●|Active:|Memory:' ; journalctl -u xbot-worker -n 30 --no-pager 2>&1 | cut -c1-200; free -m | sed -n 2p" || true
+              ;;
+            *) echo "step は install / caddy / status"; exit 1;;
+          esac

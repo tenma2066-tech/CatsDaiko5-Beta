@@ -1,0 +1,261 @@
+"""常駐プロセス：予約投稿・DM返信・ログイン画面の表示。systemd（xbot-worker.service）で動かす。"""
+import json
+import os
+import random
+import shutil
+import signal
+import subprocess
+import time
+import traceback
+
+from . import logic, store
+from .browser import Browser, NotLoggedIn
+
+TICK = 20                 # 何秒ごとに見るか
+VNC_BIND = os.environ.get("XBOT_VNC_BIND", "127.0.0.1")   # noVNC（websockify）を待ち受けるIP
+VNC_WEB_PORT = int(os.environ.get("XBOT_VNC_PORT", "6080"))
+NOVNC_DIR = os.environ.get("XBOT_NOVNC_DIR", "/usr/share/novnc")
+DISPLAY = ":99"
+
+_stop = False
+
+
+def _sig(*_):
+    global _stop
+    _stop = True
+
+
+# ---------------------------------------------------------------------- 予約投稿
+def due_post():
+    with store.db() as d:
+        return d.execute("SELECT * FROM posts WHERE state='scheduled' AND at<=? ORDER BY at, id LIMIT 1", (time.time(),)).fetchone()
+
+
+def posted_times():
+    with store.db() as d:
+        return [r["done_at"] for r in d.execute("SELECT done_at FROM posts WHERE state='posted' AND done_at>=?", (time.time() - 2 * 86400,))]
+
+
+def run_post(s, row):
+    if not logic.can_post(posted_times(), time.time(), int(s["max_posts_day"])):
+        store.update_status(note=f"今日の投稿は上限（{s['max_posts_day']}件）に達したため、明日に回します")
+        return
+    images = [os.path.join(store.UPLOAD_DIR, f) for f in json.loads(row["images"] or "[]")]
+    missing = [p for p in images if not os.path.exists(p)]
+    with store.db() as d:
+        d.execute("UPDATE posts SET state='posting', tries=tries+1 WHERE id=?", (row["id"],))
+    dry = bool(s["dry_run"])
+    try:
+        if missing:
+            raise RuntimeError("画像ファイルが見つかりません")
+        with Browser() as b:
+            shot = b.post(row["text"], images, dry)
+        state = "dry" if dry else "posted"
+        with store.db() as d:
+            d.execute("UPDATE posts SET state=?, done_at=?, shot=?, error=NULL WHERE id=?", (state, time.time(), shot, row["id"]))
+        store.log("info", "post", f"#{row['id']} を{'下書きモードで確認しました（投稿していません）' if dry else '投稿しました'}")
+    except NotLoggedIn as e:
+        with store.db() as d:
+            d.execute("UPDATE posts SET state='scheduled' WHERE id=?", (row["id"],))
+        store.update_status(logged_in=False)
+        store.log("error", "login", str(e))
+    except Exception as e:  # noqa: BLE001
+        retry = row["tries"] + 1 < 3
+        with store.db() as d:
+            d.execute("UPDATE posts SET state=?, error=?, at=? WHERE id=?",
+                      ("scheduled" if retry else "failed", str(e)[:500], time.time() + 600 if retry else row["at"], row["id"]))
+        store.log("error", "post", f"#{row['id']} 失敗{'（10分後にもう一度）' if retry else '（3回失敗したので止めました）'}: {e}")
+
+
+# ---------------------------------------------------------------------- DM
+def rules():
+    with store.db() as d:
+        return [dict(r) for r in d.execute("SELECT * FROM rules WHERE enabled=1")]
+
+
+def reply_times():
+    with store.db() as d:
+        return [r["at"] for r in d.execute("SELECT at FROM replied WHERE at>=? AND dry=0", (time.time() - 3600,))]
+
+
+def last_reply_at(conv):
+    with store.db() as d:
+        r = d.execute("SELECT MAX(at) AS t FROM replied WHERE conv=? AND dry=0", (conv,)).fetchone()
+    return r["t"] if r else None
+
+
+def already(conv, h):
+    with store.db() as d:
+        return d.execute("SELECT 1 FROM replied WHERE conv=? AND msg_hash=?", (conv, h)).fetchone() is not None
+
+
+def run_dms(s):
+    rs = rules()
+    if not rs:
+        return
+    dry = bool(s["dry_run"])
+    done = 0
+    with Browser() as b:
+        convs = b.list_conversations(int(s["dm_scan_limit"]))
+        for c in convs:
+            if logic.is_own_preview(c["preview"]):
+                continue
+            h = logic.msg_hash(c["conv"], c["preview"])
+            if already(c["conv"], h):
+                continue
+            if not logic.can_reply(reply_times(), time.time(), int(s["max_replies_hour"])):
+                store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
+                break
+            if logic.in_cooldown(last_reply_at(c["conv"]), time.time(), float(s["reply_cooldown_hours"])):
+                continue
+            got = b.last_incoming(c["conv"])
+            if not got:
+                continue
+            message, first = got
+            h = logic.msg_hash(c["conv"], message)
+            if already(c["conv"], h):
+                continue
+            rule = logic.pick_rule(rs, message, first)
+            if not rule:
+                with store.db() as d:   # 当てはまるルールがない → 次からは見ない
+                    d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,1)", (c["conv"], h, None, time.time()))
+                continue
+            b.reply(c["conv"], rule["reply"], dry)
+            with store.db() as d:
+                d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,?)",
+                          (c["conv"], h, rule["id"], time.time(), 1 if dry else 0))
+            done += 1
+            store.log("info", "dm", f"ルール「{rule['name']}」で{'返信を下書きしました（送っていません）' if dry else '返信しました'}")
+            time.sleep(random.uniform(20, 60))   # 続けて返さない
+    store.update_status(last_dm_check=time.time(), dm_checked=len(convs), dm_replied=done)
+
+
+# ---------------------------------------------------------------------- ログイン画面（Xvfb + x11vnc + noVNC）
+class LoginScreen:
+    def __init__(self):
+        self.procs = []
+        self.browser = None
+
+    def running(self):
+        return bool(self.procs)
+
+    def start(self, password):
+        for tool in ("Xvfb", "x11vnc", "websockify"):
+            if not shutil.which(tool):
+                raise RuntimeError(f"{tool} が入っていません")
+        self.procs.append(subprocess.Popen(["Xvfb", DISPLAY, "-screen", "0", "430x900x24", "-nolisten", "tcp"]))
+        time.sleep(1.5)
+        pwfile = os.path.join(store.DATA_DIR, ".vncpass")
+        subprocess.run(["x11vnc", "-storepasswd", password, pwfile], check=True, capture_output=True)
+        os.chmod(pwfile, 0o600)
+        self.procs.append(subprocess.Popen(["x11vnc", "-display", DISPLAY, "-rfbport", "5901", "-localhost", "-rfbauth", pwfile,
+                                            "-forever", "-shared", "-quiet", "-noxdamage"]))
+        self.procs.append(subprocess.Popen(["websockify", "--web", NOVNC_DIR, f"{VNC_BIND}:{VNC_WEB_PORT}", "127.0.0.1:5901"]))
+        time.sleep(1)
+        self.browser = Browser(headless=False, display=DISPLAY).__enter__()
+        self.browser.page.goto("https://x.com/login")
+        store.log("info", "login", "ログイン画面を開きました（15分で自動的に閉じます）")
+
+    def stop(self):
+        if self.browser:
+            try:
+                self.browser.__exit__(None, None, None)
+            except Exception:
+                pass
+            self.browser = None
+        for p in reversed(self.procs):
+            try:
+                p.terminate()
+                p.wait(5)
+            except Exception:
+                p.kill()
+        self.procs = []
+        try:
+            os.remove(os.path.join(store.DATA_DIR, ".vncpass"))
+        except OSError:
+            pass
+        store.put("vnc_password", "")
+        store.log("info", "login", "ログイン画面を閉じました")
+
+
+def check_login():
+    try:
+        with Browser() as b:
+            ok = b.logged_in()
+            shot = b.shot("login-check")
+        store.update_status(logged_in=ok, login_checked=time.time(), login_shot=shot)
+        store.log("info" if ok else "warn", "login", "Xにログインしています" if ok else "Xにログインしていません")
+    except Exception as e:  # noqa: BLE001
+        store.log("error", "login", f"ログイン状態を確認できませんでした: {e}")
+
+
+def snapshot():
+    try:
+        with Browser() as b:
+            shots = b.snapshot()
+        store.update_status(snapshots=shots, snapshot_at=time.time())
+        store.log("info", "check", "画面の記録を撮りました（何も送っていません）")
+    except Exception as e:  # noqa: BLE001
+        store.log("error", "check", f"画面の記録を撮れませんでした: {e}")
+
+
+def main():
+    signal.signal(signal.SIGTERM, _sig)
+    signal.signal(signal.SIGINT, _sig)
+    store.log("info", "start", "常駐プロセスを起動しました")
+    screen = LoginScreen()
+    next_dm = 0
+    while not _stop:
+        try:
+            s = store.get_all()
+            store.update_status(heartbeat=time.time())
+            req = s.get("request") or ""
+            if req:
+                store.put("request", "")
+            # --- ログイン画面
+            if screen.running():
+                if time.time() > float(s["login_until"]) or req == "stop_login":
+                    screen.stop()
+                    store.put("login_until", 0)
+                    check_login()
+                time.sleep(2)
+                continue
+            if time.time() < float(s["login_until"]) and s.get("vnc_password"):
+                try:
+                    screen.start(s["vnc_password"])
+                except Exception as e:  # noqa: BLE001
+                    store.log("error", "login", f"ログイン画面を開けませんでした: {e}")
+                    screen.stop()
+                    store.put("login_until", 0)
+                continue
+            if req == "check_login":
+                check_login()
+            elif req == "snapshot":
+                snapshot()
+            if s["paused"]:
+                time.sleep(TICK)
+                continue
+            row = due_post()
+            if row:
+                run_post(s, row)
+            if s["dm_enabled"] and time.time() >= next_dm:
+                next_dm = time.time() + max(2, int(s["dm_interval_min"])) * 60 + random.uniform(0, 60)
+                try:
+                    run_dms(s)
+                except NotLoggedIn as e:
+                    store.update_status(logged_in=False)
+                    store.log("error", "login", str(e))
+                except Exception as e:  # noqa: BLE001
+                    store.log("error", "dm", f"DMの確認に失敗しました: {e}")
+        except Exception:  # noqa: BLE001
+            store.log("error", "loop", traceback.format_exc()[-800:])
+        for _ in range(TICK):
+            if _stop:
+                break
+            time.sleep(1)
+    screen.stop()
+    store.log("info", "stop", "常駐プロセスを止めました")
+
+
+if __name__ == "__main__":
+    main()

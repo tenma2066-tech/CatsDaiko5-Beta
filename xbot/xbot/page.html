@@ -1,0 +1,185 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow">
+<title>X 自動化 | TN SHOP</title>
+<style>
+:root{--bg:#eef1f5;--panel:#fff;--ink:#16181c;--muted:#5d6675;--line:#16181c;--soft:#f2f4f8;--accent:#1d9bf0;--ok:#119a5a;--warn:#d98200;--bad:#d93636;--okbg:#e5f6ed;--warnbg:#fff3db;--badbg:#fdebeb}
+@media (prefers-color-scheme:dark){:root{--bg:#101215;--panel:#1b1e24;--ink:#f1f3f6;--muted:#9aa4b2;--line:#454c58;--soft:#252932;--okbg:#13291e;--warnbg:#33290f;--badbg:#321a1a}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;line-height:1.55;padding-bottom:48px}
+.wrap{max-width:720px;margin:0 auto;padding:0 14px}
+header{padding:calc(14px + env(safe-area-inset-top,0px)) 0 6px;display:flex;align-items:center;gap:10px}
+header h1{margin:0;font-size:19px;flex:1;line-height:1.2}header h1 small{display:block;font-size:12px;color:var(--muted);font-weight:600}
+.tabs{position:sticky;top:0;z-index:5;background:var(--bg);display:flex;gap:6px;padding:8px 0;overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1 0 auto;padding:9px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);font-weight:700;font-size:13.5px;text-decoration:none;text-align:center;white-space:nowrap}
+.tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:14px;margin-top:12px}
+.card h2{margin:0 0 4px;font-size:17px}.card h3{margin:14px 0 6px;font-size:14px}.sub{margin:0 0 8px;font-size:13px;color:var(--muted)}
+.msg{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--accent);color:#fff;font-weight:700;font-size:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{background:var(--soft);border-radius:12px;padding:10px 12px}.stat small{display:block;color:var(--muted);font-size:12px}.stat b{display:block;font-size:17px}
+.stat.ok{background:var(--okbg)}.stat.warn{background:var(--warnbg)}.stat.bad{background:var(--badbg)}
+label{display:block;font-size:13px;font-weight:700;margin:10px 0 4px}
+input[type=text],input[type=password],input[type=datetime-local],input[type=number],textarea,select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+textarea{min-height:96px;resize:vertical}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 14px;border:2px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-decoration:none}
+.btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}.btn.danger{color:var(--bad);border-color:var(--bad)}.btn.full{width:100%;margin-top:10px}.btn.sm{min-height:34px;font-size:13px;padding:0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.row form{margin:0}
+.item{border-top:1px solid var(--soft);padding:12px 0}.item:first-child{border-top:0}
+.item .top{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.item .body{white-space:pre-wrap;word-break:break-word;margin-top:6px;font-size:14.5px}
+.chip{display:inline-block;padding:1px 9px;border-radius:999px;border:1.5px solid var(--line);font-size:12px;font-weight:700;background:var(--soft)}
+.chip.ok{border-color:var(--ok);color:var(--ok);background:var(--okbg)}.chip.warn{border-color:var(--warn);color:var(--warn);background:var(--warnbg)}.chip.bad{border-color:var(--bad);color:var(--bad);background:var(--badbg)}
+.thumbs{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.thumbs img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1.5px solid var(--line)}
+.err{color:var(--bad);font-size:13px;margin-top:4px}
+.note{margin:8px 0 0;padding:9px 11px;border-radius:10px;font-size:13px;background:var(--warnbg);border:1.5px solid var(--warn)}
+.note.ok{background:var(--okbg);border-color:var(--ok)}
+.ev{font-size:12.5px;border-top:1px solid var(--soft);padding:6px 0;word-break:break-word}.ev b{font-weight:700}.ev.error{color:var(--bad)}.ev.warn{color:var(--warn)}
+details summary{cursor:pointer;font-weight:700;font-size:13.5px}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:8px}.shots img{width:100%;border-radius:10px;border:1.5px solid var(--line)}
+.sw{display:flex;gap:8px;margin-top:6px}.sw label{flex:1;margin:0;padding:10px;border:2px solid var(--line);border-radius:12px;text-align:center;font-weight:700}
+.sw input{position:absolute;opacity:0}.sw label:has(input:checked){background:var(--accent);color:#fff;border-color:var(--accent)}
+.counter{text-align:right;font-size:12px;color:var(--muted)}.counter.over{color:var(--bad);font-weight:700}
+.vnc{position:fixed;inset:0;display:flex;flex-direction:column;background:#000}.vnc .bar{display:flex;gap:8px;align-items:center;padding:calc(8px + env(safe-area-inset-top,0px)) 10px 8px;background:var(--panel)}
+.vnc .bar span{flex:1;font-size:12.5px}.vnc iframe{flex:1;border:0;width:100%}
+.gate{max-width:380px;margin:16vh auto 0}
+</style></head><body>
+{% if view == 'login' %}
+<div class="wrap gate"><div class="card"><h2>X 自動化 管理サイト</h2><p class="sub">TN SHOP 専用。管理パスワードを入れてください。</p>
+<form method="post"><label for="pw">パスワード</label><input id="pw" type="password" name="password" autocomplete="current-password" required>
+<button class="btn pri full">ログイン</button></form>{% if msg %}<p class="err">{{ msg }}</p>{% endif %}</div></div>
+
+{% elif view == 'vnc' %}
+<div class="vnc"><div class="bar"><span>あなた自身で X にログインしてください（パスワードはこのツールに保存されません）。{{ until }} に自動で閉じます。</span>
+<form method="post" action="/action/login_stop"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn pri sm">ログインできた・閉じる</button></form></div>
+<iframe src="/novnc/vnc.html?autoconnect=1&resize=scale&reconnect=1&show_dot=1&password={{ pw }}&path=novnc/websockify" allow="clipboard-read; clipboard-write"></iframe></div>
+
+{% else %}
+<div class="wrap">
+<header><h1>X 自動化<small>予約投稿・DM自動返信 ｜ TN SHOP</small></h1>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">ログアウト</button></form></header>
+<nav class="tabs">
+{% for k, t in [('home','ホーム'),('posts','予約投稿'),('dm','DM返信'),('settings','設定'),('log','記録')] %}<a class="tab {{ 'on' if tab==k }}" href="/?tab={{ k }}">{{ t }}</a>{% endfor %}
+</nav>
+{% if msg %}<div class="msg" role="status">{{ msg }}</div>{% endif %}
+{% if s.dry_run %}<div class="note">🧪 <b>下書きモード中</b>：投稿ボタン・送信ボタンは押しません（入力まで行い、画面の記録だけ残します）。本番にするときは「設定」で切り替えます。</div>{% endif %}
+{% if s.paused %}<div class="note">⏸ <b>一時停止中</b>：予約投稿もDM返信も止まっています。</div>{% endif %}
+
+{% if tab == 'home' %}
+<div class="card"><h2>いまの状態</h2>
+<div class="grid">
+<div class="stat {{ 'ok' if alive else 'bad' }}"><small>常駐プロセス</small><b>{{ '動いています' if alive else '止まっています' }}</b></div>
+<div class="stat {{ 'ok' if st.logged_in else ('bad' if st.logged_in == false else 'warn') }}"><small>Xへのログイン</small><b>{{ 'ログイン中' if st.logged_in else ('未ログイン' if st.logged_in == false else '未確認') }}</b></div>
+<div class="stat"><small>今日の投稿</small><b>{{ today }} / {{ s.max_posts_day }}</b></div>
+<div class="stat"><small>この1時間の返信</small><b>{{ hour }} / {{ s.max_replies_hour }}</b></div>
+</div>
+{% if st.note %}<p class="sub" style="margin-top:8px">{{ st.note }}</p>{% endif %}
+<p class="sub" style="margin-top:8px">DMの最終確認：{{ fmt(st.last_dm_check) }}　ログイン確認：{{ fmt(st.login_checked) }}</p>
+<div class="row">
+<form method="post" action="/action/{{ 'resume' if s.paused else 'pause' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn {{ 'pri' if s.paused else 'danger' }}">{{ '▶ 再開する' if s.paused else '⏸ 一時停止' }}</button></form>
+<form method="post" action="/action/check_login"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn">ログインを確認</button></form>
+<form method="post" action="/action/snapshot"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn">画面の記録を撮る</button></form>
+</div></div>
+
+<div class="card"><h2>X へのログイン</h2>
+<p class="sub">ボタンを押すと、サーバー上のブラウザが iPhone に表示されます。<b>ご自身で</b> X にログインしてください。パスワードはこのツールに保存されず、ログインした状態だけがサーバーに残ります。画面は15分で自動的に閉じます。</p>
+{% if login_open %}
+<a class="btn pri full" href="/login-screen">ログイン画面を開く</a>
+<form method="post" action="/action/login_stop"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full">ログイン画面を閉じる</button></form>
+{% else %}
+<form method="post" action="/action/login_start"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn pri full" onclick="return confirm('ログイン画面を15分だけ開きます。よろしいですか？')">ログイン画面を準備する</button></form>
+{% endif %}</div>
+
+{% if st.snapshots %}<div class="card"><h2>画面の記録</h2><p class="sub">{{ fmt(st.snapshot_at) }} に撮影（何も送っていません）</p>
+<div class="shots">{% for x in st.snapshots %}<a href="/shot/{{ x }}" target="_blank"><img src="/shot/{{ x }}" alt=""></a>{% endfor %}</div></div>{% endif %}
+
+{% elif tab == 'posts' %}
+<div class="card"><h2>新しい予約投稿</h2>
+<form method="post" action="/post/new" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="pt">本文</label><textarea id="pt" name="text" maxlength="1000" placeholder="投稿する文章"></textarea><div class="counter" id="ptc"></div>
+<label for="pi">画像（4枚まで・JPG/PNG/GIF/WEBP）</label><input id="pi" type="file" name="images" accept="image/jpeg,image/png,image/gif,image/webp" multiple>
+<div class="thumbs" id="pprev"></div>
+<label for="pa">投稿する日時（日本時間）</label><input id="pa" type="datetime-local" name="at" value="{{ now_local }}">
+<button class="btn pri full">予約する</button></form></div>
+
+<div class="card"><h2>予約・投稿の一覧</h2>
+{% for p in posts %}<div class="item">
+<div class="top">
+{% set lab = {'scheduled':('予約中',''),'posting':('投稿中','warn'),'posted':('投稿済み','ok'),'dry':('下書きで確認済み','warn'),'failed':('失敗','bad'),'canceled':('取り消し','')}[p.state] %}
+<span class="chip {{ lab[1] }}">{{ lab[0] }}</span><span class="chip">{{ p.when }}</span>{% if p.done_at %}<span class="sub" style="margin:0">実行 {{ p.done }}</span>{% endif %}</div>
+{% if p.text %}<div class="body">{{ p.text }}</div>{% endif %}
+{% if p.imgs %}<div class="thumbs">{% for n in p.imgs %}<img src="/img/{{ n }}" alt="">{% endfor %}</div>{% endif %}
+{% if p.error %}<div class="err">{{ p.error }}</div>{% endif %}
+{% if p.shot %}<details><summary>画面の記録</summary><img src="/shot/{{ p.shot }}" style="width:100%;border-radius:10px;margin-top:6px" alt=""></details>{% endif %}
+<div class="row">
+{% if p.state == 'scheduled' %}<form method="post" action="/post/{{ p.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">取り消す</button></form>{% endif %}
+{% if p.state in ('failed','canceled','dry') %}<form method="post" action="/post/{{ p.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">もう一度予約</button></form>{% endif %}
+{% if p.state != 'posting' %}<form method="post" action="/post/{{ p.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm danger" onclick="return confirm('この予約を削除しますか？')">削除</button></form>{% endif %}
+</div></div>
+{% else %}<p class="sub">まだありません。</p>{% endfor %}</div>
+
+{% elif tab == 'dm' %}
+<div class="card"><h2>DM自動返信</h2>
+<p class="sub">いまは <b>{{ 'オン' if s.dm_enabled else 'オフ' }}</b> です。{{ s.dm_interval_min }}分ごとにDMを確認し、下のルールに当てはまったら返信します（1時間 {{ s.max_replies_hour }}件まで・同じ相手には {{ s.reply_cooldown_hours }}時間あけます）。</p>
+<form method="post" action="/action/{{ 'dm_off' if s.dm_enabled else 'dm_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full {{ '' if s.dm_enabled else 'pri' }}">{{ 'DM自動返信をオフにする' if s.dm_enabled else 'DM自動返信をオンにする' }}</button></form></div>
+
+<div class="card"><h2>ルールを追加</h2><p class="sub">上から順（優先度の数字が小さい順）に見て、最初に当てはまったルールの文を返します。</p>
+<form method="post" action="/rule/new"><input type="hidden" name="csrf" value="{{ csrf }}">
+{% set r = {'name':'','kind':'keyword','keywords':'','match':'any','reply':'','priority':100} %}<label>ルールの名前</label><input type="text" name="name" value="{{ r.name }}" maxlength="60" placeholder="例：料金の問い合わせ">
+<label>条件</label><select name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if r.kind==k }}>{{ t }}</option>{% endfor %}</select>
+<div class="kwbox"><label>キーワード（「,」か改行で区切る）</label><input type="text" name="keywords" value="{{ r.keywords }}" placeholder="例：料金, 値段, いくら">
+<div class="sw"><label><input type="radio" name="match" value="any" {{ 'checked' if r.match!='all' }}>どれか1つ含む</label><label><input type="radio" name="match" value="all" {{ 'checked' if r.match=='all' }}>すべて含む</label></div></div>
+<label>返信する文</label><textarea name="reply" maxlength="2000" required>{{ r.reply }}</textarea>
+<label>優先度（小さいほど先に判定）</label><input type="number" name="priority" value="{{ r.priority }}" min="0" max="9999" inputmode="numeric">
+<button class="btn pri full">保存</button>
+</form></div>
+
+<div class="card"><h2>ルールの一覧</h2>
+{% for r in rules %}<div class="item"><div class="top"><span class="chip {{ 'ok' if r.enabled else '' }}">{{ 'オン' if r.enabled else 'オフ' }}</span><b>{{ r.name }}</b><span class="chip">優先度 {{ r.priority }}</span></div>
+<p class="sub" style="margin:4px 0 0">条件：{{ kinds[r.kind] }}{% if r.kind == 'keyword' %}（{{ r.keywords }}／{{ 'すべて含む' if r.match=='all' else 'どれか1つ' }}）{% endif %}</p>
+<div class="body">{{ r.reply }}</div>
+<details style="margin-top:6px"><summary>編集</summary><form method="post" action="/rule/{{ r.id }}/edit"><input type="hidden" name="csrf" value="{{ csrf }}"><label>ルールの名前</label><input type="text" name="name" value="{{ r.name }}" maxlength="60" placeholder="例：料金の問い合わせ">
+<label>条件</label><select name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if r.kind==k }}>{{ t }}</option>{% endfor %}</select>
+<div class="kwbox"><label>キーワード（「,」か改行で区切る）</label><input type="text" name="keywords" value="{{ r.keywords }}" placeholder="例：料金, 値段, いくら">
+<div class="sw"><label><input type="radio" name="match" value="any" {{ 'checked' if r.match!='all' }}>どれか1つ含む</label><label><input type="radio" name="match" value="all" {{ 'checked' if r.match=='all' }}>すべて含む</label></div></div>
+<label>返信する文</label><textarea name="reply" maxlength="2000" required>{{ r.reply }}</textarea>
+<label>優先度（小さいほど先に判定）</label><input type="number" name="priority" value="{{ r.priority }}" min="0" max="9999" inputmode="numeric">
+<button class="btn pri full">保存</button></form></details>
+<div class="row"><form method="post" action="/rule/{{ r.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">{{ 'オフにする' if r.enabled else 'オンにする' }}</button></form>
+<form method="post" action="/rule/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm danger" onclick="return confirm('このルールを削除しますか？')">削除</button></form></div></div>
+{% else %}<p class="sub">まだありません。上から追加してください。</p>{% endfor %}</div>
+
+<div class="card"><h2>最近の返信</h2>
+{% for x in recent %}<div class="ev">{{ x.when }}　{{ x.name or '-' }}{{ '（下書き）' if x.dry }}</div>{% else %}<p class="sub">まだありません。</p>{% endfor %}</div>
+
+{% elif tab == 'settings' %}
+<div class="card"><h2>動かし方</h2>
+<p class="sub">最初は<b>下書きモード</b>で、入力までの動きを「画面の記録」で確認してから本番にしてください。</p>
+<form method="post" action="/action/{{ 'dry_off' if s.dry_run else 'dry_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<button class="btn full {{ 'danger' if s.dry_run else 'pri' }}" onclick="return confirm('{{ '本番モードにすると、予約どおり実際に投稿・返信します。よろしいですか？' if s.dry_run else '下書きモードに戻しますか？' }}')">{{ '本番モードにする（実際に投稿・返信する）' if s.dry_run else '下書きモードに戻す' }}</button></form></div>
+<div class="card"><h2>上限・間隔</h2><p class="sub">やりすぎると X に止められやすくなります。控えめがおすすめです。</p>
+<form method="post" action="/settings"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>1日の投稿数の上限</label><input type="number" name="max_posts_day" value="{{ s.max_posts_day }}" min="1" max="50" inputmode="numeric">
+<label>1時間の返信数の上限</label><input type="number" name="max_replies_hour" value="{{ s.max_replies_hour }}" min="1" max="60" inputmode="numeric">
+<label>DMを確認する間隔（分）</label><input type="number" name="dm_interval_min" value="{{ s.dm_interval_min }}" min="2" max="120" inputmode="numeric">
+<label>同じ相手に続けて返信しない時間（時間）</label><input type="number" name="reply_cooldown_hours" value="{{ s.reply_cooldown_hours }}" min="0" max="720" inputmode="numeric">
+<label>1回に確認する会話の数</label><input type="number" name="dm_scan_limit" value="{{ s.dm_scan_limit }}" min="1" max="30" inputmode="numeric">
+<button class="btn pri full">保存</button></form></div>
+
+{% elif tab == 'log' %}
+<div class="card"><h2>記録</h2><p class="sub">新しい順に150件。</p>
+{% for e in events %}<div class="ev {{ e.level }}"><b>{{ e.when }}</b>　{{ e.msg }}</div>{% else %}<p class="sub">まだありません。</p>{% endfor %}</div>
+{% endif %}
+</div>
+<script>
+(function(){
+  var t=document.getElementById('pt'), c=document.getElementById('ptc');
+  function len(s){var n=0;for(var i=0;i<s.length;i++){n+=s.charCodeAt(i)<0x1100?1:2;}return n;}
+  if(t){var f=function(){var n=len(t.value);c.textContent=n+' / {{ max_len }}';c.classList.toggle('over',n>{{ max_len }});};t.addEventListener('input',f);f();}
+  var i=document.getElementById('pi'), pv=document.getElementById('pprev');
+  if(i) i.addEventListener('change',function(){pv.textContent='';if(i.files.length>4){alert('画像は4枚までです');i.value='';return;}
+    for(var k=0;k<i.files.length;k++){var im=document.createElement('img');im.src=URL.createObjectURL(i.files[k]);pv.appendChild(im);}});
+  document.querySelectorAll('select[name=kind]').forEach(function(s){var f=function(){var b=s.form.querySelector('.kwbox');if(b) b.hidden=s.value!=='keyword';};s.addEventListener('change',f);f();});
+})();
+</script>
+{% endif %}
+</body></html>

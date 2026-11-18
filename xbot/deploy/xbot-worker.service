@@ -1,0 +1,28 @@
+[Unit]
+Description=xbot 常駐プロセス（予約投稿・DM自動返信・ログイン画面）
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=xbot
+Group=xbot
+EnvironmentFile=/etc/xbot/env
+WorkingDirectory=/opt/xbot
+ExecStart=/opt/xbot/venv/bin/python -m xbot.worker
+Restart=on-failure
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
+# にゃんこ代行に影響しないよう、メモリとCPUに上限をかける
+MemoryMax=1200M
+MemoryHigh=1000M
+CPUQuota=150%
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xbot
+
+[Install]
+WantedBy=multi-user.target
