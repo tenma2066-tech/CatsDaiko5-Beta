@@ -83,6 +83,30 @@ class NewFeatures(unittest.TestCase):
             A._apply_edits({"log": []}, save, [], [], [A.RESTART_KEY], {}, [])
         self.assertEqual(ap.call_args_list[0].kwargs["quantity_map"], {"XP": 1000})
 
+    def test_restart_official_preset_and_levels(self):
+        d = A._parse_restart_form("レアチケ=1\nにゃんチケ=10", "1-9,17,25,26", True, "", ["日本編 第1章クリア", "存在しない"][:1], "20", "20")
+        self.assertEqual((d["cat_level"], d["facility_level"], d["subs"]), (20, 20, ["日本編 第1章クリア"]))
+        with self.assertRaises(ValueError):
+            A._parse_restart_form("", "", True, "", ["存在しない"])
+        with self.assertRaises(ValueError):
+            A._parse_restart_form("", "", True, "", [], "20")           # レベルだけでキャラ番号なし
+        with self.assertRaises(ValueError):
+            A._parse_restart_form("", "1", True, "", [], "", "21")
+        A._save_restart(dict(A.RESTART_OFFICIAL, enabled=True))
+        rp = A.restart_pack()
+        self.assertTrue(rp["enabled"])
+        self.assertEqual(rp["cats"], [1, 2, 3, 4, 5, 6, 7, 8, 9, 17, 25, 26])
+        save = SimpleNamespace(officer_pass=SimpleNamespace(play_time=0))
+        with patch.object(A, "_log"), patch.object(A.engine, "apply_subs_and_others", return_value=[]) as subs, \
+             patch.object(A.engine, "apply_item_amounts", return_value=[]), \
+             patch.object(A.engine, "apply_cat_customizations", return_value={}) as cust, \
+             patch.object(A.engine, "set_facility_levels", return_value=True) as fac:
+            A._apply_edits({"log": [], "warn": []}, save, [], [], [A.RESTART_KEY], {}, [])
+        self.assertEqual(subs.call_args_list[0].args[1], ["日本編 第1章クリア", "日本編 第2章クリア", "日本編 第3章クリア"])
+        self.assertEqual(cust.call_args.args[1][0], {"base_level": 20})
+        self.assertEqual(len(cust.call_args.args[1]), 12)
+        fac.assert_called_once_with(save, 20)
+
     # ---------------- 管理者は無料
     def _admin_client(self):
         c = A.app.test_client()

@@ -800,8 +800,16 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
         try:
             if rp["items"]:
                 warn_failures(engine.apply_item_amounts(save, list(rp["items"]), quantity_map=rp["items"]))
+            if rp["subs"]:                         # 日本編のクリアなど（お宝も金になる）
+                warn_failures(engine.apply_subs_and_others(save, sorted(rp["subs"], key=lambda x: _SUB_PRIORITY.get(x, 99)), []))
             if rp["cats"]:
-                engine.unlock_cats_by_ids(save, [n - DB_OFFSET for n in rp["cats"]])
+                ids = [n - DB_OFFSET for n in rp["cats"]]
+                if rp["cat_level"]:
+                    engine.apply_cat_customizations(save, {i: {"base_level": rp["cat_level"]} for i in ids})
+                else:
+                    engine.unlock_cats_by_ids(save, ids)
+            if rp["facility_level"] and not engine.set_facility_levels(save, rp["facility_level"]):
+                job["warn"].append("施設のレベルを上げられなかった可能性があります。")
             _log(job, "初期垢作成：リスタートパックの内容を入れました。")
         except Exception:  # noqa: BLE001
             job["warn"].append("リスタートパックの内容の一部を入れられなかった可能性があります。")
@@ -1211,12 +1219,29 @@ def restart_pack() -> dict:
             d = json.load(f)
         items = {str(k): int(v) for k, v in (d.get("items") or {}).items()}
         cats = [int(x) for x in (d.get("cats") or [])]
-        return {"enabled": bool(d.get("enabled")) and bool(items or cats), "items": items, "cats": cats, "note": str(d.get("note", ""))[:300]}
+        subs = [x for x in (d.get("subs") or []) if x in SUBS]
+        cat_level = max(0, min(int(d.get("cat_level") or 0), 60))
+        facility_level = max(0, min(int(d.get("facility_level") or 0), 20))
+        has = bool(items or cats or subs or facility_level)
+        return {"enabled": bool(d.get("enabled")) and has, "items": items, "cats": cats, "subs": subs, "cat_level": cat_level,
+                "facility_level": facility_level, "note": str(d.get("note", ""))[:300]}
     except (OSError, ValueError, TypeError):
-        return {"enabled": False, "items": {}, "cats": [], "note": ""}
+        return {"enabled": False, "items": {}, "cats": [], "subs": [], "cat_level": 0, "facility_level": 0, "note": ""}
 
 
-def _parse_restart_form(text: str, cats_text: str, enabled: bool, note: str) -> dict:
+# 公式「リスタートパック」と同じ中身（攻略サイト・公式告知より。キャラ番号はゲームデータで確認）
+#   日本編1〜3章クリア（お宝すべて金）／基本キャラ9種＋もねこ(17)・ネコヴァルキリー(25)・ネコムート(26)をLv20
+#   施設Lv20（にゃんこ砲の射程は上限のLv10）／レアチケ1枚・にゃんチケ10枚／ネコ缶・XPは付かない
+RESTART_OFFICIAL = {
+    "items": {"レアチケ": 1, "にゃんチケ": 10},
+    "cats": list(range(1, 10)) + [17, 25, 26],
+    "subs": ["日本編 第1章クリア", "日本編 第2章クリア", "日本編 第3章クリア"],
+    "cat_level": 20, "facility_level": 20,
+    "note": "公式リスタートパックと同じ内容：日本編1〜3章クリア（お宝すべて金）・基本キャラ9種＋もねこ・ネコヴァルキリー・ネコムートをLv20・施設Lv20（にゃんこ砲の射程はLv10）・レアチケ1枚・にゃんチケ10枚",
+}
+
+
+def _parse_restart_form(text: str, cats_text: str, enabled: bool, note: str, subs=None, cat_level="", facility_level="") -> dict:
     items = {}
     for n, line in enumerate((text or "").splitlines(), 1):
         line = unicodedata.normalize("NFKC", line).strip()
@@ -1237,9 +1262,25 @@ def _parse_restart_form(text: str, cats_text: str, enabled: bool, note: str) -> 
     cats, err = parse_cat_numbers(cats_text or "")
     if err:
         raise ValueError("キャラ番号：" + err)
-    if enabled and not (items or cats):
-        raise ValueError("有効にするには、アイテムかキャラを1つ以上入れてください。")
-    return {"enabled": enabled, "items": items, "cats": cats, "note": (note or "").strip()[:300]}
+    subs = list(subs or [])
+    bad = [x for x in subs if x not in SUBS]
+    if bad:
+        raise ValueError("ステージ・サブ：「" + "・".join(bad) + "」はありません。")
+    def _lv(raw, name, hi):
+        raw = unicodedata.normalize("NFKC", str(raw or "")).strip()
+        if not raw:
+            return 0
+        if not (raw.isascii() and raw.isdigit()) or not 1 <= int(raw) <= hi:
+            raise ValueError(f"{name}は 1〜{hi} の数字で入れてください（空欄なら変更しません）。")
+        return int(raw)
+    cat_level = _lv(cat_level, "キャラのレベル", 60)
+    facility_level = _lv(facility_level, "施設のレベル", 20)
+    if cat_level and not cats:
+        raise ValueError("キャラのレベルを入れるときは、キャラ番号も入れてください。")
+    if enabled and not (items or cats or subs or facility_level):
+        raise ValueError("有効にするには、中身を1つ以上入れてください。")
+    return {"enabled": enabled, "items": items, "cats": cats, "subs": [x for x in SUBS if x in subs], "cat_level": cat_level,
+            "facility_level": facility_level, "note": (note or "").strip()[:300]}
 
 
 def _save_restart(d: dict) -> None:
@@ -1337,7 +1378,7 @@ def admin():
     return _admin_page(msg)
 
 
-ADMIN_TAB = {"restart_save": "settings", "pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
+ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
              "maint_save": "settings", "price_save": "settings", "order_recheck": "orders", "order_start": "orders",
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
@@ -1463,10 +1504,18 @@ def _admin_post(token):
         elif action == "restart_save":
             try:
                 _save_restart(_parse_restart_form(request.form.get("items", ""), request.form.get("cats", ""),
-                                                  request.form.get("enabled") == "1", request.form.get("note", "")))
+                                                  request.form.get("enabled") == "1", request.form.get("note", ""),
+                                                  request.form.getlist("subs"), request.form.get("cat_level", ""),
+                                                  request.form.get("facility_level", "")))
                 msg = "初期垢作成（リスタートパック）の中身を保存しました。" + ("利用者の画面で選べるようになりました。" if request.form.get("enabled") == "1" else "（いまは選べない状態です）")
             except (ValueError, OSError) as exc:
                 msg = str(exc) or "保存できませんでした。"
+        elif action == "restart_official":
+            try:
+                _save_restart(dict(RESTART_OFFICIAL, enabled=True))
+                msg = "初期垢作成に公式リスタートパックと同じ中身を入れて、利用者の画面で選べるようにしました。"
+            except OSError:
+                msg = "保存できませんでした。"
         elif action == "price_save":
             try:
                 _save_prices(request.form)
@@ -1550,7 +1599,7 @@ def _admin_page(msg):
             _log_orders.exception("coupon list failed")
     rp = restart_pack()
     rp_text = "\n".join(f"{k}={v}" for k, v in rp["items"].items())
-    return render_template_string(ADMIN_HTML, coupons=coupons, rp=rp, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
+    return render_template_string(ADMIN_HTML, coupons=coupons, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
                                   maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED)
@@ -2539,8 +2588,14 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <div class="sw"><label><input type="radio" name="enabled" value="1" {{ "checked" if rp.enabled }}>選べるようにする</label><label><input type="radio" name="enabled" value="0" {{ "checked" if not rp.enabled }}>準備中</label></div>
 <label for="rpi">アイテム（1行に1つ）</label><textarea id="rpi" name="items" rows="6">{{ rp_text }}</textarea>
 <label for="rpc">キャラ番号（任意）</label><input id="rpc" name="cats" value="{{ rp_cats }}" placeholder="例：1-9, 25">
+<label for="rpl">キャラのレベル（任意・空欄なら解放だけ）</label><input id="rpl" name="cat_level" inputmode="numeric" maxlength="2" value="{{ rp.cat_level or '' }}" placeholder="例：20">
+<label for="rpf">施設のレベル（任意・にゃんこ砲の射程などは上限まで）</label><input id="rpf" name="facility_level" inputmode="numeric" maxlength="2" value="{{ rp.facility_level or '' }}" placeholder="例：20">
+<label>一緒にクリアするステージ・サブ（任意）</label>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:13.5px">{% for x in all_subs %}<label style="font-weight:400;margin:2px 0"><input type="checkbox" name="subs" value="{{ x }}" {{ "checked" if x in rp.subs }}> {{ x }}</label>{% endfor %}</div>
 <label for="rpn">利用者に見せる説明（任意）</label><input id="rpn" name="note" value="{{ rp.note }}" maxlength="300" placeholder="例：公式リスタートパックと同じ内容">
-<button class="btn pri full">保存</button></form></div>
+<button class="btn pri full">保存</button></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="restart_official">
+<button class="btn full" onclick="return confirm('公式リスタートパックと同じ中身（日本編1〜3章クリア・お宝金・基本キャラ9種＋もねこ・ネコヴァルキリー・ネコムートLv20・施設Lv20・レアチケ1・にゃんチケ10）を入れて、利用者が選べるようにします。よろしいですか？')">⭐ 公式と同じ中身を入れて公開する</button></form></div>
 <div class="card"><h2>クーポン</h2><p class="sub">支払額200円以上の注文の完了時に自動で発行（次回200円以上で10%引き・1回きり・30日）。新しい順に最大100件。</p>
 {% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code><span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div></div>
 {% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div>

@@ -936,6 +936,28 @@ def apply_cat_customizations(save, settings_by_id: dict) -> dict:
 _FIX_OTHERS = ("ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正")
 
 
+def set_facility_levels(save, level: int) -> bool:
+    """施設（にゃんこ砲・働きネコ・お城・特殊能力）を指定レベルにする（+値は付けない）。
+    各施設の上限を超える分は上限まで（にゃんこ砲の射程は上限 Lv10）。今より低くはしない。"""
+    skills = save.special_skills
+    ability_data = core.AbilityData(save)
+    if not ability_data.ability_data:
+        return False
+    for i, skill in enumerate(skills.get_valid_skills()):
+        ability = ability_data.get_ability_data_item(i)
+        if ability is None:
+            continue
+        target = max(0, min(int(level), int(ability.max_base_level)) - 1)
+        cur_base = int(getattr(skill.upgrade, "base", 0) or 0)
+        cur_plus = int(getattr(skill.upgrade, "plus", 0) or 0)
+        if target <= cur_base:
+            continue
+        skills.set_upgrade(i, core.Upgrade(cur_plus, target), max_base=ability.max_base_level - 1, max_plus=ability.max_plus_level)
+    for skill in skills.skills:
+        skill.seen = 1
+    return True
+
+
 def apply_subs_and_others(save, subs_to_apply, others_to_apply):
     """サブ系・その他系の書き換え（元コードそのまま）"""
     failures = []
