@@ -2,7 +2,12 @@ name: xbot deploy
 # X 自動化ツール（xbot）を VPS に入れる / 更新する。手動でだけ動く（push では動かない）。
 # 必要なシークレット: VPS_HOST, VPS_PASSWORD, XBOT_ADMIN_PASSWORD
 # step: install = 入れる・更新する（お店には触らない） / caddy = 管理サイトのURLをCaddyに追加（reloadのみ） / status = 状態を見るだけ
+# 手動実行（workflow_dispatch）は main にないと使えないため、xbot/deploy/run.txt を書き換えて push したときにも動く。
+#   run.txt の中身: 1行目 = step（install / caddy / status）、2行目 = domain（caddy のとき）
 on:
+  push:
+    branches: [claude/zealous-ritchie-5o2epn]
+    paths: ["xbot/deploy/run.txt"]
   workflow_dispatch:
     inputs:
       step:
@@ -29,6 +34,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run
         run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            STEP=$(sed -n 1p xbot/deploy/run.txt | tr -d '[:space:]')
+            XBOT_DOMAIN=$(sed -n 2p xbot/deploy/run.txt | tr -d '[:space:]')
+          fi
+          echo "step=$STEP domain=$XBOT_DOMAIN"
           sudo apt-get install -y sshpass >/dev/null
           SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no root@$VPS_HOST"
           case "$STEP" in
