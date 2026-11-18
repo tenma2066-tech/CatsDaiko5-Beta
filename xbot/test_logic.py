@@ -236,8 +236,8 @@ class Worker(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *a): pass
             def post(self, text, imgs, dry): test.posted.append((text, dry)); return None
-            def dm_open_inbox(self, requests=False): self.cur = None
-            def dm_request_keys(self): return list(reqs)
+            def dm_open_inbox(self, requests=False, other=False): self.cur = None; self.other = other
+            def dm_request_keys(self): return [k for k in reqs if (k.startswith("o") == self.other)]
             def dm_open_request(self, key): self.cur = key; return reqs[key]
             def dm_accept(self): test.accepted.append(self.cur); reqs.pop(self.cur, None)
             def dm_chat_keys(self, limit): return [c["conv"] for c in convs][:limit]
@@ -320,6 +320,17 @@ class Worker(unittest.TestCase):
         self.w.time.sleep = lambda x: None
         self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
         self.assertEqual(self.sent, [("1:9", "料金表です", False)])          # リクエストで失敗しても、会話には返信する
+
+    def test_hidden_other_requests_are_accepted_too(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('はじめて','first_time','ようこそ',?)", (time.time(),))
+        fb = self.fake_browser([], {}, requests={"5:9": ("a", False, True), "o6:9": ("b", False, True), "o7:9": ("c", False, True)})
+        self.w.DMBrowser = fb
+        self.w.random.uniform = lambda a, b: 0
+        self.w.time.sleep = lambda x: None
+        self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
+        self.assertEqual(sorted(self.accepted), ["5:9", "o6:9", "o7:9"])     # 「その他」の分も許可する
+        self.assertEqual(len(self.sent), 3)
 
     def test_requests_accepted_and_answered(self):
         with store.db() as d:

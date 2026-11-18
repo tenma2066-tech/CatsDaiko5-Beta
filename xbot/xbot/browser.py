@@ -364,15 +364,15 @@ class Browser:
         }""")
 
     # ------------------------------------------------------------------ 新しいチャット（/i/chat）
-    def dm_open_inbox(self, requests=False):
+    def dm_open_inbox(self, requests=False, other=False):
+        """会話の一覧（requests=True ならメッセージリクエスト、other=True ならその中の「その他」）を開く。"""
         p = self.page
-        p.goto(CHAT + ("/requests" if requests else ""), wait_until="domcontentloaded")
-        for _ in range(40):
+        p.goto(CHAT + ("/requests/other" if (requests and other) else "/requests" if requests else ""), wait_until="domcontentloaded")
+        sel = ('[data-testid^="dm-message-request-item-"]' if requests else '[data-testid^="dm-conversation-item-"]')
+        for i in range(20 if not requests else 12):
             if chat_pin_visible(p):
                 raise ChatLocked("チャットの暗証番号が必要です（「DM返信」タブの「チャットの暗証番号を入力する」から入れてください）")
-            if p.locator('[data-testid="dm-inbox-panel"]').count() and (
-                    p.locator('[data-testid^="dm-conversation-item-"], [data-testid^="dm-message-request-item-"], '
-                              '[data-testid="dm-empty-conversation-state"]').count()):
+            if p.locator(sel).count():     # 一覧の中身が出るまで待つ（右側の「会話を選択」の表示は目印にしない）
                 break
             time.sleep(1)
         time.sleep(2)
