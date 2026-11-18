@@ -279,26 +279,25 @@ def main():
                     from .browser import CHAT, DMBrowser
                     with DMBrowser() as b:
                         shots = []
-                        targets = []
-                        for lst, item in ((CHAT, "dm-conversation-item-"), (CHAT + "/requests", "dm-message-request-item-")):
-                            b.page.goto(lst, wait_until="domcontentloaded")
-                            time.sleep(12)
-                            hrefs = b.page.evaluate("""(pfx) => { const out = []; const walk = r => r.querySelectorAll('*').forEach(e => {
-                                const t = e.getAttribute && e.getAttribute('data-testid'); if (t && t.startsWith(pfx)) { const a = e.closest('a') || e.querySelector('a'); out.push(a ? a.getAttribute('href') : null); }
-                                if (e.shadowRoot) walk(e.shadowRoot); }); walk(document); return out; }""", item)
-                            href = next((h for h in hrefs if h), None)
-                            if href:
-                                targets.append(("open-" + ("chat" if item.startswith("dm-conv") else "request"), "https://x.com" + href))
-                        print(f"[probe] targets={len(targets)}", flush=True)
-                        for name, url in targets:
-                            b.page.goto(url, wait_until="domcontentloaded")
-                            time.sleep(15)
-                            info = b.deep_probe()
-                            print(f"[probe] {name}: url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:20]} editable={info['editable']} unreadish={info['unreadish']}", flush=True)
-                            print(f"[probe] {name}: tids={info['tids']}", flush=True)
-                            print(f"[probe] {name}: roles={info['roles']} labels={info['labels']}", flush=True)
-                            print(f"[probe] {name}: hrefs={info['hrefs'][:6]}", flush=True)
-                            shots.append(b.shot("probe-" + name))
+                        shots = []
+                        b.page.goto(CHAT + "/requests", wait_until="domcontentloaded")
+                        time.sleep(12)
+                        item = b.page.locator('[data-testid^="dm-message-request-item-"]').first
+                        print(f"[probe] request items={b.page.locator('[data-testid^=\"dm-message-request-item-\"]').count()}", flush=True)
+                        item.click()
+                        time.sleep(12)
+                        info = b.deep_probe()
+                        print(f"[probe] open-request: editable={info['editable']}", flush=True)
+                        print(f"[probe] open-request: tids={info['tids']}", flush=True)
+                        print(f"[probe] open-request: roles={info['roles']} labels={info['labels']}", flush=True)
+                        btns = b.page.evaluate("""() => { const out = []; const walk = r => r.querySelectorAll('button,[role=button]').forEach(e => {
+                            const t = (e.innerText||e.getAttribute('aria-label')||'').trim(); const id = (e.getAttribute('data-testid')||'').replace(/[0-9]+/g,'#');
+                            if (t.length < 25 && !/@|[0-9]{3,}/.test(t)) out.push(id + '|' + t); }); walk(document);
+                            document.querySelectorAll('*').forEach(e => { if (e.shadowRoot) e.shadowRoot.querySelectorAll('button,[role=button]').forEach(x => {
+                              const t = (x.innerText||x.getAttribute('aria-label')||'').trim(); const id = (x.getAttribute('data-testid')||'').replace(/[0-9]+/g,'#');
+                              if (t.length < 25 && !/@|[0-9]{3,}/.test(t)) out.push(id + '|' + t); }); }); return [...new Set(out)].slice(0, 40); }""")
+                        print(f"[probe] open-request: buttons={btns}", flush=True)
+                        shots.append(b.shot("probe-request"))
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
