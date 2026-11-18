@@ -189,7 +189,7 @@ class Browser:
         return fn
 
     def logged_in(self) -> bool:
-        self.page.goto(HOME, wait_until="domcontentloaded")
+        self.goto(HOME)
         try:
             self.page.wait_for_selector(SEL["logged_in"], timeout=20000)
             return True
@@ -364,11 +364,33 @@ class Browser:
           return {tids: top(tids), roles: top(roles), labels: top(labels), hrefs: top(hrefs).slice(0,20), editable: edit, unreadish};
         }""")
 
+    def goto(self, url, tries=3):
+        """ページを開く。X は読み込み中に自分で別のページへ移ることがあり、そのとき最初の読み込みが
+        「ERR_ABORTED」で打ち切られるので、少し待ってやり直す。"""
+        last = None
+        for i in range(tries):
+            try:
+                self.page.goto(url, wait_until="domcontentloaded")
+                return
+            except Exception as e:  # noqa: BLE001
+                last = e
+                msg = str(e)
+                if "ERR_ABORTED" in msg or "interrupted by another navigation" in msg or "frame was detached" in msg:
+                    time.sleep(2 + i * 2)
+                    try:   # 打ち切られても、目的のページまで来ていればそれでよい
+                        if self.page.url.split("?")[0].rstrip("/").startswith(url.split("?")[0].rstrip("/")):
+                            return
+                    except Exception:  # noqa: BLE001
+                        pass
+                    continue
+                raise
+        raise last
+
     # ------------------------------------------------------------------ 新しいチャット（/i/chat）
     def dm_open_inbox(self, requests=False, other=False):
         """会話の一覧（requests=True ならメッセージリクエスト、other=True ならその中の「その他」）を開く。"""
         p = self.page
-        p.goto(CHAT + ("/requests" if requests else ""), wait_until="domcontentloaded")
+        self.goto(CHAT + ("/requests" if requests else ""))
         if requests and other:      # 隠れているリクエスト：「その他」ボタンを押して開く
             btn = p.locator('[data-testid="dm-message-requests-other-button"]').first
             btn.wait_for(state="visible", timeout=20000)

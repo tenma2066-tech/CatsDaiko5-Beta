@@ -294,7 +294,7 @@ class PinJob(Importer):
             self._set(step=2, label=PIN_STEPS[1])
             with DMBrowser() as b:
                 p = b.page
-                p.goto(CHAT, wait_until="domcontentloaded")
+                b.goto(CHAT)
                 for _ in range(30):
                     if chat_pin_visible(p):
                         break

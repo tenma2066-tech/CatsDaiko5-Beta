@@ -64,6 +64,36 @@ class Logic(unittest.TestCase):
         self.assertEqual(logic.msg_hash("/m/1", "ＡＢＣ"), logic.msg_hash("/m/1", "abc"))
 
 
+class GotoRetry(unittest.TestCase):
+    def test_aborted_navigation_is_retried(self):
+        from xbot.browser import Browser
+        import xbot.browser as xb
+        calls = []
+
+        class P:
+            url = "about:blank"
+            def goto(self, url, wait_until=None):
+                calls.append(url)
+                if len(calls) < 3:
+                    raise RuntimeError("Page.goto: net::ERR_ABORTED at " + url)
+                self.url = url
+        b = Browser.__new__(Browser); b.page = P()
+        old = xb.time.sleep; xb.time.sleep = lambda x: None
+        try:
+            b.goto("https://x.com/i/chat")
+            self.assertEqual(len(calls), 3)
+            calls.clear()
+            class Q(P):
+                def goto(self, url, wait_until=None):
+                    calls.append(url); raise RuntimeError("net::ERR_NAME_NOT_RESOLVED")
+            b.page = Q()
+            with self.assertRaises(RuntimeError):
+                b.goto("https://x.com/i/chat")
+            self.assertEqual(len(calls), 1)          # ほかのエラーはやり直さない
+        finally:
+            xb.time.sleep = old
+
+
 class Repeat(unittest.TestCase):
     def test_next_time(self):
         t = logic.parse_jst("2026-11-20T10:00")          # 金曜

@@ -340,11 +340,11 @@ def main():
                     with DMBrowser() as b:
                         shots = []
                         shots = []
-                        b.page.goto(CHAT, wait_until="domcontentloaded")
+                        b.goto(CHAT)
                         time.sleep(12)
                         info = b.deep_probe()
                         print(f"[probe] inbox: tids={[t for t in info['tids'] if 'request' in t[0] or 'inbox' in t[0]]}", flush=True)
-                        b.page.goto(CHAT + "/requests", wait_until="domcontentloaded")
+                        b.goto(CHAT + "/requests")
                         time.sleep(12)
                         main_n = b.page.locator('[data-testid^="dm-message-request-item-"]').count()
                         print(f"[probe] requests main items={main_n}", flush=True)
