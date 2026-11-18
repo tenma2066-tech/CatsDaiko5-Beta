@@ -343,9 +343,9 @@ class Browser:
         """チャット画面の作りを、Shadow DOM の中まで調べる（本文・名前は取らない）。"""
         return self.page.evaluate(r"""() => {
           const tids = {}, roles = {}, labels = {}, hrefs = {}; let edit = 0, unreadish = 0;
-          const generic = /^(チャット|メッセージ|リクエスト|受信|すべて|未読|新しいチャット|検索|戻る|送信|設定|承認|許可|受け入れる|拒否|削除|ブロック|Accept|Decline|Delete|Requests?|Inbox|Chat|Messages?|Send|Back|New chat|Search|Unread|All|情報|もっと見る|More)$/;
+          const generic = /^(チャット|メッセージ|リクエスト|受信|すべて|未読|新しいチャット|検索|戻る|送信|設定|承認|許可|受け入れる|拒否|削除|ブロック|Accept|Decline|Delete|Requests?|Inbox|Chat|Messages?|Send|Back|New chat|Search|Unread|All|情報|もっと見る|More|Block|Report|報告|Ignore|無視|Reply|返信|Message|Start a message|メッセージを入力|Unencrypted message|Encrypted message)$/i;
           const walk = (root) => root.querySelectorAll('*').forEach(e => {
-            const t = e.getAttribute && e.getAttribute('data-testid'); if (t) tids[t] = (tids[t]||0)+1;
+            const t0 = e.getAttribute && e.getAttribute('data-testid'); const t = t0 ? t0.replace(/[0-9]+/g,'#').replace(/UserAvatar-Container-.*/,'UserAvatar-Container-@') : null; if (t) tids[t] = (tids[t]||0)+1;
             const r = e.getAttribute && e.getAttribute('role'); if (r) roles[r] = (roles[r]||0)+1;
             const l = e.getAttribute && (e.getAttribute('aria-label')||''); if (l && generic.test(l.trim())) labels[l.trim()] = (labels[l.trim()]||0)+1;
             if ((e.tagName==='BUTTON'||r==='tab'||r==='button') && e.innerText && generic.test(e.innerText.trim())) labels['text:'+e.innerText.trim()] = (labels['text:'+e.innerText.trim()]||0)+1;

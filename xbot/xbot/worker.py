@@ -279,14 +279,25 @@ def main():
                     from .browser import CHAT, DMBrowser
                     with DMBrowser() as b:
                         shots = []
-                        for name, url in (("chat", CHAT), ("requests", CHAT + "/requests")):
+                        targets = []
+                        for lst, item in ((CHAT, "dm-conversation-item-"), (CHAT + "/requests", "dm-message-request-item-")):
+                            b.page.goto(lst, wait_until="domcontentloaded")
+                            time.sleep(12)
+                            hrefs = b.page.evaluate("""(pfx) => { const out = []; const walk = r => r.querySelectorAll('*').forEach(e => {
+                                const t = e.getAttribute && e.getAttribute('data-testid'); if (t && t.startsWith(pfx)) { const a = e.closest('a') || e.querySelector('a'); out.push(a ? a.getAttribute('href') : null); }
+                                if (e.shadowRoot) walk(e.shadowRoot); }); walk(document); return out; }""", item)
+                            href = next((h for h in hrefs if h), None)
+                            if href:
+                                targets.append(("open-" + ("chat" if item.startswith("dm-conv") else "request"), "https://x.com" + href))
+                        print(f"[probe] targets={len(targets)}", flush=True)
+                        for name, url in targets:
                             b.page.goto(url, wait_until="domcontentloaded")
                             time.sleep(15)
                             info = b.deep_probe()
                             print(f"[probe] {name}: url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:20]} editable={info['editable']} unreadish={info['unreadish']}", flush=True)
                             print(f"[probe] {name}: tids={info['tids']}", flush=True)
                             print(f"[probe] {name}: roles={info['roles']} labels={info['labels']}", flush=True)
-                            print(f"[probe] {name}: hrefs={info['hrefs']}", flush=True)
+                            print(f"[probe] {name}: hrefs={info['hrefs'][:6]}", flush=True)
                             shots.append(b.shot("probe-" + name))
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
