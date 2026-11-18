@@ -259,8 +259,11 @@ class Browser:
         """DM画面の作りを調べる（本文・名前は取らず、部品の名前と数だけ）。"""
         import re
         p = self.page
+        errs = []
+        p.on("console", lambda m: errs.append(m.type) if m.type == "error" else None)
+        p.on("pageerror", lambda e: errs.append("pageerror:" + str(e)[:80]))
         p.goto(url, wait_until="domcontentloaded")
-        time.sleep(8)
+        time.sleep(25)
         info = p.evaluate(r"""() => {
           const c = {}; document.querySelectorAll('[data-testid]').forEach(e => { const k = e.getAttribute('data-testid'); c[k] = (c[k]||0)+1; });
           const hrefs = {}; document.querySelectorAll('a[href]').forEach(a => { const h = a.getAttribute('href').replace(/[0-9]+/g,'#').replace(/\/[A-Za-z0-9_]{3,15}$/,'/@'); if (/messages|chat|request/i.test(h)) hrefs[h]=(hrefs[h]||0)+1; });
@@ -282,6 +285,13 @@ class Browser:
             except Exception as e:  # noqa: BLE001
                 frames.append({"url": f.url[:60], "error": type(e).__name__})
         info["frames"] = frames
+        info["detail"] = p.evaluate(r"""() => { const r = document.querySelector('[data-testid=xchatEmbedRoute]'); const o = document.querySelector('[data-testid=xchatEmbedOverlays]');
+            const pw = document.querySelector('[data-testid=paywallScrim]');
+            return {route_children: r ? r.querySelectorAll('*').length : -1, route_text: r ? r.innerText.length : -1,
+                    overlay_children: o ? o.querySelectorAll('*').length : -1, paywall_visible: pw ? !!(pw.offsetWidth||pw.offsetHeight) : null,
+                    body_text: document.body.innerText.length, iframes: document.querySelectorAll('iframe').length,
+                    has_crypto_subtle: !!(window.crypto && crypto.subtle), has_wasm: typeof WebAssembly === 'object', has_idb: !!window.indexedDB}; }""")
+        info["errors"] = [e for e in errs if e.startswith("pageerror")][:5] + [f"console_errors={errs.count('error')}"]
         # 覆い（有料案内など）が出ているか
         info["kw_main"] = [k for k in ("パスコード", "暗証", "Premium", "プレミアム", "認証済み", "購読", "Subscribe", "チャット", "暗号") if k in (p.inner_text("body") or "")]
         path = re.sub(r"[0-9]+", "#", p.url.split("?")[0])

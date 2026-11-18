@@ -278,14 +278,13 @@ def main():
                 try:
                     with Browser() as b:
                         shots = []
-                        for name, url in (("inbox", "https://x.com/messages"), ("requests", "https://x.com/messages/requests"),
-                                          ("chat", "https://x.com/i/chat")):
+                        for name, url in (("chat", "https://x.com/i/chat"),):
                             path, info, shot = b.probe(url)
                             shots.append(shot)
                             top = sorted(info["testids"].items(), key=lambda kv: -kv[1])[:40]
                             print(f"[probe] {name}: url={path} rows={info['rows']} tabs={info['tabs']} hrefs={info['hrefs']}", flush=True)
                             print(f"[probe] {name}: testids={top}", flush=True)
-                            print(f"[probe] {name}: main_keywords={info.get('kw_main')}", flush=True)
+                            print(f"[probe] {name}: main_keywords={info.get('kw_main')} detail={info.get('detail')} errors={info.get('errors')}", flush=True)
                             for fr in info.get("frames", []):
                                 print(f"[probe] {name}: frame={fr}", flush=True)
                         store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
