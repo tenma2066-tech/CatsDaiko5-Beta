@@ -152,7 +152,12 @@ _SUB_PRIORITY = {
     "全キャラ解放&エラーキャラ削除": 0,
     "全キャラ最高形態": 1,
     "全キャラレベルMAX": 2,
+    **{k: (10 if v[0] == "old" else 11) for k, v in engine.LEGEND_TIERS.items()},   # 旧レジェンド → 真レジェンド の順
 }
+
+
+def _legend_kinds(subs):
+    return {engine.LEGEND_TIERS[x][0] for x in subs if x in engine.LEGEND_TIERS}
 
 # bcsfe の配布元（PyPI / GitHub）の説明に「BANされることがある」と書かれている項目。
 # これ以外が安全という意味ではない（公開情報が無いだけ）。
@@ -830,6 +835,15 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
     warn_failures(engine.apply_item_amounts(save, items))
     if qty:                                          # 数量指定（同じ項目は数量指定を優先）
         warn_failures(engine.apply_item_amounts(save, list(qty), quantity_map=qty))
+    kinds = _legend_kinds(subs)
+    if "uncanny" in kinds and "old" not in kinds:   # 真レジェンドだけ：旧レジェンドの冠1が本当に終わっているか、セーブで確かめる
+        try:
+            if not engine.old_legend_crown1_done(save):
+                engine.clear_legend_crowns(save, "old", 1)
+                _log(job, "旧レジェンドの冠1が終わっていなかったので、真レジェンドが遊べるよう一緒にクリアしました（料金はかかりません）。")
+                job["warn"].append("旧レジェンドの冠1が終わっていなかったため、一緒にクリアしました。")
+        except Exception:  # noqa: BLE001
+            job["warn"].append("旧レジェンドの冠1が終わっているか確かめられませんでした。")
     subs_sorted = sorted(subs, key=lambda x: _SUB_PRIORITY.get(x, 99))
     warn_failures(engine.apply_subs_and_others(save, subs_sorted, others))
     if pt_add:                                       # プレイ時間を増やす（セーブは1/30秒単位。上限で止める）
@@ -1951,6 +1965,15 @@ def run():
     items = [x for x in data.get("items", []) if x in ITEMS]
     subs = _one_legend_tier([x for x in data.get("subs", []) if x in SUBS])
     others = [x for x in data.get("others", []) if x in OTHERS]
+    kinds = _legend_kinds(subs)
+    if "uncanny" in kinds and "old" not in kinds and not clone and not integrity_only:
+        # 真レジェンドは、旧レジェンドの冠1が終わっていないと遊べない
+        if not transfer:
+            return jsonify(error="真レジェンドは、旧レジェンドの冠1まで終わっていないと遊べません。新しいアカウントでは、旧レジェンドの段階（冠1クリア以上）も一緒に選んでください。",
+                           code="need_old_legend"), 400
+        if not data.get("old_legend_done"):
+            return jsonify(error="真レジェンドは、旧レジェンドの冠1まで終わっていないと遊べません。旧レジェンドの段階も一緒に選ぶか、すでに終わっている場合は「旧レジェンドの冠1はクリア済み」にチェックしてください。",
+                           code="need_old_legend"), 400
     if not clone and not integrity_only and data.get("restart_pack"):
         rp = restart_pack()
         if not rp["enabled"]:
@@ -3101,6 +3124,9 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <div class="panel">
       <h2>{{ title }}</h2>
       <p class="sub">{{ desc }}</p>
+      {% if key == 'subs' %}
+      <label class="sw" id="oldDoneWrap" style="margin:10px 0" hidden><input type="checkbox" id="oldDone"><span><b>旧レジェンドの冠1はクリア済み</b><small>真レジェンドは、旧レジェンドの冠1まで終わっていないと遊べません。旧レジェンドの段階を選ばずに真レジェンドだけ頼むときは、ここにチェックしてください（引継ぎコードのデータのみ）。終わっていなかった場合は、こちらで旧レジェンドの冠1も一緒にクリアします。</small></span></label>
+      {% endif %}
       {% if key == 'others' and payments %}
       <div class="ptbox"><b>プレイ時間を増やす</b><small>いまのプレイ時間に<b>足します</b>。{{ pt_min // 60 }}時間以上・10分単位で指定できます（10分ごとに {{ prices.playtime10 }}円）。空欄なら変更しません。</small>
         <div class="ptrow"><input id="ptH" type="text" inputmode="numeric" maxlength="6" placeholder="0" aria-label="時間"><span>時間</span>
@@ -3569,6 +3595,8 @@ function qtyMap(){
 const LEG=/^(旧|真)レジェンド (?:冠([1-4])|イディ|ノーヴァ)/;
 const legLv=k=>k[2]?+k[2]:5;
 /* サブの件数（レジェンドは段階の数だけ数える＝段階ごとに +1件分） */
+function legKinds(){ const k=new Set(); picked('subs').forEach(x=>{ const m=LEG.exec(x); if(m) k.add(m[1]); }); return k; }
+function needOld(){ const k=legKinds(); return k.has('真')&&!k.has('旧'); }
 function subUnits(list){ return (list||picked('subs')).reduce((n,x)=>{ const k=LEG.exec(x); return n+(k?legLv(k):1); },0); }
 document.addEventListener('change',e=>{
   const t=e.target; if(!(t&&t.name==='subs'&&t.checked)) return; const m=LEG.exec(t.value); if(!m) return;
@@ -3581,6 +3609,7 @@ function normLegend(){
 }
 function refresh(){
   normLegend();
+  { const w=$('#oldDoneWrap'); if(w) w.hidden=!needOld(); }
   let total=0;
   const pc=parseNums($('#chars').value), cn=pc.err?0:pc.nums.length; total+=cn;
   $('#cnt-chars').textContent=cn; $('#cnt-chars').classList.toggle('on',cn>0);
@@ -3821,6 +3850,10 @@ function renderChecks(pc,qm,total){
   if(ptc.err) add('bad',ptc.err);
   if(ptc.min>0&&picked('others').includes('プレイ時間カンスト')) add('bad','「プレイ時間カンスト」と「プレイ時間を増やす」は同時に選べません。');
   if(restartOn()&&(t||c)) add('bad','初期垢作成は新しいアカウントで行います。引継ぎコードと暗証番号を空欄にしてください。');
+  if(needOld()&&!special()){
+    if(!t) add('bad','真レジェンドは、旧レジェンドの冠1まで終わっていないと遊べません。新しいアカウントでは、旧レジェンドの段階も一緒に選んでください。');
+    else if(!$('#oldDone').checked) add('bad','真レジェンドだけを頼むときは、「サブ」で「旧レジェンドの冠1はクリア済み」にチェックするか、旧レジェンドの段階も選んでください。');
+  }
   if(total===0&&!pc.err) add('warn','まだ項目が選ばれていません。');
   if($('#dry').checked) add('ok','試運転：コードは発行せず、変更内容だけ確認します。');
   if(!L.some(x=>x[0]!=='ok')) add('ok','問題は見つかりませんでした。');
@@ -3902,7 +3935,7 @@ function renderExtras(pc,qm,total,bm){
 try{ if(localStorage.getItem('nyanko-safe2')==='1') $('#safe').checked=true; }catch(e){}
 $('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe2',$('#safe').checked?'1':'0')}catch(e){} refresh(); });
 $('#dry').addEventListener('change',refresh);
-['#ptH','#coupon'].forEach(q=>{ const e=$(q); if(e) e.addEventListener('input',refresh); });
+['#ptH','#coupon','#oldDone'].forEach(q=>{ const e=$(q); if(e) e.addEventListener('input',refresh); });
 $('#clone').addEventListener('change',()=>{ if($('#clone').checked){ $('#integrity').checked=false; if($('#restart')) $('#restart').checked=false; } refresh(); });
 $('#integrity').addEventListener('change',()=>{ if($('#integrity').checked){ $('#clone').checked=false; if($('#restart')) $('#restart').checked=false; } refresh(); });
 
@@ -4228,6 +4261,7 @@ async function start(){
   } else {
   if(parseNums($('#chars').value).err){ show('chars'); toast('キャラ番号を確認してください'); return; }
   const ptv=ptMin(); if(ptv.err){ show('others'); toast(ptv.err); return; }
+  if(needOld()&&!special()&&(!t||!$('#oldDone').checked)){ show('subs'); toast(!t?'新しいアカウントでは、旧レジェンドの段階も一緒に選んでください':'「旧レジェンドの冠1はクリア済み」にチェックするか、旧レジェンドの段階も選んでください'); return; }
   if(ptv.min>0&&picked('others').includes('プレイ時間カンスト')){ show('others'); toast('「プレイ時間カンスト」と「プレイ時間を増やす」は同時に選べません'); return; }
   if(restartOn()&&(t||c)){ show('input'); $('#inputErr').textContent='初期垢作成は新しいアカウントで行います。引継ぎコードと暗証番号を空欄にしてください。'; return; }
   if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('items'); return; }
@@ -4265,7 +4299,7 @@ async function start(){
 function runBody(t,c){
   return {safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c,
           items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others'),
-          playtime_add_min:special()?0:ptMin().min, restart_pack:!special()&&restartOn(), coupon:IS_ADMIN?'':couponCode()};
+          old_legend_done:!!($('#oldDone')&&$('#oldDone').checked), playtime_add_min:special()?0:ptMin().min, restart_pack:!special()&&restartOn(), coupon:IS_ADMIN?'':couponCode()};
 }
 $('#go').addEventListener('click',start);
 

@@ -972,6 +972,17 @@ LEGEND_FINALE = {
 }
 
 
+OLD_LEGEND_LAST_MAP = 47      # 旧レジェンドの物語の最後のマップ「伝説のおわり」（ステージ8つ）
+OLD_LEGEND_LAST_STAGES = 8
+
+
+def old_legend_crown1_done(save) -> bool:
+    """旧レジェンドの冠1が最後（伝説のおわり）まで終わっているか。真レジェンドはこれが終わっていないと遊べない。"""
+    ch = save.event_stages.chapters[0].chapters[OLD_LEGEND_LAST_MAP].chapters[0]
+    last = ch.stages[OLD_LEGEND_LAST_STAGES - 1]
+    return int(getattr(last, "clear_amount", 0) or 0) > 0 or int(ch.clear_progress or 0) >= OLD_LEGEND_LAST_STAGES
+
+
 def clear_legend_crowns(save, kind: str, crowns: int) -> int:
     """旧レジェンド（kind=old）／真レジェンド（kind=uncanny）の全マップを、冠1〜指定の冠までクリアする。
     指定より上の冠には触らない（すでにクリア済みなら、そのまま残す）。クリアした冠のステージ数を返す。"""
