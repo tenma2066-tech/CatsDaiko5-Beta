@@ -26,8 +26,12 @@ services:
       - "443:443"
     environment:
       SITE_HOST: ${SITE_HOST}
+    extra_hosts:
+      # 同じサーバーの systemd で動く xbot（管理サイト）に転送するため
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-sites:/etc/caddy/sites:ro
       - caddy_data:/data
       - caddy_config:/config
 

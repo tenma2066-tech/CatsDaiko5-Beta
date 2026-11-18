@@ -36,6 +36,8 @@ rm -rf "$APP_DIR/src"
 mv "$NEW_SRC" "$APP_DIR/src"
 cp "$APP_DIR/src/deploy/vps/docker-compose.yml" "$APP_DIR/docker-compose.yml"
 cp "$APP_DIR/src/deploy/vps/Caddyfile" "$APP_DIR/Caddyfile"
+mkdir -p "$APP_DIR/caddy-sites"   # 別サイト（xbot など）の追加設定。お店の更新では中身を消さない
+[ -e "$APP_DIR/caddy-sites/00-placeholder.caddy" ] || echo "# 追加のサイト設定（xbot など）を置く場所" > "$APP_DIR/caddy-sites/00-placeholder.caddy"
 
 # 4) 秘密情報（初回だけ生成。以後は上書きしない＝保存済みPayPay情報を読めなくしないため）
 cd "$APP_DIR"

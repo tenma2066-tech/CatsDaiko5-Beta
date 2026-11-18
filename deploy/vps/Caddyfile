@@ -3,3 +3,6 @@
 	encode gzip
 	reverse_proxy app:8080
 }
+
+# 同じサーバーで動く別のサイト（xbot の管理サイトなど）。ここは読み込むだけで、お店の設定には影響しない。
+import /etc/caddy/sites/*.caddy
