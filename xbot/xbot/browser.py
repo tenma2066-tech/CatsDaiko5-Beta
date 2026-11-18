@@ -1,6 +1,7 @@
 """Playwright で X の画面を操作する部分。X の画面の作りが変わったら、ここの SEL を直す。"""
 import os
 import random
+import threading
 import time
 
 from . import store
@@ -24,6 +25,9 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
       "Chrome/131.0.0.0 Safari/537.36")
 
 
+PROFILE_LOCK = threading.Lock()   # 同じプロフィールを2つのブラウザで同時に開かない
+
+
 class NotLoggedIn(Exception):
     pass
 
@@ -41,6 +45,14 @@ class Browser:
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
+        PROFILE_LOCK.acquire()
+        try:
+            return self._open(sync_playwright)
+        except BaseException:
+            PROFILE_LOCK.release()
+            raise
+
+    def _open(self, sync_playwright):
         os.makedirs(store.PROFILE_DIR, mode=0o700, exist_ok=True)
         os.chmod(store.PROFILE_DIR, 0o700)
         env = dict(os.environ)
@@ -62,7 +74,10 @@ class Browser:
         try:
             self.ctx.close()
         finally:
-            self._pw.stop()
+            try:
+                self._pw.stop()
+            finally:
+                PROFILE_LOCK.release()
 
     # ------------------------------------------------------------------ 共通
     def shot(self, name):

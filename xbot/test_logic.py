@@ -76,6 +76,36 @@ class Repeat(unittest.TestCase):
         self.assertEqual(logic.render_text("{日付}({曜日}) {時刻}", t), "11/20(金) 10:00")
 
 
+class Cookies(unittest.TestCase):
+    def test_parse(self):
+        from xbot import cookies
+        tok = "a" * 40
+        ck = cookies.parse("", tok, "b" * 64)
+        self.assertEqual({c["name"] for c in ck}, {"auth_token", "ct0"})
+        self.assertTrue(all(c["domain"] == ".x.com" and c["secure"] for c in ck))
+        js = '[{"name":"auth_token","value":"%s","domain":".x.com","httpOnly":true},{"name":"ct0","value":"%s","domain":".x.com"},' \
+             '{"name":"twid","value":"u%%3D1","domain":".x.com"},{"name":"other","value":"1","domain":".google.com"}]' % (tok, "c" * 64)
+        names = {c["name"] for c in cookies.parse(js, "", "")}
+        self.assertEqual(names, {"auth_token", "ct0", "twid"})
+        for bad in (("", "", ""), ("not json", "", ""), ("", "short!", "")):
+            with self.assertRaises(ValueError):
+                cookies.parse(*bad)
+
+    def test_web_route(self):
+        from unittest import mock
+        from xbot import web
+        c = web.app.test_client()
+        c.post("/login", data={"password": "test-pass"}); c.get("/")
+        with c.session_transaction() as ss:
+            csrf = ss["csrf"]
+        with mock.patch.object(web.xlogin, "call", return_value={"state": "done", "label": "ok"}) as call:
+            r = c.post("/xcookie", data={"csrf": csrf, "auth_token": "a" * 40, "ct0": "b" * 64})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(call.call_args.args[0], "cookies")
+        page = c.post("/xcookie", data={"csrf": csrf, "auth_token": "x"}).get_data(as_text=True)
+        self.assertIn("形が正しくありません", page)
+
+
 class Web(unittest.TestCase):
     def setUp(self):
         from xbot import web

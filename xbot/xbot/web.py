@@ -9,7 +9,7 @@ from datetime import datetime
 
 from flask import Flask, abort, redirect, render_template_string, request, send_from_directory, session
 
-from . import logic, store, xlogin
+from . import cookies as xcookies, logic, store, xlogin
 
 ADMIN_PASSWORD = os.environ.get("XBOT_ADMIN_PASSWORD", "")
 app = Flask(__name__)
@@ -170,6 +170,24 @@ def xlogin_input():
         pass
     value = None   # 入力内容はここで手放す（保存しない）
     return redirect("/xlogin")   # 再読み込みでパスワードが再送されないようにする
+
+
+@app.route("/xcookie", methods=["GET", "POST"])
+def xcookie():
+    res = None
+    if request.method == "POST":
+        try:
+            ck = xcookies.parse(request.form.get("json", ""), request.form.get("auth_token", ""), request.form.get("ct0", ""))
+            res = xlogin.call("cookies", ck)
+        except ValueError as e:
+            res = {"state": "error", "label": str(e)}
+        except Exception as e:  # noqa: BLE001
+            res = {"state": "error", "label": f"常駐プロセスにつながりませんでした（{type(e).__name__}）。少し待ってからもう一度お試しください。"}
+        ck = None   # 入力内容はここで手放す（サーバーのブラウザの中だけに残る）
+        if res.get("state") == "done":
+            flash("X にログインできました。")
+            return back("home")
+    return render_template_string(PAGE, view="xcookie", r=res, csrf=csrf())
 
 
 @app.post("/xlogin/cancel")

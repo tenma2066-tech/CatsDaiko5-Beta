@@ -51,6 +51,26 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <form method="post"><label for="pw">パスワード</label><input id="pw" type="password" name="password" autocomplete="current-password" required>
 <button class="btn pri full">ログイン</button></form>{% if msg %}<p class="err">{{ msg }}</p>{% endif %}</div></div>
 
+{% elif view == 'xcookie' %}
+<div class="wrap"><header><h1>ログイン情報の貼り付け<small>パスワードはサーバーに渡しません</small></h1><a class="btn sm" href="/">戻る</a></header>
+{% if r %}<div class="card"><h2>{{ '✅ ' if r.state=='done' else '⚠️ ' }}{{ r.label }}</h2>{% if r.shot %}<img src="{{ r.shot }}" style="width:100%;border-radius:10px;border:1.5px solid var(--line);margin-top:6px" alt="">{% endif %}</div>{% endif %}
+<div class="card"><h2>やり方</h2>
+<ol style="padding-left:20px;margin:6px 0;font-size:14px;line-height:1.8">
+<li>App Store で <b>Orion Browser</b>（無料）を入れる</li>
+<li>Orion の拡張機能から <b>Cookie-Editor</b> を入れる</li>
+<li>Orion で <b>x.com</b> を開き、いつも通り自分でログイン</li>
+<li>x.com を開いたまま Cookie-Editor を開き、<b>Export → JSON</b> でコピー（または <code>auth_token</code> と <code>ct0</code> の値だけコピー）</li>
+<li>下に貼り付けて「取り込む」</li>
+</ol>
+<div class="note">この値はパスワードと同じくらい大事です。チャットや他の人には見せないでください。X でログアウトすると無効になります。</div></div>
+<div class="card"><h2>貼り付け</h2>
+<form method="post" action="/xcookie" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>A. Cookie-Editor の Export（JSON）をまるごと</label><textarea name="json" rows="5" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder='[{"name":"auth_token", ...}]'></textarea>
+<p class="sub" style="margin:10px 0 0">または B. 値を1つずつ</p>
+<label>auth_token</label><input type="password" name="auth_token" autocomplete="off" autocapitalize="off" spellcheck="false">
+<label>ct0</label><input type="password" name="ct0" autocomplete="off" autocapitalize="off" spellcheck="false">
+<button class="btn pri full" onclick="this.textContent='確認中…（30秒ほどかかります）';this.form.submit();this.disabled=true;">取り込む</button></form></div></div>
+
 {% elif view == 'xlogin' %}
 <div class="wrap"><header><h1>X にログイン<small>入力した内容は保存しません</small></h1><a class="btn sm" href="/">戻る</a></header>
 <div class="card">
@@ -101,8 +121,8 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 </div></div>
 
 <div class="card"><h2>X へのログイン</h2>
-<p class="sub">このページで、X のユーザー名・パスワード（求められたら確認コード）を入力すると、サーバーのブラウザがログインします。入力した内容は<b>保存しません</b>（ログインした状態だけが残ります）。</p>
-<a class="btn pri full" href="/xlogin">X にログインする</a></div>
+<p class="sub">iPhone の Orion ブラウザで X にログインし、「ログイン済みの印」（Cookie）を貼り付けます。パスワードはサーバーに渡しません。</p>
+<a class="btn pri full" href="/xcookie">ログイン情報を貼り付ける</a></div>
 
 {% if st.snapshots %}<div class="card"><h2>画面の記録</h2><p class="sub">{{ fmt(st.snapshot_at) }} に撮影（何も送っていません）</p>
 <div class="shots">{% for x in st.snapshots %}<a href="/shot/{{ x }}" target="_blank"><img src="/shot/{{ x }}" alt=""></a>{% endfor %}</div></div>{% endif %}

@@ -208,15 +208,39 @@ class Session:
         p.keyboard.press("Enter")
 
 
+def import_cookies(cookies):
+    """Cookie をサーバーのブラウザに入れて、ログインできているか確かめる。"""
+    from .browser import Browser
+    with Browser() as b:
+        b.ctx.clear_cookies()
+        b.ctx.add_cookies(cookies)
+        ok = b.logged_in()
+        time.sleep(2)
+        shot = Session._shot(b)
+    store.update_status(logged_in=ok, login_checked=time.time())
+    store.log("info" if ok else "warn", "login", "ログイン情報を取り込みました：" + ("Xにログインできています" if ok else "ログインできていません（値が古いか、間違っている可能性）"))
+    return {"state": "done" if ok else "error", "label": "ログインできました。" if ok else
+            "ログインできませんでした。iPhone の Orion で x.com にログインし直してから、もう一度取り出して貼ってください。", "shot": shot}
+
+
 class Manager:
     def __init__(self):
         self.s = None
         self.lock = threading.Lock()
+        self.importing = False
 
     def active(self):
-        return bool(self.s and self.s.alive)
+        return bool(self.s and self.s.alive) or self.importing
 
     def handle(self, op, value):
+        if op == "cookies":
+            self.importing = True
+            try:
+                return import_cookies(value or [])
+            except Exception as e:  # noqa: BLE001
+                return {"state": "error", "label": f"取り込めませんでした：{str(e)[:200]}"}
+            finally:
+                self.importing = False
         with self.lock:
             if op == "start":
                 if not self.active():
@@ -245,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             body = {}
         op = body.get("op")
-        if op not in ("start", "state", "input", "cancel"):
+        if op not in ("start", "state", "input", "cancel", "cookies"):
             self.send_response(400)
             self.end_headers()
             return
