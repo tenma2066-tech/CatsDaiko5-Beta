@@ -95,5 +95,48 @@ def post_length(text: str) -> int:
     return n
 
 
+WEEK = ["月", "火", "水", "木", "金", "土", "日"]
+
+
+def next_time(rep: dict, after: float):
+    """定期投稿の次の時刻（after より後）。rep = {type: daily|weekly|hours, time: "HH:MM", days: [0..6], hours: N}"""
+    if not rep or rep.get("type") not in ("daily", "weekly", "hours"):
+        return None
+    if rep["type"] == "hours":
+        step = max(1, int(rep.get("hours") or 1)) * 3600
+        base = float(rep.get("anchor") or after)
+        n = int((after - base) // step) + 1
+        return base + max(1, n) * step
+    hh, mm = [int(x) for x in str(rep.get("time") or "09:00").split(":")[:2]]
+    d = datetime.fromtimestamp(after, JST).replace(hour=hh, minute=mm, second=0, microsecond=0)
+    from datetime import timedelta
+    days = set(int(x) for x in rep.get("days") or []) if rep["type"] == "weekly" else set(range(7))
+    if not days:
+        return None
+    for i in range(0, 8):
+        c = d + timedelta(days=i)
+        if c.timestamp() > after and c.weekday() in days:
+            return c.timestamp()
+    return None
+
+
+def describe_repeat(rep) -> str:
+    if not rep:
+        return ""
+    if rep.get("type") == "daily":
+        return f"毎日 {rep.get('time')}"
+    if rep.get("type") == "weekly":
+        return "毎週 " + "・".join(WEEK[int(d)] for d in sorted(rep.get("days") or [])) + f" {rep.get('time')}"
+    if rep.get("type") == "hours":
+        return f"{rep.get('hours')}時間ごと"
+    return ""
+
+
+def render_text(text: str, ts: float) -> str:
+    """本文の {日付} {曜日} {時刻} を、投稿するときの日本時間に置きかえる（同じ文の連続投稿を避けるのにも使える）。"""
+    d = datetime.fromtimestamp(ts, JST)
+    return (text or "").replace("{日付}", f"{d.month}/{d.day}").replace("{曜日}", WEEK[d.weekday()]).replace("{時刻}", d.strftime("%H:%M"))
+
+
 def now() -> float:
     return time.time()

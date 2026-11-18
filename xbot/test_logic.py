@@ -64,6 +64,18 @@ class Logic(unittest.TestCase):
         self.assertEqual(logic.msg_hash("/m/1", "ＡＢＣ"), logic.msg_hash("/m/1", "abc"))
 
 
+class Repeat(unittest.TestCase):
+    def test_next_time(self):
+        t = logic.parse_jst("2026-11-20T10:00")          # 金曜
+        self.assertEqual(logic.fmt_jst(logic.next_time({"type": "daily", "time": "09:00"}, t)), "11/21 09:00")
+        self.assertEqual(logic.fmt_jst(logic.next_time({"type": "daily", "time": "21:30"}, t)), "11/20 21:30")
+        self.assertEqual(logic.fmt_jst(logic.next_time({"type": "weekly", "time": "09:00", "days": [0, 2]}, t)), "11/23 09:00")  # 月
+        self.assertEqual(logic.fmt_jst(logic.next_time({"type": "hours", "hours": 6, "anchor": t}, t + 7 * 3600)), "11/20 22:00")
+        self.assertIsNone(logic.next_time({"type": "weekly", "time": "09:00", "days": []}, t))
+        self.assertEqual(logic.describe_repeat({"type": "weekly", "time": "09:00", "days": [5, 0]}), "毎週 月・土 09:00")
+        self.assertEqual(logic.render_text("{日付}({曜日}) {時刻}", t), "11/20(金) 10:00")
+
+
 class Web(unittest.TestCase):
     def setUp(self):
         from xbot import web
@@ -190,6 +202,37 @@ class Worker(unittest.TestCase):
         self.w.run_post(s, self.w.due_post())
         self.assertEqual(self.posted[-1], ("p2", True))
 
+    def test_repeat_post_advances_and_keeps_record(self):
+        import json as _j
+        rep = {"type": "daily", "time": "09:00"}
+        with store.db() as d:
+            d.execute("INSERT INTO posts(text, at, created, repeat) VALUES(?,?,?,?)", ("おはよう {曜日}", time.time() - 5, time.time(), _j.dumps(rep)))
+        self.w.Browser = self.fake_browser([], {})
+        s = dict(store.get_all(), dry_run=False, max_posts_day=10)
+        self.w.run_post(s, self.w.due_post())
+        with store.db() as d:
+            rows = [dict(r) for r in d.execute("SELECT * FROM posts ORDER BY id")]
+        self.assertEqual(rows[0]["state"], "scheduled")                  # 定期の元は次の時刻へ
+        self.assertGreater(rows[0]["at"], time.time())
+        self.assertEqual(logic.fmt_jst(rows[0]["at"])[-5:], "09:00")
+        self.assertEqual((rows[1]["state"], rows[1]["parent"]), ("posted", rows[0]["id"]))   # 実行の記録
+        self.assertNotIn("{曜日}", self.posted[-1][0])
+        self.assertIsNone(self.w.due_post())                             # すぐにはもう一度投稿しない
+
+    def test_web_repeat_form(self):
+        from xbot import web
+        c = web.app.test_client()
+        c.post("/login", data={"password": "test-pass"}); c.get("/")
+        with c.session_transaction() as ss:
+            csrf = ss["csrf"]
+        c.post("/post/new", data={"csrf": csrf, "text": "週報", "at": "2030-01-07T20:00", "repeat": "weekly", "days": ["0", "4"]})
+        c.post("/post/new", data={"csrf": csrf, "text": "x", "at": "2030-01-07T20:00", "repeat": "weekly"})   # 曜日なしは不可
+        with store.db() as d:
+            rows = [dict(r) for r in d.execute("SELECT * FROM posts WHERE text IN ('週報','x')")]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(_json_days(rows[0]), [0, 4])
+        self.assertIn("毎週 月・金 20:00", c.get("/?tab=posts").get_data(as_text=True))
+
     def test_dm_reply_once_and_skip_own(self):
         with store.db() as d:
             d.execute("INSERT INTO rules(name, kind, keywords, reply, created) VALUES('料金','keyword','料金','料金表です',?)", (time.time(),))
@@ -204,6 +247,11 @@ class Worker(unittest.TestCase):
         self.assertEqual(self.sent, [("/messages/1", "料金表です", False)])
         self.w.run_dms(s)                     # 同じメッセージには二度返さない
         self.assertEqual(len(self.sent), 1)
+
+
+def _json_days(row):
+    import json as _j
+    return _j.loads(row["repeat"])["days"]
 
 
 if __name__ == "__main__":

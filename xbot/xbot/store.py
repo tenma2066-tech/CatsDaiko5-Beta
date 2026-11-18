@@ -44,6 +44,11 @@ def _init(db):
     CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, level TEXT NOT NULL, kind TEXT NOT NULL, msg TEXT NOT NULL);
     """)
+    for col in ("repeat TEXT", "parent INTEGER"):     # 定期投稿（repeat）と、その実行記録（parent）
+        try:
+            db.execute("ALTER TABLE posts ADD COLUMN " + col)
+        except sqlite3.OperationalError:
+            pass
 
 
 @contextmanager

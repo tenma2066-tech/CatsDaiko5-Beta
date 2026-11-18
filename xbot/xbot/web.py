@@ -5,6 +5,7 @@ import os
 import secrets
 import time
 import uuid
+from datetime import datetime
 
 from flask import Flask, abort, redirect, render_template_string, request, send_from_directory, session
 
@@ -111,6 +112,7 @@ def index():
         hour = d.execute("SELECT COUNT(*) c FROM replied WHERE dry=0 AND at>=?", (time.time() - 3600,)).fetchone()["c"]
         recent = [dict(r) for r in d.execute("SELECT r.*, u.name FROM replied r LEFT JOIN rules u ON u.id=r.rule_id WHERE r.rule_id IS NOT NULL ORDER BY r.at DESC LIMIT 30")]
     for p in posts:
+        p["rep"] = logic.describe_repeat(json.loads(p["repeat"])) if p.get("repeat") else ""
         p["imgs"] = json.loads(p["images"] or "[]")
         p["when"] = logic.fmt_jst(p["at"])
         p["done"] = logic.fmt_jst(p["done_at"])
@@ -165,6 +167,28 @@ def post_new():
     except ValueError:
         flash("日時の形が正しくありません。")
         return back("posts")
+    rep = None
+    rtype = request.form.get("repeat", "none")
+    if rtype in ("daily", "weekly", "hours"):
+        hm = datetime.fromtimestamp(at, logic.JST).strftime("%H:%M")
+        rep = {"type": rtype, "time": hm}
+        if rtype == "weekly":
+            days = sorted({int(x) for x in request.form.getlist("days") if x.isdigit() and 0 <= int(x) <= 6})
+            if not days:
+                flash("毎週の場合は、曜日を1つ以上選んでください。")
+                return back("posts")
+            rep["days"] = days
+        if rtype == "hours":
+            h = (request.form.get("every_hours") or "").strip()
+            if not h.isdigit() or not 1 <= int(h) <= 168:
+                flash("「〇時間ごと」は 1〜168 の数字で入れてください。")
+                return back("posts")
+            rep["hours"] = int(h)
+            rep["anchor"] = at
+        if at < time.time() - 60:
+            at = logic.next_time(rep, time.time())
+        elif rtype == "weekly" and datetime.fromtimestamp(at, logic.JST).weekday() not in rep["days"]:
+            at = logic.next_time(rep, at)
     os.makedirs(store.UPLOAD_DIR, exist_ok=True)
     names = []
     for f in files:
@@ -179,8 +203,9 @@ def post_new():
         f.save(os.path.join(store.UPLOAD_DIR, name))
         names.append(name)
     with store.db() as d:
-        d.execute("INSERT INTO posts(text, images, at, created) VALUES(?,?,?,?)", (text, json.dumps(names), at, time.time()))
-    flash(f"予約しました（{logic.fmt_jst(at)}）。" + ("いまは下書きモードなので、実際には投稿されません。" if store.get("dry_run") else ""))
+        d.execute("INSERT INTO posts(text, images, at, created, repeat) VALUES(?,?,?,?,?)",
+                  (text, json.dumps(names), at, time.time(), json.dumps(rep, ensure_ascii=False) if rep else None))
+    flash(f"予約しました（{'定期：' + logic.describe_repeat(rep) + '・初回 ' if rep else ''}{logic.fmt_jst(at)}）。" + ("いまは下書きモードなので、実際には投稿されません。" if store.get("dry_run") else ""))
     return back("posts")
 
 
@@ -192,12 +217,18 @@ def post_op(pid, op):
             abort(404)
         if op == "cancel" and row["state"] == "scheduled":
             d.execute("UPDATE posts SET state='canceled' WHERE id=?", (pid,))
-            flash("予約を取り消しました。")
+            flash("予約を止めました。" + ("（定期投稿は「もう一度予約」で再開できます）" if row["repeat"] else ""))
         elif op == "retry" and row["state"] in ("failed", "canceled", "dry"):
-            d.execute("UPDATE posts SET state='scheduled', tries=0, error=NULL, at=? WHERE id=?", (max(time.time(), row["at"]), pid))
+            at = max(time.time(), row["at"])
+            if row["repeat"]:
+                at = logic.next_time(json.loads(row["repeat"]), time.time()) or at
+            d.execute("UPDATE posts SET state='scheduled', tries=0, error=NULL, at=? WHERE id=?", (at, pid))
             flash("もう一度予約しました。")
         elif op == "delete" and row["state"] != "posting":
+            others = " ".join(r["images"] for r in d.execute("SELECT images FROM posts WHERE id!=?", (pid,)))
             for n in json.loads(row["images"] or "[]"):
+                if n in others:
+                    continue
                 try:
                     os.remove(os.path.join(store.UPLOAD_DIR, n))
                 except OSError:
