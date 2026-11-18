@@ -251,8 +251,17 @@ class Importer:
                 cookies = None
                 self._set(step=3, label=STEPS[2])
                 ok = b.logged_in()
-                time.sleep(2)
+                time.sleep(4)
+                ok2 = b.logged_in()          # 少し待ってもう一度（すぐに切られていないか）
+                names = sorted({c["name"] for c in b.ctx.cookies("https://x.com")})
                 shot = Session._shot(b)
+            store.log("info", "login", f"取り込み後の確認：1回目={'OK' if ok else 'NG'} 2回目={'OK' if ok2 else 'NG'} "
+                      f"auth_token={'あり' if 'auth_token' in names else 'なし'} kdt={'あり' if 'kdt' in names else 'なし'} 残っている項目={len(names)}件")
+            if ok and not ok2:
+                self._set(state="failed", step=4, shot=shot,
+                          label="一度はログインできましたが、すぐに X 側でログインが切られました。Cookie-Editor の「Export → JSON」で全部まとめてコピーして（A の欄）貼り直してください。")
+                return
+            ok = ok and ok2
             store.update_status(logged_in=ok, login_checked=time.time())
             store.log("info" if ok else "warn", "login", "ログイン情報を取り込みました：" + ("Xにログインできています" if ok else "ログインできていません"))
             self._set(state="done" if ok else "failed", step=4, shot=shot,

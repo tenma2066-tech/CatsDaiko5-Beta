@@ -72,7 +72,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <div class="note">この値はパスワードと同じくらい大事です。チャットや他の人には見せないでください。X でログアウトすると無効になります。</div></div>
 <div class="card"><h2>貼り付け</h2>
 <form method="post" action="/xcookie" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label>A. Cookie-Editor の Export（JSON）をまるごと</label><textarea name="json" rows="5" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder='[{"name":"auth_token", ...}]'></textarea>
+<label>A. Cookie-Editor の Export（JSON）をまるごと <span class="chip ok">おすすめ</span></label><p class="sub" style="margin:0 0 4px">端末を見分ける値（kdt など）も一緒に入るので、すぐにログインが切れにくくなります。</p><textarea name="json" rows="5" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder='[{"name":"auth_token", ...}]'></textarea>
 <p class="sub" style="margin:10px 0 0">または B. 値を1つずつ</p>
 <label>auth_token</label><input type="password" name="auth_token" autocomplete="off" autocapitalize="off" spellcheck="false">
 <label>ct0</label><input type="password" name="ct0" autocomplete="off" autocapitalize="off" spellcheck="false">
