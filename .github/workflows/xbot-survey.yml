@@ -1,0 +1,35 @@
+name: xbot survey (read-only)
+# xbot を入れる前の確認。VPSの状態を「読むだけ」。何も変更・停止・再起動しない。
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/zealous-ritchie-5o2epn]
+    paths: [".github/workflows/xbot-survey.yml"]
+
+jobs:
+  survey:
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      SSHPASS: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - name: Read VPS status (no changes)
+        run: |
+          sudo apt-get install -y sshpass >/dev/null
+          cat > /tmp/s.sh <<'SH'
+          echo "=== OS ==="; . /etc/os-release; echo "$PRETTY_NAME"; uname -r
+          echo "=== CPU / load ==="; nproc; uptime
+          echo "=== memory (MB) ==="; free -m
+          echo "=== disk ==="; df -h / /opt 2>/dev/null | sort -u
+          echo "=== top processes by memory ==="; ps -eo user,pid,%cpu,%mem,rss,comm --sort=-rss | head -15
+          echo "=== docker ==="; docker ps --format '{{.Names}}  {{.Image}}  {{.Status}}  {{.Ports}}' 2>&1
+          docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}' 2>&1
+          echo "=== running services ==="; systemctl list-units --type=service --state=running --no-pager --no-legend | awk '{print $1}'
+          echo "=== listening ports ==="; ss -tlnp 2>/dev/null | awk 'NR>1{print $4, $6}' | sed 's/users:((//; s/,pid=.*//'
+          echo "=== firewall ==="; (ufw status 2>/dev/null || echo "ufw なし") | head -10
+          echo "=== python ==="; python3 --version 2>&1; python3 -c "import venv" 2>&1 && echo "venv OK" || echo "venv なし"; pip3 --version 2>&1 | head -1
+          echo "=== existing users (uid>=1000) ==="; awk -F: '$3>=1000 && $3<65000 {print $1}' /etc/passwd
+          echo "=== /opt ==="; ls /opt
+          SH
+          sed -i 's/^          //' /tmp/s.sh
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/s.sh
