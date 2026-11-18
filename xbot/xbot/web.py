@@ -418,6 +418,10 @@ def action(op):
         store.put("dm_enabled", True); flash("DM自動返信をオンにしました。"); tab = "dm"
     elif op == "dm_off":
         store.put("dm_enabled", False); flash("DM自動返信をオフにしました。"); tab = "dm"
+    elif op == "req_on":
+        store.put("dm_accept_requests", True); flash("メッセージリクエストを自動で許可します。"); tab = "dm"
+    elif op == "req_off":
+        store.put("dm_accept_requests", False); flash("メッセージリクエストの自動許可をやめました。"); tab = "dm"
     elif op in ("check_login", "snapshot"):
         store.put("request", op); flash("確認を依頼しました。1分ほどで結果が出ます（画面を再読み込みしてください）。")
     elif op == "check_dm":

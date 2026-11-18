@@ -9,7 +9,7 @@ import time
 import traceback
 
 from . import logic, store
-from .browser import Browser, NotLoggedIn
+from .browser import Browser, ChatLocked, DMBrowser, NotLoggedIn
 from . import xlogin
 
 TICK = 20                 # 何秒ごとに見るか
@@ -118,50 +118,82 @@ def already(conv, h):
         return d.execute("SELECT 1 FROM replied WHERE conv=? AND msg_hash=?", (conv, h)).fetchone() is not None
 
 
+def _handle(b, s, rs, key, got, dry, counts):
+    """1つの会話：最後が相手のメッセージで、ルールに合えば返信する。"""
+    if not got:
+        return
+    message, mine, first = got
+    if mine:
+        return
+    h = logic.msg_hash(key, message)
+    if already(key, h):
+        return
+    if not logic.can_reply(reply_times(), time.time(), int(s["max_replies_hour"])):
+        counts["limited"] = True
+        return
+    if logic.in_cooldown(last_reply_at(key), time.time(), float(s["reply_cooldown_hours"])):
+        return
+    rule = logic.pick_rule(rs, message, first)
+    if not rule:
+        with store.db() as d:   # 当てはまるルールがない → 次からは見ない
+            d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,1)", (key, h, None, time.time()))
+        return
+    b.dm_reply(rule["reply"], dry)
+    with store.db() as d:
+        d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,?)",
+                  (key, h, rule["id"], time.time(), 1 if dry else 0))
+    counts["replied"] += 1
+    store.log("info", "dm", f"ルール「{rule['name']}」で{'返信を下書きしました（送っていません）' if dry else '返信しました'}")
+    time.sleep(random.uniform(20, 60))   # 続けて返さない
+
+
 def run_dms(s, manual=False):
     rs = rules()
-    if not rs:
+    dry = bool(s["dry_run"])
+    counts = {"replied": 0, "accepted": 0, "requests": 0, "chats": 0, "limited": False}
+    if not rs and not s.get("dm_accept_requests"):
         store.update_status(last_dm_check=time.time(), dm_checked=0, dm_replied=0)
         if manual:
             store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
         return
-    dry = bool(s["dry_run"])
-    done = 0
-    with Browser() as b:
-        convs = b.list_conversations(int(s["dm_scan_limit"]))
-        for c in convs:
-            if logic.is_own_preview(c["preview"]):
-                continue
-            h = logic.msg_hash(c["conv"], c["preview"])
-            if already(c["conv"], h):
-                continue
-            if not logic.can_reply(reply_times(), time.time(), int(s["max_replies_hour"])):
-                store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
-                break
-            if logic.in_cooldown(last_reply_at(c["conv"]), time.time(), float(s["reply_cooldown_hours"])):
-                continue
-            got = b.last_incoming(c["conv"])
-            if not got:
-                continue
-            message, first = got
-            h = logic.msg_hash(c["conv"], message)
-            if already(c["conv"], h):
-                continue
-            rule = logic.pick_rule(rs, message, first)
-            if not rule:
-                with store.db() as d:   # 当てはまるルールがない → 次からは見ない
-                    d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,1)", (c["conv"], h, None, time.time()))
-                continue
-            b.reply(c["conv"], rule["reply"], dry)
-            with store.db() as d:
-                d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,?)",
-                          (c["conv"], h, rule["id"], time.time(), 1 if dry else 0))
-            done += 1
-            store.log("info", "dm", f"ルール「{rule['name']}」で{'返信を下書きしました（送っていません）' if dry else '返信しました'}")
-            time.sleep(random.uniform(20, 60))   # 続けて返さない
-    store.update_status(last_dm_check=time.time(), dm_checked=len(convs), dm_replied=done)
-    if manual or done:
-        store.log("info", "dm", f"DMを確認しました：会話 {len(convs)}件を確認、{'下書き' if dry else '返信'} {done}件")
+    with DMBrowser() as b:
+        # 1) メッセージリクエスト：許可して、ルールに合えば返信
+        if s.get("dm_accept_requests", True):
+            b.dm_open_inbox(requests=True)
+            keys = b.dm_request_keys()
+            counts["requests"] = len(keys)
+            for key in keys[:5]:
+                if dry:
+                    break   # 下書きモードでは許可しない（件数だけ知らせる）
+                b.dm_open_inbox(requests=True)
+                got = b.dm_open_request(key)
+                b.dm_accept()
+                counts["accepted"] += 1
+                store.log("info", "dm", "メッセージリクエストを許可しました")
+                if rs:
+                    _handle(b, s, rs, key, got, dry, counts)
+                time.sleep(random.uniform(5, 15))
+        # 2) ふつうの会話
+        if rs:
+            b.dm_open_inbox()
+            keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
+            counts["chats"] = len(keys)
+            for key in keys:
+                if counts["limited"]:
+                    store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
+                    break
+                b.dm_open_inbox()
+                try:
+                    got = b.dm_open_chat(key)
+                except Exception as e:  # noqa: BLE001
+                    store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
+                    continue
+                _handle(b, s, rs, key, got, dry, counts)
+    store.update_status(last_dm_check=time.time(), dm_checked=counts["chats"], dm_replied=counts["replied"],
+                        dm_requests=counts["requests"], dm_accepted=counts["accepted"])
+    if manual or counts["replied"] or counts["accepted"]:
+        req = (f"リクエスト {counts['requests']}件" + (f"（許可 {counts['accepted']}件）" if not dry else "（下書きモードなので許可していません）")) if s.get("dm_accept_requests", True) else "リクエストは自動許可オフ"
+        store.log("info", "dm", f"DMを確認しました：会話 {counts['chats']}件、{req}、{'下書き' if dry else '返信'} {counts['replied']}件")
 
 
 # ---------------------------------------------------------------------- ログイン画面（Xvfb + x11vnc + noVNC）
@@ -308,6 +340,9 @@ def main():
                 except NotLoggedIn as e:
                     store.update_status(logged_in=False)
                     store.log("error", "login", str(e))
+                except ChatLocked as e:
+                    store.update_status(chat_unlocked=False)
+                    store.log("error", "dm", str(e))
                 except Exception as e:  # noqa: BLE001
                     store.log("error", "dm", f"DMの確認に失敗しました: {e}")
                 next_dm = time.time() + max(2, int(s["dm_interval_min"])) * 60
@@ -324,6 +359,9 @@ def main():
                 except NotLoggedIn as e:
                     store.update_status(logged_in=False)
                     store.log("error", "login", str(e))
+                except ChatLocked as e:
+                    store.update_status(chat_unlocked=False)
+                    store.log("error", "dm", str(e))
                 except Exception as e:  # noqa: BLE001
                     store.log("error", "dm", f"DMの確認に失敗しました: {e}")
         except Exception:  # noqa: BLE001

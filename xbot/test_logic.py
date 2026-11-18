@@ -226,19 +226,23 @@ class Worker(unittest.TestCase):
         with store.db() as d:
             d.execute("DELETE FROM posts"); d.execute("DELETE FROM rules"); d.execute("DELETE FROM replied")
 
-    def fake_browser(self, convs, incoming):
+    def fake_browser(self, convs, incoming, requests=None):
         test = self
-        test.sent = []
-        test.posted = []
+        test.sent, test.posted, test.accepted = [], [], []
+        reqs = dict(requests or {})
 
         class FB:
             def __init__(self, *a, **k): pass
             def __enter__(self): return self
             def __exit__(self, *a): pass
             def post(self, text, imgs, dry): test.posted.append((text, dry)); return None
-            def list_conversations(self, limit): return convs
-            def last_incoming(self, conv): return incoming.get(conv)
-            def reply(self, conv, text, dry): test.sent.append((conv, text, dry))
+            def dm_open_inbox(self, requests=False): self.cur = None
+            def dm_request_keys(self): return list(reqs)
+            def dm_open_request(self, key): self.cur = key; return reqs[key]
+            def dm_accept(self): test.accepted.append(self.cur); reqs.pop(self.cur, None)
+            def dm_chat_keys(self, limit): return [c["conv"] for c in convs][:limit]
+            def dm_open_chat(self, key): self.cur = key; return incoming.get(key)
+            def dm_reply(self, text, dry): test.sent.append((self.cur, text, dry))
         return FB
 
     def test_post_respects_dry_and_limit(self):
@@ -292,17 +296,32 @@ class Worker(unittest.TestCase):
     def test_dm_reply_once_and_skip_own(self):
         with store.db() as d:
             d.execute("INSERT INTO rules(name, kind, keywords, reply, created) VALUES('料金','keyword','料金','料金表です',?)", (time.time(),))
-        convs = [{"conv": "/messages/1", "preview": "料金は？"}, {"conv": "/messages/2", "preview": "あなた: どうも"},
-                 {"conv": "/messages/3", "preview": "こんにちは"}]
-        inc = {"/messages/1": ("料金は？", True), "/messages/3": ("こんにちは", True)}
-        self.w.Browser = self.fake_browser(convs, inc)
+        convs = [{"conv": "1:9"}, {"conv": "2:9"}, {"conv": "3:9"}]
+        inc = {"1:9": ("料金は？", False, True), "2:9": ("どうも", True, False), "3:9": ("こんにちは", False, True)}
+        fb = self.fake_browser(convs, inc)
+        self.w.DMBrowser = fb
         self.w.random.uniform = lambda a, b: 0
         self.w.time.sleep = lambda x: None
-        s = dict(store.get_all(), dry_run=False)
+        s = dict(store.get_all(), dry_run=False, dm_accept_requests=False)
         self.w.run_dms(s)
-        self.assertEqual(self.sent, [("/messages/1", "料金表です", False)])
+        self.assertEqual(self.sent, [("1:9", "料金表です", False)])
         self.w.run_dms(s)                     # 同じメッセージには二度返さない
         self.assertEqual(len(self.sent), 1)
+
+    def test_requests_accepted_and_answered(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('はじめて','first_time','ようこそ',?)", (time.time(),))
+        fb = self.fake_browser([], {}, requests={"5:9": ("はじめまして", False, True), "6:9": ("こんにちは", False, True)})
+        self.w.DMBrowser = fb
+        self.w.random.uniform = lambda a, b: 0
+        self.w.time.sleep = lambda x: None
+        self.w.run_dms(dict(store.get_all(), dry_run=True, dm_accept_requests=True))   # 下書きモードでは許可しない
+        self.assertEqual(self.accepted, [])
+        fb = self.fake_browser([], {}, requests={"5:9": ("はじめまして", False, True), "6:9": ("こんにちは", False, True)})
+        self.w.DMBrowser = fb
+        self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
+        self.assertEqual(sorted(self.accepted), ["5:9", "6:9"])
+        self.assertEqual(sorted(x[0] for x in self.sent), ["5:9", "6:9"])
 
 
 def _json_days(row):

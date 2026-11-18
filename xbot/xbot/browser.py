@@ -84,6 +84,10 @@ def chat_pin_visible(page) -> bool:
         return False
 
 
+class ChatLocked(Exception):
+    pass
+
+
 class NotLoggedIn(Exception):
     pass
 
@@ -358,6 +362,86 @@ class Browser:
           const top = o => Object.entries(o).sort((a,b)=>b[1]-a[1]).slice(0,60);
           return {tids: top(tids), roles: top(roles), labels: top(labels), hrefs: top(hrefs).slice(0,20), editable: edit, unreadish};
         }""")
+
+    # ------------------------------------------------------------------ 新しいチャット（/i/chat）
+    def dm_open_inbox(self, requests=False):
+        p = self.page
+        p.goto(CHAT + ("/requests" if requests else ""), wait_until="domcontentloaded")
+        for _ in range(40):
+            if chat_pin_visible(p):
+                raise ChatLocked("チャットの暗証番号が必要です（「DM返信」タブの「チャットの暗証番号を入力する」から入れてください）")
+            if p.locator('[data-testid="dm-inbox-panel"]').count() and (
+                    p.locator('[data-testid^="dm-conversation-item-"], [data-testid^="dm-message-request-item-"], '
+                              '[data-testid="dm-empty-conversation-state"]').count()):
+                break
+            time.sleep(1)
+        time.sleep(2)
+
+    def dm_request_keys(self):
+        return [t.split("dm-message-request-item-", 1)[1] for t in
+                self.page.locator('[data-testid^="dm-message-request-item-"]').evaluate_all("els => els.map(e => e.getAttribute('data-testid'))")]
+
+    def dm_chat_keys(self, limit):
+        keys = self.page.locator('[data-testid^="dm-conversation-item-"]').evaluate_all("els => els.map(e => e.getAttribute('data-testid'))")
+        return [t.split("dm-conversation-item-", 1)[1] for t in keys][:limit]
+
+    def _last_message(self):
+        """開いている会話の最後のメッセージ：(本文, 自分が送ったものか, 自分が一度も送っていないか)。"""
+        p = self.page
+        for _ in range(20):
+            if p.locator('[data-testid^="message-text-"]').count():
+                break
+            time.sleep(1)
+        info = p.locator('[data-testid^="message-text-"]').evaluate_all("""els => {
+            const list = (els[0] && (els[0].closest('[data-testid=dm-message-list]') || els[0].getRootNode().querySelector('[data-testid=dm-message-list]')));
+            const lr = list ? list.getBoundingClientRect() : {left: 0, right: window.innerWidth};
+            const mine = e => { const r = e.getBoundingClientRect(); return (r.left - lr.left) > (lr.right - r.right); };
+            return els.map(e => ({text: (e.innerText || '').trim(), mine: mine(e)}));
+        }""")
+        if not info:
+            return None
+        last = info[-1]
+        return last["text"], bool(last["mine"]), not any(m["mine"] for m in info)
+
+    def dm_open_request(self, key):
+        self.page.locator(f'[data-testid="dm-message-request-item-{key}"]').first.click()
+        self.page.wait_for_selector('[data-testid="dm-message-request-accept-button"]', timeout=20000)
+        return self._last_message()
+
+    def dm_accept(self):
+        self.page.locator('[data-testid="dm-message-request-accept-button"]').first.click()
+        self.page.wait_for_selector('[data-testid="dm-composer-textarea"]', timeout=20000)
+        human_pause(1, 2)
+
+    def dm_open_chat(self, key):
+        self.page.locator(f'[data-testid="dm-conversation-item-{key}"]').first.click()
+        self.page.wait_for_selector('[data-testid="dm-composer-textarea"]', timeout=20000)
+        human_pause(1, 2)
+        return self._last_message()
+
+    def dm_reply(self, text, dry):
+        p = self.page
+        box = p.locator('[data-testid="dm-composer-textarea"]').first
+        box.click()
+        human_pause()
+        lines = (text or "").split("\n")
+        for i, line in enumerate(lines):
+            if line:
+                p.keyboard.insert_text(line)
+            if i < len(lines) - 1:
+                p.keyboard.press("Shift+Enter")   # 改行（Enter だけだと送信される）
+        human_pause()
+        if dry:
+            shot = self.shot("dm-dry")
+            p.keyboard.press("Control+A")
+            p.keyboard.press("Delete")
+            return shot
+        p.keyboard.press("Enter")
+        time.sleep(2.5)
+        left = (box.inner_text() or "").strip()
+        if left:
+            raise RuntimeError("返信を送れたことを確認できませんでした（入力欄に文字が残っています）")
+        return self.shot("dm")
 
     def snapshot(self):
         """画面の確認用：ホーム・投稿画面・DM画面の記録を撮る（何も送らない）。"""

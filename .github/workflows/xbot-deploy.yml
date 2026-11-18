@@ -60,5 +60,9 @@ jobs:
               $SSH "cat > /tmp/xbot-probe.sh" < xbot/deploy/probe.sh
               $SSH "bash /tmp/xbot-probe.sh < /dev/null; rm -f /tmp/xbot-probe.sh"
               ;;
+            dmcheck)
+              $SSH "cat > /tmp/xbot-dmcheck.sh" < xbot/deploy/dmcheck.sh
+              $SSH "bash /tmp/xbot-dmcheck.sh < /dev/null; rm -f /tmp/xbot-dmcheck.sh"
+              ;;
             *) echo "step は install / caddy / status / probe"; exit 1;;
           esac
