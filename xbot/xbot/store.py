@@ -24,6 +24,7 @@ DEFAULTS = {
     "vnc_password": "",
     "status": {},               # 常駐プロセスの状態（ログイン中か・最後の確認など）
     "request": "",              # 管理サイトからの依頼（check_login / snapshot / stop_login）
+    "rules_changed": 0,         # 返信ルールを最後に変えた時刻
     "dm_accept_requests": True, # メッセージリクエストを自動で許可する
     "engine": "iphone",         # iphone = iPhone の Safari と同じ種類（WebKit） / pc = パソコンの Chrome（Chromium）
     "network": "warp",          # warp = Cloudflare WARP 経由（xbot だけ） / direct = サーバーから直接

@@ -77,7 +77,8 @@ def auth():
 def login():
     msg = ""
     if request.method == "POST":
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+        # Caddy が最後に本当の接続元を付け足すので、最後の値を使う（先頭は送る側が自由に書けてしまう）
+        ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[-1].strip()
         fails = [t for t in _fails.get(ip, []) if t > time.time() - 900]
         if len(fails) >= 8:
             msg = "失敗が続いたため、15分ほど待ってからお試しください。"
@@ -348,12 +349,14 @@ def rule_new():
     with store.db() as d:
         d.execute("INSERT INTO rules(name, kind, keywords, match, reply, priority, created) VALUES(?,?,?,?,?,?,?)",
                   (r["name"], r["kind"], r["keywords"], r["match"], r["reply"], r["priority"], time.time()))
+    store.put("rules_changed", time.time())
     flash(f"ルール「{r['name']}」を追加しました。")
     return back("dm")
 
 
 @app.post("/rule/<int:rid>/<op>")
 def rule_op(rid, op):
+    store.put("rules_changed", time.time())   # ルールを変えたら、当てはまらなかったメッセージをもう一度見る
     with store.db() as d:
         if op == "toggle":
             d.execute("UPDATE rules SET enabled=1-enabled WHERE id=?", (rid,))
@@ -374,6 +377,8 @@ def rule_op(rid, op):
 
 
 # ---------------------------------------------------------------------- 設定・操作
+LIMIT_NAMES = {"max_posts_day": "1日の投稿数の上限", "max_replies_hour": "1時間の返信数の上限", "dm_interval_min": "DMを確認する間隔",
+               "reply_cooldown_hours": "同じ相手に続けて返信しない時間", "dm_scan_limit": "1回に確認する会話の数"}
 LIMITS = {"max_posts_day": (1, 50), "max_replies_hour": (1, 60), "dm_interval_min": (2, 120), "reply_cooldown_hours": (0, 720), "dm_scan_limit": (1, 30)}
 
 
@@ -382,7 +387,7 @@ def settings():
     for k, (lo, hi) in LIMITS.items():
         v = (request.form.get(k) or "").strip()
         if not v.isdigit() or not lo <= int(v) <= hi:
-            flash(f"「{k}」は {lo}〜{hi} の数字で入れてください。")
+            flash(f"「{LIMIT_NAMES.get(k, k)}」は {lo}〜{hi} の数字で入れてください。")
             return back("settings")
         store.put(k, int(v))
     flash("設定を保存しました。")

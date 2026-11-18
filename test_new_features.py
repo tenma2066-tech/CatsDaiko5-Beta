@@ -111,7 +111,19 @@ class NewFeatures(unittest.TestCase):
         self.assertEqual(len(cust.call_args.args[1]), 12)
         fac.assert_called_once_with(save, 20)
 
-    # ---------------- 管理者は無料
+    # ---------------- 旧レジェンド・真レジェンドの段階
+    def test_legend_tiers_one_per_legend(self):
+        self.assertNotIn("旧レジェンドステージクリア", A.SUBS)
+        self.assertNotIn("真レジェンドステージクリア", A.SUBS)
+        for k in A.engine.LEGEND_TIERS:
+            self.assertIn(k, A.SUBS)
+        self.assertEqual(A._one_legend_tier(["旧レジェンド 冠4までクリア", "旧レジェンド イディまでクリア"]), ["旧レジェンド イディまでクリア"])
+        subs = ["旧レジェンド 冠1クリア", "旧レジェンド 冠3までクリア", "真レジェンド 冠2までクリア", "にゃんこ塔全クリア"]
+        self.assertEqual(A._one_legend_tier(subs), ["旧レジェンド 冠3までクリア", "真レジェンド 冠2までクリア", "にゃんこ塔全クリア"])
+        r = self.run_({"subs": subs}).get_json()
+        self.assertEqual(r["amount"], 75)      # 旧（冠3）・真（冠2）・塔 の3件だけ
+
+
     def _admin_client(self):
         c = A.app.test_client()
         with c.session_transaction() as s:
@@ -158,6 +170,15 @@ class NewFeatures(unittest.TestCase):
             self.c.post(f"/api/orders/{r['order']}/pay", json={"link": self.LINK})
         self.assertEqual(G.coupon_list()[0]["state"], "used")
         self.assertIn("すでに使われています", G.coupon_check(code)[1])
+
+    def test_coupon_moves_to_new_order_of_same_person(self):
+        code = G.coupon_issue("O9", 30)
+        r1 = self.run_({"chars": "1-5", "coupon": code}).get_json()
+        r2 = self.run_({"chars": "1-6", "coupon": code})                 # 作り直し → 使用中で弾かれない
+        self.assertEqual(r2.status_code, 200, r2.get_json())
+        self.assertEqual(A._orders[r1["order"]]["state"], "dead")          # 前の未払いの注文は使えなくなる
+        r3 = self.run_({"chars": "1-5", "coupon": code}, A.app.test_client())   # 別の人は使えない
+        self.assertEqual(r3.get_json()["code"], "coupon_invalid")
 
     def test_coupon_released_when_unpaid_order_expires(self):
         code = G.coupon_issue("O2", 30)

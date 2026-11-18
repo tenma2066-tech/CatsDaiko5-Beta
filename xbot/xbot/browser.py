@@ -368,7 +368,12 @@ class Browser:
     def dm_open_inbox(self, requests=False, other=False):
         """会話の一覧（requests=True ならメッセージリクエスト、other=True ならその中の「その他」）を開く。"""
         p = self.page
-        p.goto(CHAT + ("/requests/other" if (requests and other) else "/requests" if requests else ""), wait_until="domcontentloaded")
+        p.goto(CHAT + ("/requests" if requests else ""), wait_until="domcontentloaded")
+        if requests and other:      # 隠れているリクエスト：「その他」ボタンを押して開く
+            btn = p.locator('[data-testid="dm-message-requests-other-button"]').first
+            btn.wait_for(state="visible", timeout=20000)
+            btn.click(timeout=15000)
+            time.sleep(1)
         sel = ('[data-testid^="dm-message-request-item-"]' if requests else '[data-testid^="dm-conversation-item-"]')
         for i in range(20 if not requests else 12):
             if chat_pin_visible(p):

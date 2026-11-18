@@ -958,6 +958,50 @@ def set_facility_levels(save, level: int) -> bool:
     return True
 
 
+LEGEND_TIERS = {   # メニュー名 → (どのレジェンドか, 何冠までクリアするか)
+    "旧レジェンド 冠1クリア": ("old", 1), "旧レジェンド 冠2までクリア": ("old", 2),
+    "旧レジェンド 冠3までクリア": ("old", 3), "旧レジェンド 冠4までクリア": ("old", 4),
+    "真レジェンド 冠1クリア": ("uncanny", 1), "真レジェンド 冠2までクリア": ("uncanny", 2),
+    "真レジェンド 冠3までクリア": ("uncanny", 3), "真レジェンド 冠4までクリア": ("uncanny", 4),
+    "旧レジェンド イディまでクリア": ("old", 5), "真レジェンド ノーヴァまでクリア": ("uncanny", 5),
+}
+# 5段階目：冠4まで全部クリアのあとに出る入手ステージ（EXステージ＝イベントステージの種類4）と、もらえるキャラ（セーブ内部のID）
+LEGEND_FINALE = {
+    "old": {"ex_map": 26, "cat": 568},       # 太古の力EX「太古の力」→ イディ:N（No.569）
+    "uncanny": {"ex_map": 69, "cat": 771},   # 古代賢者マップ「起源の覚醒」→ 生命の賢者Dr.ノーヴァ（No.772）
+}
+
+
+def clear_legend_crowns(save, kind: str, crowns: int) -> int:
+    """旧レジェンド（kind=old）／真レジェンド（kind=uncanny）の全マップを、冠1〜指定の冠までクリアする。
+    指定より上の冠には触らない（すでにクリア済みなら、そのまま残す）。クリアした冠のステージ数を返す。"""
+    if kind == "old":
+        groups = save.event_stages.chapters[0].chapters
+    else:
+        uncanny = save.uncanny
+        groups = uncanny.chapters.chapters
+        for mi in range(min(len(groups), len(uncanny.unknown))):
+            uncanny.unknown[mi] = max(1, uncanny.unknown[mi])
+    n = 0
+    for g in groups:
+        top = min(int(crowns), len(g.chapters))
+        for star in range(top):
+            for si in range(len(g.chapters[star].stages)):
+                g.clear_stage(star, si, 1, False, True)   # クリア回数は増やさない
+                n += 1
+            g.chapters[star].chapter_unlock_state = 3
+        if top < len(g.chapters):                          # 次の冠を挑戦できる状態にする
+            g.chapters[top].chapter_unlock_state = max(1, int(g.chapters[top].chapter_unlock_state or 0))
+    if int(crowns) >= 5:                                   # 入手ステージ（イディ／ノーヴァ）もクリアして、キャラを入れる
+        fin = LEGEND_FINALE[kind]
+        ex = save.event_stages.chapters[4].chapters[fin["ex_map"]]
+        ex.clear_stage(0, 0, 1, False, True)
+        ex.chapters[0].chapter_unlock_state = 3
+        unlock_cats_by_ids(save, [fin["cat"]])
+        n += 1
+    return n
+
+
 def apply_subs_and_others(save, subs_to_apply, others_to_apply):
     """サブ系・その他系の書き換え（元コードそのまま）"""
     failures = []
@@ -1132,7 +1176,15 @@ def apply_subs_and_others(save, subs_to_apply, others_to_apply):
                 except Exception as e:
                     failures.append(sub)
 
-            elif sub == '旧レジェンドステージクリア':
+            elif sub in LEGEND_TIERS:
+                try:
+                    kind, crowns = LEGEND_TIERS[sub]
+                    if not clear_legend_crowns(save, kind, crowns):
+                        failures.append(sub)
+                except Exception as e:
+                    failures.append(sub)
+
+            elif sub == '旧レジェンドステージクリア':   # 旧メニュー（支払い済みの古い注文のために残す）
                 try:
                     if hasattr(save, 'event_stages') and len(save.event_stages.chapters) > 0:
                         es = save.event_stages

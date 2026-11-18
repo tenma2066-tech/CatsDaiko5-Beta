@@ -338,6 +338,26 @@ class Worker(unittest.TestCase):
         self.assertEqual(sorted(self.accepted), ["5:9", "o6:9", "o7:9"])     # 「その他」の分も許可する
         self.assertEqual(len(self.sent), 3)
 
+    def test_draft_does_not_block_real_reply_and_rule_change_rechecks(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, keywords, reply, created) VALUES('料金','keyword','料金','料金表です',?)", (time.time(),))
+        convs = [{"conv": "1:9"}, {"conv": "2:9"}]
+        inc = {"1:9": ("料金は？", False, True), "2:9": ("予約したい", False, True)}
+        self.w.DMBrowser = self.fake_browser(convs, inc)
+        self.w.random.uniform = lambda a, b: 0
+        self.w.time.sleep = lambda x: None
+        self.w.run_dms(dict(store.get_all(), dry_run=True, dm_accept_requests=False))     # 下書き
+        self.assertEqual(self.sent, [("1:9", "料金表です", True)])
+        self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=False))    # 本番にしたら返信する
+        self.assertEqual(self.sent[-1], ("1:9", "料金表です", False))
+        n = len(self.sent)
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, keywords, reply, created) VALUES('予約','keyword','予約','予約はこちら',?)", (time.time(),))
+        store.put("rules_changed", time.time() + 1)
+        self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=False))    # ルールを足したら、前は当てはまらなかった分も見る
+        self.assertEqual(self.sent[n:], [("2:9", "予約はこちら", False)])
+        store.put("rules_changed", 0)
+
     def test_requests_accepted_and_answered(self):
         with store.db() as d:
             d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('はじめて','first_time','ようこそ',?)", (time.time(),))

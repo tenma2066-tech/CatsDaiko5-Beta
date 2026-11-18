@@ -122,7 +122,11 @@ SUBS = [
     "日本編 第1章クリア", "日本編 第2章クリア", "日本編 第3章クリア",
     "未来編 第1章クリア", "未来編 第2章クリア", "未来編 第3章クリア",
     "宇宙編 第1章クリア", "宇宙編 第2章クリア", "宇宙編 第3章クリア",
-    "ゾンビステージクリア", "旧レジェンドステージクリア", "真レジェンドステージクリア",
+    "ゾンビステージクリア",
+    "旧レジェンド 冠1クリア", "旧レジェンド 冠2までクリア", "旧レジェンド 冠3までクリア", "旧レジェンド 冠4までクリア",
+    "旧レジェンド イディまでクリア",
+    "真レジェンド 冠1クリア", "真レジェンド 冠2までクリア", "真レジェンド 冠3までクリア", "真レジェンド 冠4までクリア",
+    "真レジェンド ノーヴァまでクリア",
     "ゼロレジェンドステージクリア", "魔界編全クリア", "にゃんこ塔全クリア",
     "イベントステージ全クリア", "ガマトトLvMax", "ガマトト助手全員レジェンド化",
     "にゃんこ神社LvMax",
@@ -134,6 +138,16 @@ OTHERS = [
     "ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正",
     "未所持キャラのガチャ・図鑑記録を整理",
 ]
+def _one_legend_tier(subs):
+    """同じレジェンドの段階は、いちばん上だけを残す（下の段階は含まれるので、二重に料金を取らない）。"""
+    best = {}
+    for x in subs:
+        t = engine.LEGEND_TIERS.get(x)
+        if t and (t[0] not in best or t[1] > engine.LEGEND_TIERS[best[t[0]]][1]):
+            best[t[0]] = x
+    return [x for x in subs if x not in engine.LEGEND_TIERS or best.get(engine.LEGEND_TIERS[x][0]) == x]
+
+
 _SUB_PRIORITY = {
     "全キャラ解放&エラーキャラ削除": 0,
     "全キャラ最高形態": 1,
@@ -1932,7 +1946,7 @@ def run():
         safe = False
         data = {"transfer": transfer, "confirm": confirm, "dry": dry}
     items = [x for x in data.get("items", []) if x in ITEMS]
-    subs = [x for x in data.get("subs", []) if x in SUBS]
+    subs = _one_legend_tier([x for x in data.get("subs", []) if x in SUBS])
     others = [x for x in data.get("others", []) if x in OTHERS]
     if not clone and not integrity_only and data.get("restart_pack"):
         rp = restart_pack()
@@ -2053,6 +2067,18 @@ def run():
     coupon = unicodedata.normalize("NFKC", str(data.get("coupon", ""))).strip().upper().replace(" ", "")[:20]
     base_amount = amount
     if coupon:
+        # 同じ人が支払う前に注文を作り直したとき：前の（未払いの）注文が押さえているクーポンを、新しい注文へ移す
+        me0 = _owner()
+        with _orders_lock:
+            stale = [k for k, o in _orders.items() if o["owner"] == me0 and o["state"] == "unpaid"
+                     and o.get("coupon") == coupon and not o.get("coupon_used")]
+            for k in stale:
+                _orders[k].update(state="dead", coupon=None, diag="superseded: クーポンを新しい注文へ移しました")
+        for k in stale:
+            try:
+                paypay_gateway.coupon_release(coupon, k)
+            except Exception:  # noqa: BLE001
+                _log_orders.exception("coupon release failed")
         if base_amount < COUPON_MIN:
             return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
         ok, why = paypay_gateway.coupon_check(coupon)
@@ -2068,6 +2094,7 @@ def run():
                        if o["owner"] == me and o["state"] == "paid" and o.get("retry") and o["amount"] >= amount), None)
         if credit:
             o = _orders[credit]
+            breakdown = [b for b in breakdown if not str(b.get("label", "")).startswith("クーポン")]   # 支払い済みを充てるので、クーポンは使わない
             o.update(job=job, arguments=arguments, transfer_key=transfer_key, breakdown=breakdown, skipped=skipped, summary=summary)
             paid_amount = o["amount"]
         else:
@@ -3533,7 +3560,20 @@ function overInputs(){ return $$('input.q').filter(isOver); }
 function qtyMap(){
   const m={}; $$('input.q').forEach(e=>{ if(e.value!=='') m[e.dataset.item]=e.value; }); return m;
 }
+/* 旧レジェンド・真レジェンドの段階は、それぞれ1つだけ（上の段階が下を含む） */
+const LEG=/^(旧|真)レジェンド (?:冠([1-4])|イディ|ノーヴァ)/;
+const legLv=k=>k[2]?+k[2]:5;
+document.addEventListener('change',e=>{
+  const t=e.target; if(!(t&&t.name==='subs'&&t.checked)) return; const m=LEG.exec(t.value); if(!m) return;
+  document.querySelectorAll('input[name=subs]').forEach(x=>{ const k=LEG.exec(x.value); if(x!==t&&k&&k[1]===m[1]) x.checked=false; });
+},true);
+function normLegend(){
+  const best={};
+  document.querySelectorAll('input[name=subs]:checked').forEach(x=>{ const k=LEG.exec(x.value); if(k&&(!best[k[1]]||legLv(k)>best[k[1]])) best[k[1]]=legLv(k); });
+  document.querySelectorAll('input[name=subs]:checked').forEach(x=>{ const k=LEG.exec(x.value); if(k&&legLv(k)!==best[k[1]]) x.checked=false; });
+}
 function refresh(){
+  normLegend();
   let total=0;
   const pc=parseNums($('#chars').value), cn=pc.err?0:pc.nums.length; total+=cn;
   $('#cnt-chars').textContent=cn; $('#cnt-chars').classList.toggle('on',cn>0);

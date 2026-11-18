@@ -114,8 +114,14 @@ def last_reply_at(conv):
 
 
 def already(conv, h):
+    """このメッセージは処理済みか。
+    ・本番で返信したもの → 処理済み
+    ・下書きモードで下書きしただけ → 処理済みにしない（本番にしたら返信する）
+    ・当てはまるルールがなかった → ルールを変えるまでは処理済み（変えたら、もう一度見る）"""
+    changed = float(store.get("rules_changed") or 0)
     with store.db() as d:
-        return d.execute("SELECT 1 FROM replied WHERE conv=? AND msg_hash=?", (conv, h)).fetchone() is not None
+        return d.execute("SELECT 1 FROM replied WHERE conv=? AND msg_hash=? AND (dry=0 OR (rule_id IS NULL AND at>?))",
+                         (conv, h, changed)).fetchone() is not None
 
 
 def _handle(b, s, rs, key, got, dry, counts, who=None):
@@ -136,13 +142,15 @@ def _handle(b, s, rs, key, got, dry, counts, who=None):
     rule = logic.pick_rule(rs, message, first)
     if not rule:
         with store.db() as d:   # 当てはまるルールがない → 次からは見ない
-            d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,1)", (key, h, None, time.time()))
+            d.execute("INSERT INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,1) "
+                      "ON CONFLICT(conv, msg_hash) DO UPDATE SET rule_id=NULL, at=excluded.at, dry=1", (key, h, None, time.time()))
         return
     if who is None:
         who = b.dm_peer()
     b.dm_reply(rule["reply"], dry)
     with store.db() as d:
-        d.execute("INSERT OR IGNORE INTO replied(conv, msg_hash, rule_id, at, dry, who) VALUES(?,?,?,?,?,?)",
+        d.execute("INSERT INTO replied(conv, msg_hash, rule_id, at, dry, who) VALUES(?,?,?,?,?,?) "
+                  "ON CONFLICT(conv, msg_hash) DO UPDATE SET rule_id=excluded.rule_id, at=excluded.at, dry=excluded.dry, who=excluded.who",
                   (key, h, rule["id"], time.time(), 1 if dry else 0, who or None))
     counts["replied"] += 1
     store.log("info", "dm", f"{who + ' に' if who else ''}ルール「{rule['name']}」で{'返信を下書きしました（送っていません）' if dry else '返信しました'}")
@@ -288,6 +296,11 @@ def main():
     signal.signal(signal.SIGTERM, _sig)
     signal.signal(signal.SIGINT, _sig)
     store.log("info", "start", "常駐プロセスを起動しました")
+    with store.db() as d:   # 投稿の途中で止まったもの：二重投稿を避けるため、自動ではやり直さない
+        n = d.execute("UPDATE posts SET state='failed', error='投稿の途中で止まりました。X で投稿されたか確認してから「もう一度予約」してください' "
+                      "WHERE state='posting'").rowcount
+    if n:
+        store.log("warn", "post", f"投稿の途中で止まっていた予約が {n}件 ありました（予約の一覧を確認してください）")
     xlogin.serve()   # 管理サイトから入力してログインするための窓口（127.0.0.1 のみ）
     screen = LoginScreen()
     next_dm = 0
