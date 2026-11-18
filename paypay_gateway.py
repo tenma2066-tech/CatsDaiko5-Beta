@@ -600,6 +600,77 @@ def history_list(limit: int = 200, user_id: str = ""):
         return [dict(r) for r in db.execute(sql, args).fetchall()]
 
 
+# ---------------------------------------------------------------- クーポン（200円以上で10%引き・1回きり）
+_COUPON_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # 見間違えやすい 0/O/1/I を除く
+
+
+def _coupon_table(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS coupons (code TEXT PRIMARY KEY, created REAL, expires REAL, state TEXT,
+                  issued_order TEXT, used_order TEXT, updated REAL)""")
+
+
+def coupon_issue(order_id: str, days: int = 30) -> str:
+    import secrets as _s
+    now = time.time()
+    with _ledger() as db:
+        _coupon_table(db)
+        row = db.execute("SELECT code FROM coupons WHERE issued_order=?", (order_id,)).fetchone()
+        if row:
+            return row["code"]
+        for _ in range(10):
+            code = "NK-" + "".join(_s.choice(_COUPON_CHARS) for _ in range(4)) + "-" + "".join(_s.choice(_COUPON_CHARS) for _ in range(4))
+            try:
+                db.execute("INSERT INTO coupons VALUES(?,?,?,?,?,?,?)", (code, now, now + days * 86400, "active", order_id, None, now))
+                return code
+            except sqlite3.IntegrityError:
+                continue
+    raise PayPayError("coupon_issue", "クーポンを発行できませんでした。")
+
+
+def coupon_check(code: str):
+    """(使えるか, 理由)。使えるのは有効期限内で、未使用かつ、ほかの注文で使用中でないもの。"""
+    with _ledger() as db:
+        _coupon_table(db)
+        row = db.execute("SELECT * FROM coupons WHERE code=?", (code,)).fetchone()
+    if not row:
+        return False, "クーポンコードが見つかりません。入力を確認してください。"
+    if row["state"] == "used":
+        return False, "このクーポンはすでに使われています。"
+    if row["state"] == "reserved":
+        return False, "このクーポンは、ほかのご注文で使用中です。"
+    if time.time() > float(row["expires"]):
+        return False, "このクーポンは有効期限が切れています。"
+    return True, ""
+
+
+def coupon_reserve(code: str, order_id: str) -> bool:
+    with _ledger() as db:
+        _coupon_table(db)
+        cur = db.execute("UPDATE coupons SET state='reserved', used_order=?, updated=? WHERE code=? AND state='active' AND expires>?",
+                         (order_id, time.time(), code, time.time()))
+        return cur.rowcount == 1
+
+
+def coupon_release(code: str, order_id: str) -> None:
+    with _ledger() as db:
+        _coupon_table(db)
+        db.execute("UPDATE coupons SET state='active', used_order=NULL, updated=? WHERE code=? AND state='reserved' AND used_order=?",
+                   (time.time(), code, order_id))
+
+
+def coupon_consume(code: str, order_id: str) -> None:
+    with _ledger() as db:
+        _coupon_table(db)
+        db.execute("UPDATE coupons SET state='used', used_order=COALESCE(used_order, ?), updated=? WHERE code=? AND state IN ('reserved','active')",
+                   (order_id, time.time(), code))
+
+
+def coupon_list(limit: int = 100):
+    with _ledger() as db:
+        _coupon_table(db)
+        return [dict(r) for r in db.execute("SELECT * FROM coupons ORDER BY created DESC LIMIT ?", (int(limit),)).fetchall()]
+
+
 async def refresh_session():
     """管理画面の「PayPayの接続を更新」: 保存済みの電話番号・パスワードでログインし直す（期限内でも）。
     SMS認証を求められたら otp_required（その後は管理画面のSMS認証欄で続きを入力できる）。"""

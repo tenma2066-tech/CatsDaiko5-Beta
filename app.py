@@ -52,9 +52,16 @@ def _read_admin_password() -> str:
 ADMIN_PASSWORD = _read_admin_password()
 PAYMENTS_ENABLED = os.environ.get("PAYMENTS_ENABLED", "1") != "0"  # 0 = 決済なし（動作確認用）
 # 料金（円）
-PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25}
+PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25, "playtime10": 10, "restart": 50}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
-                "clone": "アカウント複製", "other": "それ以外のメニュー（1件）"}
+                "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
+                "restart": "初期垢作成（リスタートパック・基本料金）"}
+PT_KEY = "プレイ時間+分"          # qty に入れる「プレイ時間を増やす（分）」の特別なキー
+PT_MIN_MINUTES = 60
+PT_MAX_MINUTES = 2147483647 // (30 * 60)   # セーブの上限（1/30秒単位の int）を超えない
+RESTART_KEY = "初期垢作成（リスタートパック）"   # others に入れる特別な項目
+COUPON_MIN = 200                  # 200円以上の購入で発行・利用
+COUPON_DAYS = 30
 _PRICES_FILE = os.path.join(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay"), "prices.json")
 
 
@@ -74,6 +81,9 @@ def _load_prices() -> None:
 def _save_prices(new: dict) -> None:
     clean = {}
     for k in PRICES:
+        if k not in new:  # 古い画面から送られた等で欄が無い → 現在の値のまま
+            clean[k] = PRICES[k]
+            continue
         raw = str(new.get(k, "")).strip()
         if not (raw.isascii() and raw.isdigit()):
             raise ValueError(f"「{PRICE_LABELS[k]}」は半角の数字で入力してください。")
@@ -781,11 +791,33 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
             job["warn"].append(message)
             _log(job, "注意: " + message)
 
+    qty = dict(qty or {})
+    pt_add = int(qty.pop(PT_KEY, 0) or 0)
+    restart = RESTART_KEY in others
+    others = [x for x in others if x != RESTART_KEY]
+    if restart:                                      # 初期垢作成：リスタートパックと同じ中身を入れる（ほかの指定はこのあと上書き）
+        rp = restart_pack()
+        try:
+            if rp["items"]:
+                warn_failures(engine.apply_item_amounts(save, list(rp["items"]), quantity_map=rp["items"]))
+            if rp["cats"]:
+                engine.unlock_cats_by_ids(save, [n - DB_OFFSET for n in rp["cats"]])
+            _log(job, "初期垢作成：リスタートパックの内容を入れました。")
+        except Exception:  # noqa: BLE001
+            job["warn"].append("リスタートパックの内容の一部を入れられなかった可能性があります。")
     warn_failures(engine.apply_item_amounts(save, items))
     if qty:                                          # 数量指定（同じ項目は数量指定を優先）
         warn_failures(engine.apply_item_amounts(save, list(qty), quantity_map=qty))
     subs_sorted = sorted(subs, key=lambda x: _SUB_PRIORITY.get(x, 99))
     warn_failures(engine.apply_subs_and_others(save, subs_sorted, others))
+    if pt_add:                                       # プレイ時間を増やす（セーブは1/30秒単位。上限で止める）
+        try:
+            op = save.officer_pass
+            before = int(op.play_time or 0)
+            op.play_time = min(2147483647, before + pt_add * 60 * 30)
+            _log(job, f"プレイ時間を {pt_add // 60}時間{pt_add % 60}分 増やしました。")
+        except Exception:  # noqa: BLE001
+            warn_failures(["プレイ時間を増やす"])
 
     if cat_nums:                                     # 番号指定のキャラ解放・個別強化
         try:
@@ -1154,13 +1186,68 @@ def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, ca
     if clone:
         return PRICES["clone"], [("アカウント複製", 1, PRICES["clone"])]
     crash = [x for x in others if x in CRASH_ITEMS]
+    restart = RESTART_KEY in others
+    pt_min = int(qty.get(PT_KEY, 0) or 0)
+    plain_qty = {k for k in qty if k != PT_KEY}
+    plain_others = [x for x in others if x not in CRASH_ITEMS and x != RESTART_KEY]
     # 種類ごとの数量指定（「マタタビ#3」など）は、元の項目1件としてまとめて数える
-    other_n = len(set(items) | {str(k).split("#")[0] for k in qty}) + len(subs) + len([x for x in others if x not in CRASH_ITEMS])
-    rows = [("キャラ指定（レベル・形態・本能など1項目ずつ）", chara_units(cat_nums, cat_settings), PRICES["chara"]),
+    other_n = len(set(items) | {str(k).split("#")[0] for k in plain_qty}) + len(subs) + len(plain_others)
+    rows = [("初期垢作成（リスタートパック）", 1 if restart else 0, PRICES["restart"]),
+            ("キャラ指定（レベル・形態・本能など1項目ずつ）", chara_units(cat_nums, cat_settings), PRICES["chara"]),
             ("クラッシュ解除", len(crash), PRICES["crash"]),
+            ("プレイ時間（10分ごと）", pt_min // 10, PRICES["playtime10"]),
             ("その他の項目", other_n, PRICES["other"])]
     rows = [r for r in rows if r[1]]
     return sum(n * p for _, n, p in rows), rows
+
+
+_RESTART_FILE = os.path.join(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay"), "restart_pack.json")
+
+
+def restart_pack() -> dict:
+    """初期垢作成で入れる中身（管理画面で設定）。未設定なら enabled=False で選べない。"""
+    try:
+        with open(_RESTART_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        items = {str(k): int(v) for k, v in (d.get("items") or {}).items()}
+        cats = [int(x) for x in (d.get("cats") or [])]
+        return {"enabled": bool(d.get("enabled")) and bool(items or cats), "items": items, "cats": cats, "note": str(d.get("note", ""))[:300]}
+    except (OSError, ValueError, TypeError):
+        return {"enabled": False, "items": {}, "cats": [], "note": ""}
+
+
+def _parse_restart_form(text: str, cats_text: str, enabled: bool, note: str) -> dict:
+    items = {}
+    for n, line in enumerate((text or "").splitlines(), 1):
+        line = unicodedata.normalize("NFKC", line).strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise ValueError(f"{n}行目：「項目名=数量」の形で書いてください。")
+        name, _, val = line.partition("=")
+        name, val = name.strip(), val.strip().replace(",", "")
+        if name not in ITEMS and engine.split_type_key(name) is None:
+            raise ValueError(f"{n}行目：「{name}」は数量指定できる項目にありません。")
+        if not (val.isascii() and val.isdigit()):
+            raise ValueError(f"{n}行目：数量は半角の数字で書いてください。")
+        lim = engine.QUANTITY_ITEM_LIMITS.get(name.split("#")[0], 999)
+        if int(val) > lim:
+            raise ValueError(f"{n}行目：「{name}」の上限は {lim:,} です。")
+        items[name] = int(val)
+    cats, err = parse_cat_numbers(cats_text or "")
+    if err:
+        raise ValueError("キャラ番号：" + err)
+    if enabled and not (items or cats):
+        raise ValueError("有効にするには、アイテムかキャラを1つ以上入れてください。")
+    return {"enabled": enabled, "items": items, "cats": cats, "note": (note or "").strip()[:300]}
+
+
+def _save_restart(d: dict) -> None:
+    os.makedirs(os.path.dirname(_RESTART_FILE) or ".", exist_ok=True)
+    tmp = _RESTART_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, _RESTART_FILE)
 
 
 _MAINT_FILE = os.path.join(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay"), "maintenance.json")
@@ -1250,7 +1337,7 @@ def admin():
     return _admin_page(msg)
 
 
-ADMIN_TAB = {"pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
+ADMIN_TAB = {"restart_save": "settings", "pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
              "maint_save": "settings", "price_save": "settings", "order_recheck": "orders", "order_start": "orders",
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
@@ -1373,6 +1460,13 @@ def _admin_post(token):
                 key = "開始" if r == "started" else ("支払い済み（開始待ち）" if r == "paid" else ("まだ保留" if r.startswith("wait") else ("要確認" if r.startswith("stop") else "対象外")))
                 results[key] = results.get(key, 0) + 1
             msg = ("保留・要確認の注文 {} 件をPayPayに確認しました：".format(len(targets[:20])) + "、".join(f"{k} {v}件" for k, v in results.items())) if targets else "再確認が必要な注文（保留・要確認で送金リンクのあるもの）はありません。"
+        elif action == "restart_save":
+            try:
+                _save_restart(_parse_restart_form(request.form.get("items", ""), request.form.get("cats", ""),
+                                                  request.form.get("enabled") == "1", request.form.get("note", "")))
+                msg = "初期垢作成（リスタートパック）の中身を保存しました。" + ("利用者の画面で選べるようになりました。" if request.form.get("enabled") == "1" else "（いまは選べない状態です）")
+            except (ValueError, OSError) as exc:
+                msg = str(exc) or "保存できませんでした。"
         elif action == "price_save":
             try:
                 _save_prices(request.form)
@@ -1442,7 +1536,22 @@ def _admin_page(msg):
                 "today": sales(day0), "week": sales(now - 7 * 86400), "uptime": int(now - _started_at), "version": APP_VERSION,
                 "attention": [o for o in orders if o["state"] in ("dead", "paid", "hold")],
                 "counts": counts, "open_orders": len(orders)}
-    return render_template_string(ADMIN_HTML, maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
+    coupons = []
+    if unlocked:
+        try:
+            for c in paypay_gateway.coupon_list(100):
+                c["when"] = time.strftime("%m/%d %H:%M", time.localtime(c["created"]))
+                c["until"] = time.strftime("%m/%d", time.localtime(c["expires"]))
+                c["state_ja"] = {"active": "未使用", "reserved": "使用中（支払い待ち）", "used": "使用済み"}.get(c["state"], c["state"])
+                if c["state"] == "active" and time.time() > c["expires"]:
+                    c["state_ja"] = "期限切れ"
+                coupons.append(c)
+        except Exception:
+            _log_orders.exception("coupon list failed")
+    rp = restart_pack()
+    rp_text = "\n".join(f"{k}={v}" for k, v in rp["items"].items())
+    return render_template_string(ADMIN_HTML, coupons=coupons, rp=rp, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
+                                  maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED)
 
@@ -1456,8 +1565,22 @@ ORDER_KEEP = {"hold": 7 * 86400, "paid": 7 * 86400, "paying": 7 * 86400, "starti
 _log_orders = logging.getLogger("orders")
 
 
+def _order_id_of(order: dict) -> str:
+    with _orders_lock:
+        return next((k for k, v in _orders.items() if v is order), "")
+
+
 def _gc_orders() -> None:
     now = time.time()
+    with _orders_lock:
+        expiring = [(k, v.get("coupon")) for k, v in _orders.items()
+                    if v.get("coupon") and not v.get("coupon_used") and v["state"] == "unpaid"
+                    and now - v["created"] > (7 * 86400 if v.get("link_code") else ORDER_KEEP.get(v["state"], ORDER_TTL))]
+    for k, c in expiring:   # 支払われずに期限切れになった注文のクーポンは、使えるように戻す
+        try:
+            paypay_gateway.coupon_release(c, k)
+        except Exception:
+            pass
     with _orders_lock:
         # 保留・支払い済み・要確認は7日、送金リンクを受け付けたことのある注文は（支払い待ちでも）7日残す
         for k in [k for k, v in _orders.items()
@@ -1513,6 +1636,7 @@ def _reconcile_orders() -> None:
     - 失敗・取り消し・中断（サーバー再起動など）→ 支払い済みに戻す（払い直しなしで再実行できる）
     - コード発行中に結果不明 → done 扱い（自動では再実行させない。管理画面で対応）"""
     changed = False
+    issue_for = []
     with _jobs_lock:
         jobs = {k: (v.get("status"), v.get("error"), bool(v.get("outcome_unknown")), v.get("result") is not None) for k, v in _jobs.items()}
         results = {k: (v.get("result"), bool(v.get("clone")), bool(v.get("dry"))) for k, v in _jobs.items() if v.get("result") is not None}
@@ -1526,6 +1650,8 @@ def _reconcile_orders() -> None:
                 continue
             if info and info[0] == "done":
                 o.update(state="done", arguments=None, transfer_key=None, diag=f"done {stamp}")
+                if not o.get("admin_free") and int(o.get("amount") or 0) >= COUPON_MIN and not o.get("coupon_issued"):
+                    issue_for.append(o)
                 if o.get("job_id") in results:  # 発行されたコードを注文に残す（暗号化して保存。あとから開いても見られる）
                     o["result"], o["clone"], o["dry"] = results[o["job_id"]]
             elif info and (info[2] or info[3]):
@@ -1536,6 +1662,11 @@ def _reconcile_orders() -> None:
                 reason = str(info[1])[:80] if info else "中断（サーバー再起動など）"
                 o.update(state="paid", retry=True, job_id=None, diag=f"失敗→再実行可: {reason} {stamp}")
             changed = True
+    for o in issue_for:   # 200円以上の購入にはクーポンを1枚発行（次回200円以上で10%引き・1回きり）
+        try:
+            o["coupon_issued"] = paypay_gateway.coupon_issue(_order_id_of(o), COUPON_DAYS)
+        except Exception:
+            _log_orders.exception("coupon issue failed")
     if changed:
         _persist_orders()
 
@@ -1612,7 +1743,7 @@ def index():
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
-        MAIN_HTML, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
+        MAIN_HTML, is_admin=bool(session.get("admin")) and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
@@ -1725,7 +1856,8 @@ def api_cats_refresh():
 @app.post("/run")
 def run():
     _gc_jobs()
-    if _maint()["on"] and PAYMENTS_ENABLED:
+    admin_free = bool(session.get("admin")) and PAYMENTS_ENABLED   # 管理者でログイン中のブラウザは全メニュー無料
+    if _maint()["on"] and PAYMENTS_ENABLED and not admin_free:
         return _maintenance_response()
     data = request.get_json(silent=True) or {}
     transfer = str(data.get("transfer", "")).strip()
@@ -1750,6 +1882,13 @@ def run():
     items = [x for x in data.get("items", []) if x in ITEMS]
     subs = [x for x in data.get("subs", []) if x in SUBS]
     others = [x for x in data.get("others", []) if x in OTHERS]
+    if not clone and not integrity_only and data.get("restart_pack"):
+        rp = restart_pack()
+        if not rp["enabled"]:
+            return jsonify(error="初期垢作成は準備中です。"), 400
+        if transfer or confirm:
+            return jsonify(error="初期垢作成は新しいアカウントを作るメニューです。引継ぎコードと暗証番号は空欄にしてください。"), 400
+        others.append(RESTART_KEY)
     cat_nums, cat_err = parse_cat_numbers(str(data.get("chars", "")))
     if cat_err:
         return jsonify(error="キャラ管理：" + cat_err), 400
@@ -1801,6 +1940,21 @@ def run():
             if n > lim:
                 return jsonify(error=f"「{engine.type_label(k)}」の上限は {lim:,} です。"), 400
             qty[k] = n
+    raw_pt = data.get("playtime_add_min")
+    if not clone and not integrity_only and raw_pt not in (None, "", 0, "0"):
+        sv = str(raw_pt).strip()
+        if not (sv.isascii() and sv.isdigit()):
+            return jsonify(error="プレイ時間は半角の数字（分）で指定してください。"), 400
+        pt = int(sv)
+        if pt < PT_MIN_MINUTES:
+            return jsonify(error="プレイ時間は1時間以上で指定してください。"), 400
+        if pt % 10:
+            return jsonify(error="プレイ時間は10分単位で指定してください。"), 400
+        if pt > PT_MAX_MINUTES:
+            return jsonify(error="プレイ時間が長すぎます。"), 400
+        if "プレイ時間カンスト" in others:
+            return jsonify(error="「プレイ時間カンスト」と「プレイ時間を増やす」は同時に選べません。"), 400
+        qty[PT_KEY] = pt
     skipped: list[str] = []
     if safe:  # 安全モード：高リスク項目を外す
         skipped = [x for x in HIGH_RISK_ITEMS if x in items or x in qty]
@@ -1827,10 +1981,33 @@ def run():
         if _draining():
             return _updating_response()
         return _start_job(job, arguments, transfer_key)
+    if admin_free:
+        if _draining():
+            return _updating_response()
+        oid = secrets.token_urlsafe(16)
+        me = _owner()
+        free = {"owner": me, "uid": _uid(me), "state": "paid", "amount": 0, "created": time.time(), "admin_free": True,
+                "job": job, "arguments": arguments, "transfer_key": transfer_key, "breakdown": [], "skipped": skipped,
+                "summary": "【管理者・無料】" + _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))}
+        with _orders_lock:
+            _orders[oid] = free
+        resp = _start_paid_order(free)
+        _persist_orders()
+        return resp
     _gc_orders()
     _reconcile_orders()
     amount, rows = compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings)
     breakdown = [{"label": l, "count": n, "unit": p} for l, n, p in rows]
+    coupon = unicodedata.normalize("NFKC", str(data.get("coupon", ""))).strip().upper().replace(" ", "")[:20]
+    base_amount = amount
+    if coupon:
+        if base_amount < COUPON_MIN:
+            return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
+        ok, why = paypay_gateway.coupon_check(coupon)
+        if not ok:
+            return jsonify(error=why, code="coupon_invalid"), 400
+        amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
+        breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount})
     summary = _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))
     me = _owner()
     with _orders_lock:
@@ -1845,7 +2022,13 @@ def run():
             order_id = secrets.token_urlsafe(16)
             _orders[order_id] = {"owner": me, "uid": _uid(me), "state": "unpaid", "amount": amount, "created": time.time(),
                                  "job": job, "arguments": arguments, "transfer_key": transfer_key,
-                                 "breakdown": breakdown, "skipped": skipped, "summary": summary}
+                                 "breakdown": breakdown, "skipped": skipped, "summary": summary,
+                                 "coupon": coupon or None, "base_amount": base_amount}
+    if coupon and not credit:
+        if not paypay_gateway.coupon_reserve(coupon, order_id):   # 同時に2つの注文で使われないよう押さえる
+            with _orders_lock:
+                _orders.pop(order_id, None)
+            return jsonify(error="このクーポンはすでに使われたか、ほかの注文で使用中です。", code="coupon_invalid"), 400
     _persist_orders()
     if credit:
         return jsonify(order=credit, amount=paid_amount, skipped=skipped, breakdown=breakdown, state="paid", prepaid=True)
@@ -1895,6 +2078,7 @@ VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号�
 def _public_order(order_id: str, o: dict) -> dict:
     return {"order": order_id, "amount": o["amount"], "state": o["state"], "created": int(o["created"]), "retry": bool(o.get("retry")),
             "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
+            "coupon_issued": o.get("coupon_issued"),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
 
 
@@ -2098,6 +2282,13 @@ def _start_paid_order(order: dict):
         if order["state"] != "paid" or order.get("arguments") is None:
             return jsonify(error="この注文は実行を開始できる状態ではありません。画面を開き直してください。", code="started"), 409
         order["state"] = "starting"
+        coupon_to_use = order.get("coupon") if not order.get("coupon_used") else None
+    if coupon_to_use:   # 入金が確認できた（支払い済み）ので、クーポンを使用済みにする
+        try:
+            paypay_gateway.coupon_consume(coupon_to_use, _order_id_of(order))
+            order["coupon_used"] = True
+        except Exception:
+            _log_orders.exception("coupon consume failed")
     try:
         resp = _start_job(order["job"], order["arguments"], order["transfer_key"])
     except Exception:
@@ -2342,6 +2533,17 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <label for="pr-{{ k }}">{{ label }}（円）</label><input id="pr-{{ k }}" name="{{ k }}" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ prices[k] }}" required maxlength="6">
 {% endfor %}
 <button class="btn pri full" onclick="return confirm('料金を変更します。これからの新しい注文から反映されます。よろしいですか？')">料金を保存</button></form></div>
+<div class="card"><h2>初期垢作成（リスタートパック）</h2>
+<p class="sub">新しいアカウントに入れる中身です。1行に「項目名=数量」（例：<code>猫缶=1500</code>、<code>レアチケ=10</code>、種類ごとは <code>マタタビ#1=5</code>）。キャラは番号で（例：<code>1-9, 25</code>）。料金は「設定」の料金欄の「初期垢作成」で変えられます。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="restart_save">
+<div class="sw"><label><input type="radio" name="enabled" value="1" {{ "checked" if rp.enabled }}>選べるようにする</label><label><input type="radio" name="enabled" value="0" {{ "checked" if not rp.enabled }}>準備中</label></div>
+<label for="rpi">アイテム（1行に1つ）</label><textarea id="rpi" name="items" rows="6">{{ rp_text }}</textarea>
+<label for="rpc">キャラ番号（任意）</label><input id="rpc" name="cats" value="{{ rp_cats }}" placeholder="例：1-9, 25">
+<label for="rpn">利用者に見せる説明（任意）</label><input id="rpn" name="note" value="{{ rp.note }}" maxlength="300" placeholder="例：公式リスタートパックと同じ内容">
+<button class="btn pri full">保存</button></form></div>
+<div class="card"><h2>クーポン</h2><p class="sub">支払額200円以上の注文の完了時に自動で発行（次回200円以上で10%引き・1回きり・30日）。新しい順に最大100件。</p>
+{% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code><span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div></div>
+{% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div>
 <div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button class="btn full">管理者モードを終了</button></form></div>
 </section>
 
@@ -2665,6 +2867,15 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .modecard:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
 .modecard:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
 .specialsw input{display:none}
+.ptbox{margin:12px 0;padding:12px;border:2px solid var(--line);border-radius:14px;background:var(--soft)}
+.ptbox>b{display:block;font-size:15px}.ptbox small{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+.ptrow{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.ptrow input{width:110px;font:inherit;font-size:16px;padding:9px 10px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.ptrow select{font:inherit;font-size:16px;padding:9px 8px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.soon{margin-left:6px;padding:0 8px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;color:var(--muted)}
+#restartWrap:has(input:disabled){opacity:.6}
+.couponbox{margin:12px 0;padding:12px;border:2px dashed var(--line);border-radius:14px;background:var(--soft)}
+.couponbox strong{font-size:20px;letter-spacing:.06em}
 details.more{margin-top:12px}
 details.more > summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:1px}
 details.more > summary::-webkit-details-marker{display:none}
@@ -2751,6 +2962,9 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <label class="field"><span>暗証番号</span>
         <input type="text" id="confirm" placeholder="例：1234" autocomplete="off" inputmode="numeric"></label>
       <div class="mode" id="mode"></div>
+      {% if payments %}<label class="sw" id="restartWrap" style="margin-top:12px"><input type="checkbox" id="restart" {{ "" if restart.enabled else "disabled" }}>
+        <span><b>初期垢作成（リスタートパック）　{{ prices.restart }}円〜{% if not restart.enabled %}<em class="soon">準備中</em>{% endif %}</b>
+        <small>新しいアカウントを作り、公式のリスタートパックと同じ内容を入れた状態で始めます。引継ぎコード・暗証番号は空欄のまま使います。ほかのメニューも一緒に選べます（その分の料金が足されます）。{% if restart.note %}<br>{{ restart.note }}{% endif %}</small></span></label>{% endif %}
       <div class="err" id="inputErr" role="alert"></div>
     </div>
     <div class="panel">
@@ -2775,6 +2989,12 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <div class="panel">
       <h2>{{ title }}</h2>
       <p class="sub">{{ desc }}</p>
+      {% if key == 'others' and payments %}
+      <div class="ptbox"><b>プレイ時間を増やす</b><small>いまのプレイ時間に<b>足します</b>。{{ pt_min // 60 }}時間以上・10分単位で指定できます（10分ごとに {{ prices.playtime10 }}円）。空欄なら変更しません。</small>
+        <div class="ptrow"><input id="ptH" type="text" inputmode="numeric" maxlength="6" placeholder="0" aria-label="時間"><span>時間</span>
+          <select id="ptM" aria-label="分">{% for m in range(0, 60, 10) %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select><span>分</span></div>
+        <div class="err" id="ptErr" role="alert"></div></div>
+      {% endif %}
       {% if key == 'qty' %}
       <div class="tools">
         <button type="button" class="btn" id="qfill">すべて最大値</button>
@@ -2863,6 +3083,9 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <h2>ご注文内容</h2>
       <p class="sub">内容と金額を確認して、下の「お支払いへ進む」を押してください。</p>
       <div id="cart"></div>
+      {% if payments and not is_admin %}<label class="field"><span>クーポンコード（お持ちの方）</span>
+        <input type="text" id="coupon" style="text-transform:uppercase" placeholder="例：NK-ABCD-EFGH" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="20"></label>
+      <p class="sub" style="margin-top:4px">{{ coupon_min }}円以上のご注文で10%引き（1円未満切り捨て）。1つのコードは1回だけ使えます。</p>{% endif %}
       <div class="err" id="orderErr" role="alert"></div>
     </div>
     <div class="panel">
@@ -3037,6 +3260,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <h2 id="doneTitle">完了しました</h2>
     <p class="sub">下の<b>引継ぎコード</b>と<b>暗証番号</b>を、必ず今すぐ控えてください（スクリーンショットでもOK）。この表示は30分で消えます。</p>
     <div id="doneCodes"></div>
+    <div id="doneCoupon" class="couponbox" hidden></div>
     <h3>ゲームでの引き継ぎ手順</h3>
     <ol class="howto">
       <li>にゃんこ大戦争を開きます。いま遊んでいるデータがある端末では、先にそのデータが不要か確認してください（引き継ぐと<b>上書き</b>されます）。</li>
@@ -3065,6 +3289,15 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAINT={{ maint|tojson }};
 const TOTALS={{ totals|tojson }};
 const PRICES={{ prices|tojson }}, CRASH={{ crash_items|tojson }}, PAYMENTS={{ payments|tojson }};
+const IS_ADMIN={{ is_admin|tojson }}, PT_MIN={{ pt_min|tojson }}, COUPON_MIN={{ coupon_min|tojson }};
+function ptMin(){ const h=$('#ptH'), m=$('#ptM'); if(!h) return {min:0,err:''};
+  const hv=String(h.value).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).trim();
+  if(hv&&!/^\d+$/.test(hv)) return {min:0,err:'時間は半角の数字で入力してください。'};
+  const min=(hv?parseInt(hv,10):0)*60+parseInt(m.value||'0',10);
+  if(min>0&&min<PT_MIN) return {min:min,err:'プレイ時間は'+(PT_MIN/60)+'時間以上で指定してください。'};
+  return {min:min,err:''}; }
+function restartOn(){ const r=$('#restart'); return !!(r&&r.checked&&!r.disabled); }
+function couponCode(){ const c=$('#coupon'); return c?c.value.normalize('NFKC').toUpperCase().replace(/\s/g,''):''; }
 const HIGH={{ high|tojson }};
 const ERRNUMS={{ error_nums|tojson }};
 const GROUPS=['items','subs','others'];
@@ -3222,9 +3455,11 @@ function refresh(){
     $('#sel-'+g).textContent=n+' / '+TOTALS[g];
     $('#n-'+g).textContent=n+' / '+TOTALS[g];
   });
+  const ptv=ptMin(); if(ptv.min>0) total+=1; if(restartOn()) total+=1;
+  if($('#ptErr')) $('#ptErr').textContent=ptv.err;
   const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
   let m, bm;
-  if(!t&&!c){m='<b>初期アカウント</b>から新しく作ります。'; bm='初期アカウントから作成';}
+  if(!t&&!c){m=restartOn()?'<b>初期垢作成</b>：新しいアカウントにリスタートパックの内容を入れて作ります。':'<b>初期アカウント</b>から新しく作ります。'; bm=restartOn()?'初期垢作成（リスタートパック）':'初期アカウントから作成';}
   else if(t&&c){m=$('#integrity').checked?'<b>引継ぎコード</b>のセーブを検査・修復します（バン保証）。':$('#clone').checked?'<b>引継ぎコード</b>のデータから、元・複製の2アカウントを別々に作成します。':'<b>引継ぎコード</b>のデータを取得して書き換えます。'; bm=$('#integrity').checked?'既存セーブの検査（バン保証）':'引継ぎコードから取得';}
   else{m='<b>片方だけ入力されています。</b>両方入力するか、両方空欄にしてください。'; bm='入力を確認してください';}
   $('#mode').innerHTML=m; $('#barmode').textContent=bm;
@@ -3380,7 +3615,7 @@ $('#cRetry').addEventListener('click',async()=>{
 });
 
 /* ---------- 実行前チェック・モード ---------- */
-function goLabel(){ if(PAYMENTS&&!jobRunning) return 'お支払いへ進む'; return $('#integrity').checked?($('#dry').checked?'バン保証（試運転）':'バン保証'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
+function goLabel(){ if(PAYMENTS&&IS_ADMIN&&!jobRunning) return '無料で実行（管理者）'; if(PAYMENTS&&!jobRunning) return 'お支払いへ進む'; return $('#integrity').checked?($('#dry').checked?'バン保証（試運転）':'バン保証'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
 function renderChecks(pc,qm,total){
   const L=[]; const add=(lv,t)=>L.push([lv,t]);
   if($('#clone').checked){
@@ -3427,6 +3662,10 @@ function renderChecks(pc,qm,total){
   }
   const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
   if(!t!==!c) add('bad','引継ぎコードと暗証番号が片方だけです。');
+  const ptc=ptMin();
+  if(ptc.err) add('bad',ptc.err);
+  if(ptc.min>0&&picked('others').includes('プレイ時間カンスト')) add('bad','「プレイ時間カンスト」と「プレイ時間を増やす」は同時に選べません。');
+  if(restartOn()&&(t||c)) add('bad','初期垢作成は新しいアカウントで行います。引継ぎコードと暗証番号を空欄にしてください。');
   if(total===0&&!pc.err) add('warn','まだ項目が選ばれていません。');
   if($('#dry').checked) add('ok','試運転：コードは発行せず、変更内容だけ確認します。');
   if(!L.some(x=>x[0]!=='ok')) add('ok','問題は見つかりませんでした。');
@@ -3442,8 +3681,9 @@ function estimate(pc,qm){
   const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])]).size+picked('subs').length+oth.length-crash;
   let units=0;
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
-  return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other;
+  return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other+(restartOn()?PRICES.restart:0)+Math.floor(ptMin().min/10)*PRICES.playtime10;
 }
+function payable(base){ if(IS_ADMIN) return 0; return (couponCode()&&base>=COUPON_MIN)?Math.floor(base*9/10):base; }
 function renderCart(pc,qm){
   const box=$('#cart'); if(!box) return; box.textContent='';
   const t=$('#transfer').value.trim();
@@ -3460,6 +3700,8 @@ function renderCart(pc,qm){
   if($('#integrity').checked){ total=PRICES.ban_guarantee; line('バン保証','セーブを検査し、既知の異常を修復します',yen(total,0,1),'input'); }
   else if($('#clone').checked){ total=PRICES.clone; line('アカウント複製','元と複製の2アカウントのコードを出します',yen(total,0,1),'input'); }
   else{
+    if(restartOn()){ total+=PRICES.restart; line('初期垢作成（リスタートパック）','新しいアカウントにリスタートパックの内容を入れます',yen(PRICES.restart,0,1),'input'); }
+    const ptc=ptMin(); if(ptc.min>0&&!ptc.err){ const u=Math.floor(ptc.min/10); total+=u*PRICES.playtime10; line('プレイ時間 +'+Math.floor(ptc.min/60)+'時間'+(ptc.min%60?(ptc.min%60)+'分':''),'いまのプレイ時間に足します（上限を超える分は上限まで）',yen(u*PRICES.playtime10,PRICES.playtime10,u),'others'); }
     if(!pc.err&&pc.nums.length){
       const cs=catSettingsPayload(); let units=0;
       pc.nums.forEach(n=>{ const c=cs[n]||{}; units+=Math.max(1,((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0)); });
@@ -3477,8 +3719,13 @@ function renderCart(pc,qm){
     if(total===0){ box.append(el('div','cempty','まだメニューが選ばれていません。「戻る」から選んでください。')); }
   }
   if(PAYMENTS){
-    const tot=el('div','ctotal'); const b=el('b'); b.append(total.toLocaleString('ja-JP')); b.append(el('small',null,'円'));
-    tot.append(el('span',null,'お支払い金額'),b); box.append(tot);
+    const cc=couponCode(), pay=payable(total);
+    if(!IS_ADMIN&&cc){
+      if(total>=COUPON_MIN) line('クーポン（10%引き）',cc+'（使えるかは次の画面へ進むときに確認します）',el('span',null,'-'+(total-pay).toLocaleString('ja-JP')+'円'),null);
+      else box.append(el('p','cnote warn','クーポンは '+COUPON_MIN+'円以上のご注文で使えます（いまは '+total.toLocaleString('ja-JP')+'円）。'));
+    }
+    const tot=el('div','ctotal'); const b=el('b'); b.append(pay.toLocaleString('ja-JP')); b.append(el('small',null,'円'));
+    tot.append(el('span',null,IS_ADMIN?'お支払い金額（管理者は無料）':'お支払い金額'),b); box.append(tot);
   }
   if($('#dry').checked) box.append(el('p','cnote warn','試運転がオンです：コードは発行されません（料金は同じです）。'));
   if($('#safe').checked){ const sk=[...new Set([...picked('items'),...Object.keys(qm)])].filter(x=>HIGH.includes(x)); if(sk.length) box.append(el('p','cnote warn','安全モードのため実行されません（料金に含まれません）：'+sk.join('・'))); }
@@ -3492,7 +3739,7 @@ function renderExtras(pc,qm,total,bm){
   renderResults();
   const what=$('#integrity').checked?'バン保証':$('#clone').checked?'アカウント複製':('選択 '+total+'件');
   const flags=($('#dry').checked?'・試運転':'')+($('#safe').checked&&!special()?'・安全モード':'');
-  if(PAYMENTS){ $('#total').textContent=estimate(pc,qm).toLocaleString('ja-JP')+'円'; $('#barmode').textContent=what+'・'+bm+flags; }
+  if(PAYMENTS){ $('#total').textContent=payable(estimate(pc,qm)).toLocaleString('ja-JP')+'円'; $('#barmode').textContent=what+'・'+bm+flags; }
   else{ $('#total').textContent=what; $('#barmode').textContent=bm+flags; }
   if(stepOf(curView)===4) updateBar();
   if(!jobRunning) $('#go').textContent=goLabel();
@@ -3500,6 +3747,7 @@ function renderExtras(pc,qm,total,bm){
 try{ if(localStorage.getItem('nyanko-safe2')==='1') $('#safe').checked=true; }catch(e){}
 $('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe2',$('#safe').checked?'1':'0')}catch(e){} refresh(); });
 $('#dry').addEventListener('change',refresh);
+['#ptH','#coupon'].forEach(q=>{ const e=$(q); if(e) e.addEventListener('input',refresh); });
 $('#clone').addEventListener('change',()=>{ if($('#clone').checked) $('#integrity').checked=false; refresh(); });
 $('#integrity').addEventListener('change',()=>{ if($('#integrity').checked) $('#clone').checked=false; refresh(); });
 
@@ -3676,7 +3924,7 @@ async function poll(){
     if(j.status!=='running'&&j.status!=='queued'){
       stopJob(); setTimeout(loadResume,1500);
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
-      if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); $('#transfer').value=''; $('#confirm').value=''; refresh(); }
+      if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); if(PAYMENTS) fetchCoupon(curJob); $('#transfer').value=''; $('#confirm').value=''; refresh(); }
       if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① アカウント」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'バン保証の検査が完了しました'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
@@ -3813,6 +4061,9 @@ async function start(){
     }
   } else {
   if(parseNums($('#chars').value).err){ show('chars'); toast('キャラ番号を確認してください'); return; }
+  const ptv=ptMin(); if(ptv.err){ show('others'); toast(ptv.err); return; }
+  if(ptv.min>0&&picked('others').includes('プレイ時間カンスト')){ show('others'); toast('「プレイ時間カンスト」と「プレイ時間を増やす」は同時に選べません'); return; }
+  if(restartOn()&&(t||c)){ show('input'); $('#inputErr').textContent='初期垢作成は新しいアカウントで行います。引継ぎコードと暗証番号を空欄にしてください。'; return; }
   if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('items'); return; }
   const bad=overInputs()[0];
   if(bad){ show('qty'); const d=bad.closest('details'); if(d) d.open=true; toast('「'+(bad.dataset.label||bad.dataset.item)+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
@@ -3847,7 +4098,8 @@ async function start(){
 }
 function runBody(t,c){
   return {safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c,
-          items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others')};
+          items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others'),
+          playtime_add_min:special()?0:ptMin().min, restart_pack:!special()&&restartOn(), coupon:IS_ADMIN?'':couponCode()};
 }
 $('#go').addEventListener('click',start);
 
@@ -4012,10 +4264,26 @@ function openDone(j){
       row.append(d,b); box.append(row);
     });
   });
+  showCoupon(j.coupon);
   $('#doneTitle').textContent=j.clone?'複製が完了しました':'完了しました';
   $('#doneCloneNote').hidden=!j.clone;
   $('#doneAck').checked=false; $('#doneClose').disabled=true;
   $('#donePanel').hidden=false; document.body.style.overflow='hidden';
+}
+function showCoupon(code){
+  const b=$('#doneCoupon'); if(!b) return; if(!code){ b.hidden=true; return; }
+  b.textContent=''; b.append(el('b',null,'🎟 次回使える10%引きクーポン'));
+  const row=el('div','code'), d=el('div'); d.append(el('small',null,'クーポンコード'),el('strong',null,code));
+  const cb=el('button','btn','コピー'); cb.type='button'; cb.addEventListener('click',async()=>{ const ok=await copyText(code); toast(ok?'クーポンをコピーしました':'コピーできませんでした'); });
+  row.append(d,cb); b.append(row, el('small',null,'次回 '+COUPON_MIN+'円以上のご注文で10%引き（1回きり・発行から30日間）。注文の確認画面で入力してください。'));
+  b.hidden=false;
+}
+async function fetchCoupon(job){   /* 完了直後はクーポンの発行が少し遅れることがあるので、数回だけ確認する */
+  for(let i=0;i<4;i++){
+    await sleep(1500+i*1500);
+    try{ const m=await (await fetch('/api/orders/mine',{cache:'no-store'})).json();
+      const o=(m.orders||[]).find(x=>x.job===job&&x.coupon_issued); if(o){ if(!$('#donePanel').hidden) showCoupon(o.coupon_issued); return; } }catch(e){}
+  }
 }
 $('#doneAck').addEventListener('change',()=>{ $('#doneClose').disabled=!$('#doneAck').checked; });
 $('#doneClose').addEventListener('click',()=>{ $('#donePanel').hidden=true; document.body.style.overflow=''; show('status'); });
@@ -4058,7 +4326,7 @@ async function loadResume(quiet){
     if(saved&&!jobRunning&&$('#donePanel').hidden){
       try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat('r:'+saved.order).slice(-20))); }catch(e){}
       if(payOrder===saved.order) closePay();
-      show('status'); openDone({result:saved.result,clone:saved.clone}); keepResult('o:'+saved.order,{result:saved.result,clone:saved.clone});
+      show('status'); openDone({result:saved.result,clone:saved.clone,coupon:saved.coupon_issued}); keepResult('o:'+saved.order,{result:saved.result,clone:saved.clone});
     }
     const live=list.find(o=>o.job&&(o.state==='started'||o.state==='done')&&!seen.includes(o.job));
     if(live&&!jobRunning&&curJob!==live.job){
@@ -4073,11 +4341,12 @@ async function loadResume(quiet){
     const box=$('#resumeList'); box.textContent='';
     $('#resumePanel').hidden=!list.length;
     list.forEach(o=>{
+      if(o.coupon_issued&&o.state==='done') box.append(el('p','note','🎟 クーポン '+o.coupon_issued+'（次回'+COUPON_MIN+'円以上で10%引き・1回きり）'));
       const row=el('div','rrow'); const d=new Date(o.created*1000);
       row.append(el('span',null,(d.getMonth()+1)+'/'+d.getDate()+' '+clock(d)+'　'+Number(o.amount).toLocaleString('ja-JP')+'円　'+(STATE_JA[o.state]||o.state)));
       if(o.state==='done'&&!o.job&&o.result){
         const b=el('button','btn','コードを見る'); b.type='button';
-        b.addEventListener('click',()=>{ show('status'); openDone({result:o.result,clone:o.clone}); });
+        b.addEventListener('click',()=>{ show('status'); openDone({result:o.result,clone:o.clone,coupon:o.coupon_issued}); });
         row.append(b); box.append(row);
       }else if(o.job){
         const b=el('button','btn',o.state==='done'?'結果を見る':'状況を見る'); b.type='button';
