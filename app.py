@@ -2951,7 +2951,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .ptrow input{width:110px;font:inherit;font-size:16px;padding:9px 10px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .ptrow select{font:inherit;font-size:16px;padding:9px 8px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .soon{margin-left:6px;padding:0 8px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;color:var(--muted)}
-#restartWrap:has(input:disabled){opacity:.6}
+.modecard:disabled{opacity:.55;cursor:not-allowed}
 .couponbox{margin:12px 0;padding:12px;border:2px dashed var(--line);border-radius:14px;background:var(--soft)}
 .couponbox strong{font-size:20px;letter-spacing:.06em}
 details.more{margin-top:12px}
@@ -3038,11 +3038,10 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <div class="modes" role="radiogroup" aria-label="内容">
         <button type="button" class="modecard" role="radio" data-mode="normal"><b>メニューから選ぶ</b><small>アイテム・キャラ・ステージなどを選んで付与・強化します。1項目 {{ prices.other }}円から</small></button>
         <button type="button" class="modecard" role="radio" data-mode="integrity"><b>バン保証</b><small>セーブを検査し、既知のエラーキャラなどを修復します。<em>{{ prices.ban_guarantee }}円</em>・引継ぎコード必須</small></button>
+        {% if payments %}<button type="button" class="modecard" role="radio" data-mode="restart" {{ "" if restart.enabled else "disabled aria-disabled=true" }}><b>初期垢作成（リスタートパック）{% if not restart.enabled %}<em class="soon">準備中</em>{% endif %}</b><small>新しいアカウントを、公式リスタートパックと同じ中身で作ります。<em>{{ prices.restart }}円</em>〜・ほかのメニューも追加できます・引継ぎコード不要</small></button>{% endif %}
         <button type="button" class="modecard" role="radio" data-mode="clone"><b>アカウント複製</b><small>試験提供。元と複製の2アカウントのコードを出します。<em>{{ prices.clone }}円</em>・引継ぎコード必須</small></button>
       </div>
-      {% if payments %}<label class="sw" id="restartWrap" style="margin-top:12px"><input type="checkbox" id="restart" {{ "" if restart.enabled else "disabled" }}>
-        <span><b>初期垢作成（リスタートパック）　{{ prices.restart }}円〜{% if not restart.enabled %}<em class="soon">準備中</em>{% endif %}</b>
-        <small>新しいアカウントを作り、公式のリスタートパックと同じ内容を入れた状態で始めます。引継ぎコード・暗証番号は空欄のまま使います。ほかのメニューも一緒に選べます（その分の料金が足されます）。{% if restart.note %}<br>{{ restart.note }}{% endif %}</small></span></label>{% endif %}
+      {% if payments %}<input type="checkbox" id="restart" hidden {{ "" if restart.enabled else "disabled" }}>{% if restart.note %}<p class="sub" id="restartNote" hidden>{{ restart.note }}</p>{% endif %}{% endif %}
       <details class="more"><summary>くわしい説明</summary>
       <label class="sw specialsw"><input type="checkbox" id="integrity">
         <span><b>バン保証（セーブの検査・既知異常の自動修復）　{{ prices.ban_guarantee }}円</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
@@ -3399,7 +3398,7 @@ function ptMin(){ const h=$('#ptH'), m=$('#ptM'); if(!h) return {min:0,err:''};
   const min=(hv?parseInt(hv,10):0)*60+parseInt(m.value||'0',10);
   if(min>0&&min<PT_MIN) return {min:min,err:'プレイ時間は'+(PT_MIN/60)+'時間以上で指定してください。'};
   return {min:min,err:''}; }
-function restartOn(){ const r=$('#restart'); return !!(r&&r.checked&&!r.disabled); }
+function restartOn(){ const r=$('#restart'); return !!(r&&r.checked&&!r.disabled&&!$('#integrity').checked&&!$('#clone').checked); }
 function couponCode(){ const c=$('#coupon'); return c?c.value.normalize('NFKC').toUpperCase().replace(/\s/g,''):''; }
 const HIGH={{ high|tojson }};
 const ERRNUMS={{ error_nums|tojson }};
@@ -3479,12 +3478,14 @@ $('#back').addEventListener('click',goBack);
 $('#t-menu').addEventListener('click',e=>{ e.stopImmediatePropagation(); show('start'); },true);
 /* 何をしますか */
 function syncModes(){
-  const m=$('#integrity').checked?'integrity':$('#clone').checked?'clone':'normal';
+  const m=$('#integrity').checked?'integrity':$('#clone').checked?'clone':restartOn()?'restart':'normal';
   $$('.modecard').forEach(b=>b.setAttribute('aria-checked',b.dataset.mode===m?'true':'false'));
+  const rn=$('#restartNote'); if(rn) rn.hidden=m!=='restart';
 }
 $$('.modecard').forEach(b=>b.addEventListener('click',()=>{
-  const m=b.dataset.mode;
+  const m=b.dataset.mode; if(b.disabled) return;
   $('#integrity').checked=m==='integrity'; $('#clone').checked=m==='clone';
+  const r=$('#restart'); if(r) r.checked=m==='restart'&&!r.disabled;
   syncModes(); refresh(); updateBar();
 }));
 function tabMore(){const t=$('.tablist'); $('.tabs').classList.toggle('more',t.scrollLeft+t.clientWidth<t.scrollWidth-6);}
@@ -3855,8 +3856,8 @@ try{ if(localStorage.getItem('nyanko-safe2')==='1') $('#safe').checked=true; }ca
 $('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe2',$('#safe').checked?'1':'0')}catch(e){} refresh(); });
 $('#dry').addEventListener('change',refresh);
 ['#ptH','#coupon'].forEach(q=>{ const e=$(q); if(e) e.addEventListener('input',refresh); });
-$('#clone').addEventListener('change',()=>{ if($('#clone').checked) $('#integrity').checked=false; refresh(); });
-$('#integrity').addEventListener('change',()=>{ if($('#integrity').checked) $('#clone').checked=false; refresh(); });
+$('#clone').addEventListener('change',()=>{ if($('#clone').checked){ $('#integrity').checked=false; if($('#restart')) $('#restart').checked=false; } refresh(); });
+$('#integrity').addEventListener('change',()=>{ if($('#integrity').checked){ $('#clone').checked=false; if($('#restart')) $('#restart').checked=false; } refresh(); });
 
 /* ---------- 小物 ---------- */
 let toastTimer=null;
@@ -4255,7 +4256,7 @@ function saveDraft(){
   clearTimeout(draftTimer);
   draftTimer=setTimeout(()=>{ try{
     const d=currentPreset('draft'); d.transfer=$('#transfer').value; d.confirm=$('#confirm').value;
-    d.mode=$('#integrity').checked?'integrity':$('#clone').checked?'clone':'normal'; d.view=curView;
+    d.mode=$('#integrity').checked?'integrity':$('#clone').checked?'clone':restartOn()?'restart':'normal'; d.view=curView;
     sessionStorage.setItem(DKEY,JSON.stringify(d));
   }catch(e){} },300);
 }
@@ -4265,6 +4266,7 @@ function restoreDraft(){
     applyPreset(d,true);
     $('#transfer').value=d.transfer||''; $('#confirm').value=d.confirm||'';
     $('#integrity').checked=d.mode==='integrity'; $('#clone').checked=d.mode==='clone';
+    const r=$('#restart'); if(r&&!r.disabled) r.checked=d.mode==='restart';
     return d;
   }catch(e){ return null; }
 }
