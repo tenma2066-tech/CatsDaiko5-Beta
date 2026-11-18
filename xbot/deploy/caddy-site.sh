@@ -11,6 +11,9 @@ $XBOT_DOMAIN {
 	handle_path /novnc/* {
 		forward_auth host.docker.internal:8090 {
 			uri /auth
+			# WebSocket（ログイン画面）のとき、認証の確認には Upgrade を渡さない（渡すと接続に失敗する）
+			header_up -Upgrade
+			header_up -Connection
 		}
 		reverse_proxy host.docker.internal:6080
 	}
