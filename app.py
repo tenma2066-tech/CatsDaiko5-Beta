@@ -3959,12 +3959,14 @@ function renderChecks(pc,qm,total){
   L.forEach(([lv,tx])=>{ const li=document.createElement('li'); li.dataset.lv=lv;
     li.append(el('i',null,lv==='ok'?'✓':lv==='warn'?'!':'✕'),el('span',null,tx)); ul.append(li); });
 }
+/* 安全モードでスキップする項目は、料金に含めない（サーバーと同じ数え方） */
+function chargeable(name){ return !($('#safe').checked&&HIGH.includes(String(name).split('#')[0])); }
 function estimate(pc,qm){
   if($('#integrity').checked) return PRICES.ban_guarantee;
   if($('#clone').checked) return PRICES.clone;
   const oth=picked('others');
   const crash=oth.filter(x=>CRASH.includes(x)).length;
-  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])]).size+subUnits()+oth.length-crash+picked('events').length;
+  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])].filter(chargeable)).size+subUnits()+oth.length-crash+picked('events').length;
   let units=0;
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
   return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other+(restartOn()?PRICES.restart:0)+Math.floor(ptMin().min/10)*PRICES.playtime10;
@@ -3994,7 +3996,7 @@ function renderCart(pc,qm){
       total+=units*PRICES.chara;
       line('キャラ '+pc.nums.length+'体','番号 '+compress(pc.nums)+'（レベル・形態・本能は1項目ずつ）',yen(units*PRICES.chara,PRICES.chara,units),'chars');
     }
-    const items=picked('items'), qkeys=Object.keys(qm);
+    const items=picked('items').filter(chargeable), qkeys=Object.keys(qm).filter(chargeable);
     const qbase=[...new Set(qkeys.map(k=>k.split('#')[0]))].filter(x=>!items.includes(x));
     if(items.length) { total+=items.length*PRICES.other; line('アイテム（最大まで）',items.join('・'),yen(items.length*PRICES.other,PRICES.other,items.length),'items'); }
     if(qbase.length){ total+=qbase.length*PRICES.other; line('アイテム（数量指定）',qkeys.map(k=>{ const e=document.querySelector('input.q[data-item="'+CSS.escape(k)+'"]'); return (e&&e.dataset.label||k)+' '+Number(qm[k]).toLocaleString('ja-JP'); }).join('・'),yen(qbase.length*PRICES.other,PRICES.other,qbase.length),'qty'); }
@@ -4291,11 +4293,11 @@ function loadPresets(){ try{ const v=JSON.parse(localStorage.getItem(PKEY)||'[]'
 function currentPreset(name){
   const nums=parseNums($('#chars').value).nums, cats={};
   nums.forEach(n=>{ if(catSettings[n]) cats[n]=catSettings[n]; });
-  return {name, items:picked('items'), subs:picked('subs'), others:picked('others'), qty:qtyMap(),
+  return {name, items:picked('items'), subs:picked('subs'), others:picked('others'), events:picked('events'), qty:qtyMap(),
           chars:$('#chars').value, cats, safe:$('#safe').checked, dry:$('#dry').checked};
 }
 function applyPreset(p,silent){
-  ['items','subs','others'].forEach(g=>$$('input[name='+g+']').forEach(e=>e.checked=(p[g]||[]).includes(e.value)));
+  ['items','subs','others','events'].forEach(g=>$$('input[name='+g+']').forEach(e=>e.checked=(p[g]||[]).includes(e.value)));
   $$('input.q').forEach(e=>e.value=(p.qty&&p.qty[e.dataset.item]!=null)?String(p.qty[e.dataset.item]):'');
   $('#chars').value=p.chars||'';
   Object.keys(catSettings).forEach(k=>delete catSettings[k]);
