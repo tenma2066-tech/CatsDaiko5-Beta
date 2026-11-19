@@ -45,7 +45,7 @@ jobs:
             install)
               [ -n "$XBOT_ADMIN_PASSWORD" ] || { echo "XBOT_ADMIN_PASSWORD のシークレットがありません"; exit 1; }
               tar czf - -C xbot . | $SSH "rm -rf /tmp/xbot-src && mkdir -p /tmp/xbot-src && tar xzf - -C /tmp/xbot-src"
-              printf '%s' "$XBOT_ADMIN_PASSWORD" | $SSH "read -r P; XBOT_ADMIN_PASSWORD=\"\$P\" bash /tmp/xbot-src/deploy/setup.sh /tmp/xbot-src; rm -rf /tmp/xbot-src"
+              printf '%s' "$XBOT_ADMIN_PASSWORD" | $SSH "read -r P; XBOT_ADMIN_PASSWORD=\"\$P\" bash /tmp/xbot-src/deploy/setup.sh /tmp/xbot-src; rc=\$?; rm -rf /tmp/xbot-src; exit \$rc"
               ;;
             caddy)
               [ -n "$XBOT_DOMAIN" ] || { echo "domain を入れてください"; exit 1; }

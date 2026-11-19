@@ -12,8 +12,14 @@ ENVF=/etc/xbot/env
 pkill -f /tmp/xbot-check.py 2>/dev/null || true   # 前回の確認が残っていたら止める
 echo "== 1. 必要なものを入れる（apt）"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq python3-venv python3-pip xvfb x11vnc novnc python3-websockify fonts-noto-cjk >/dev/null
+PKGS="python3-venv python3-pip xvfb x11vnc novnc python3-websockify fonts-noto-cjk"
+if dpkg -s $PKGS >/dev/null 2>&1; then
+  echo "  入っています（apt は使いません）"
+else
+  # 自動アップデートが apt を使っているときは、最大5分だけ待つ（ずっと止まらないように）
+  apt-get -o DPkg::Lock::Timeout=300 update -qq
+  apt-get -o DPkg::Lock::Timeout=300 install -y -qq $PKGS >/dev/null
+fi
 
 echo "== 2. 専用ユーザー xbot（ログインできない一般ユーザー）"
 id xbot >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --create-home --shell /usr/sbin/nologin xbot
@@ -32,9 +38,12 @@ echo "== 4. Python の専用環境（venv）と Chromium"
 "$APP/venv/bin/pip" install -q --upgrade pip
 "$APP/venv/bin/pip" install -q -r "$APP/requirements.txt"
 export PLAYWRIGHT_BROWSERS_PATH="$APP/browsers"
-"$APP/venv/bin/python" -m playwright install-deps chromium >/dev/null
+if [ ! -f "$APP/.deps-ok" ]; then   # ブラウザに必要な部品（apt を使う）は最初の1回だけ
+  "$APP/venv/bin/python" -m playwright install-deps chromium >/dev/null
+  "$APP/venv/bin/python" -m playwright install-deps webkit >/dev/null
+  touch "$APP/.deps-ok"
+fi
 "$APP/venv/bin/python" -m playwright install chromium >/dev/null
-"$APP/venv/bin/python" -m playwright install-deps webkit >/dev/null
 "$APP/venv/bin/python" -m playwright install webkit >/dev/null
 chmod -R a+rX "$APP/browsers"
 
