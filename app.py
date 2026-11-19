@@ -164,8 +164,10 @@ def _load_event_maps():
         return []
 
 
-EVENT_MAPS = _load_event_maps()                     # イベント・コラボステージの一覧（ゲームデータから作成）
-EVENT_BY_ID = {m["id"]: m for m in EVENT_MAPS}
+_ALL_EVENT_MAPS = _load_event_maps()                # イベント・コラボステージの一覧（ゲームデータから作成）
+EVENT_BY_ID = {m["id"]: m for m in _ALL_EVENT_MAPS}  # 実行用（支払い済みの古い注文のため、コラボも残す）
+EVENT_MAPS = [m for m in _ALL_EVENT_MAPS if m.get("cat") != "コラボ"]   # 選べるのはイベントステージだけ（コラボは外す）
+EVENT_SELECTABLE = {m["id"] for m in EVENT_MAPS}
 EV_PREFIX = "EV:"                                   # 注文の中では「その他」に EV:マップ番号 として入れる
 
 
@@ -1863,7 +1865,7 @@ def index():
         ("qty", "アイテム", f"個数を決めて付与します。最大まで入れたいときは「すべて最大値」を押してください。空欄は変更しません（1項目 {p['other']}円）", ITEMS),
         ("chars", "キャラ", f"キャラを選び、レベル・形態・本能を1体ずつ設定します（1体・1項目ごとに {p['chara']}円）", []),
         ("subs", "サブ", f"キャラ・ステージなどをまとめて解放・強化します（1項目 {p['other']}円。レジェンドストーリーは段階が上がるごとに +{p['other']}円）", SUBS),
-        ("events", "イベステ", f"イベント・コラボステージを、マップごとにクリア済みにします（1マップ {p['other']}円）。大狂乱・絶など、前のステージのクリアが必要なものは、それを選ぶと押せるようになります", EVENT_MAPS),
+        ("events", "イベステ", f"イベントステージを、マップごとにクリア済みにします（1マップ {p['other']}円）。大狂乱・絶など、前のステージのクリアが必要なものは、それを選ぶと押せるようになります", EVENT_MAPS),
         ("others", "その他", f"会員状態やミッションなどを設定します（1項目 {p['other']}円・クラッシュ修正は {p['crash']}円）", OTHERS),
     ]
     totals = {k: len(v) for k, _, _, v in groups}
@@ -2014,7 +2016,7 @@ def run():
                 i = int(x)
             except (TypeError, ValueError):
                 continue
-            if i in EVENT_BY_ID and i not in ev:
+            if i in EVENT_SELECTABLE and i not in ev:
                 ev.append(i)
         if len(ev) > 400:
             return jsonify(error="イベントステージは1回に400件までにしてください。"), 400
@@ -3265,13 +3267,13 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
         図鑑に無い番号と、エラーキャラになる番号は自動で除外します。</p>
       {% elif key == 'events' %}
       <div class="tools">
-        <input type="search" id="evq" placeholder="マップ名で絞り込み（例：狂乱、降臨、コラボ名）" autocomplete="off" aria-label="イベステを絞り込み" style="flex:1;min-width:0;font:inherit;font-size:16px;padding:9px 11px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)">
+        <input type="search" id="evq" placeholder="マップ名で絞り込み（例：狂乱、降臨、絶）" autocomplete="off" aria-label="イベステを絞り込み" style="flex:1;min-width:0;font:inherit;font-size:16px;padding:9px 11px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)">
         <button type="button" class="btn" data-all="events" data-v="0">解除</button>
         <span class="count" id="n-events">0 / {{ totals[key] }}</span>
       </div>
       <label class="sw" style="margin:8px 0"><input type="checkbox" id="evPre"><span><b>前提のステージはクリア済み</b><small>大狂乱・絶など前提があるマップを、前提を選ばずに頼むときにチェック（引継ぎコードのデータのみ）。前提が終わっていなかった場合は、こちらで一緒にクリアします。</small></span></label>
       <div class="list" id="evlist">
-        {% for m in lst %}<label class="opt" data-q="{{ m.name }} {{ m.cat }}"><input type="checkbox" name="events" value="{{ m.id }}"{% if m.reqs %} data-req="{{ m.reqs | join(',') }}"{% endif %}><span>{{ m.name }}<em class="lp">{{ m.cat }}{% if m.stars > 1 %}・冠{{ m.stars }}{% endif %}</em>{% if m.reqs %}<small class="evreq">前提：{% if m.reqs | length > 3 %}狂乱9種すべて{% else %}{% for r in m.reqs %}{{ ev_names[r] }}{{ '・' if not loop.last }}{% endfor %}{% endif %}</small>{% endif %}</span></label>{% endfor %}
+        {% for m in lst %}<label class="opt" data-q="{{ m.name }} {{ m.cat }}"><input type="checkbox" name="events" value="{{ m.id }}"{% if m.reqs %} data-req="{{ m.reqs | join(',') }}"{% endif %}><span>{{ m.name }}{% if m.stars > 1 %}<em class="lp">冠{{ m.stars }}</em>{% endif %}{% if m.reqs %}<small class="evreq">前提：{% if m.reqs | length > 3 %}狂乱9種すべて{% else %}{% for r in m.reqs %}{{ ev_names[r] }}{{ '・' if not loop.last }}{% endfor %}{% endif %}</small>{% endif %}</span></label>{% endfor %}
       </div>
       {% else %}
       <div class="tools">
