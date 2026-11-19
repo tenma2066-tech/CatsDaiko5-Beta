@@ -38,6 +38,7 @@ echo "== 4. Python の専用環境（venv）と Chromium"
 "$APP/venv/bin/pip" install -q --upgrade pip
 "$APP/venv/bin/pip" install -q -r "$APP/requirements.txt"
 export PLAYWRIGHT_BROWSERS_PATH="$APP/browsers"
+[ -d "$APP/browsers" ] && touch "$APP/.deps-ok"   # すでにブラウザが入っている＝部品も入っている
 if [ ! -f "$APP/.deps-ok" ]; then   # ブラウザに必要な部品（apt を使う）は最初の1回だけ
   "$APP/venv/bin/python" -m playwright install-deps chromium >/dev/null
   "$APP/venv/bin/python" -m playwright install-deps webkit >/dev/null
