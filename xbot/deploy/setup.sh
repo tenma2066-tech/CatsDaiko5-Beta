@@ -9,6 +9,7 @@ DATA=/var/lib/xbot
 ENVF=/etc/xbot/env
 : "${XBOT_ADMIN_PASSWORD:?管理パスワード（XBOT_ADMIN_PASSWORD）がありません}"
 
+pkill -f /tmp/xbot-check.py 2>/dev/null || true   # 前回の確認が残っていたら止める
 echo "== 1. 必要なものを入れる（apt）"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -82,6 +83,9 @@ for eng in ("iphone", "pc"):
         print("  ブラウザ", eng, "起動できませんでした:", str(e)[:300])
 PY
 chmod 644 /tmp/xbot-check.py
-sudo -u xbot bash -c "set -a; . $ENVF; set +a; cd $APP && PYTHONPATH=$APP $APP/venv/bin/python /tmp/xbot-check.py" 2>&1 | tail -4
+# 動いている常駐プロセスとブラウザのプロフィールを取り合わないよう、使い捨てのプロフィールで確かめる（2分で打ち切り）
+CHK=$(mktemp -d); chown xbot:xbot "$CHK"
+sudo -u xbot bash -c "set -a; . $ENVF; set +a; export XBOT_DATA_DIR=$CHK; cd $APP && PYTHONPATH=$APP timeout 120 $APP/venv/bin/python /tmp/xbot-check.py" 2>&1 | tail -4
+rm -rf "$CHK"
 rm -f /tmp/xbot-check.py
 free -m | sed -n 2p
