@@ -59,14 +59,10 @@ CHAT = "https://x.com/i/chat"
 
 
 class DMBrowser:
-    """DM（チャット）用：iPhone 側のログイン情報をパソコン（Chromium）側に写して開く。
-    X のチャットは、1つのブラウザで別の会話やリクエスト画面へ移ると表示されなくなるため、場面ごとに新しく起動する。"""
-
-    def __init__(self, sync=True):
-        self.sync = sync
+    """DM（チャット）用：iPhone 側のログイン情報をパソコン（Chromium）側に写して開く。"""
 
     def __enter__(self):
-        if self.sync and (store.get("engine") or "iphone") == "iphone":
+        if (store.get("engine") or "iphone") == "iphone":
             with Browser(engine="iphone") as b0:
                 ck = b0.ctx.cookies(["https://x.com"])
             self.b = Browser(engine="pc").__enter__()
@@ -394,41 +390,22 @@ class Browser:
     def dm_open_inbox(self, requests=False, other=False):
         """会話の一覧（requests=True ならメッセージリクエスト、other=True ならその中の「その他」）を開く。"""
         p = self.page
-        if "/i/chat" in (p.url or ""):
-            # X のチャットは、リクエスト画面などから移ると会話の一覧が出ない（0件のまま）ことがあるので、毎回まっさらな状態から開く
-            try:
-                p.goto("about:blank")
-            except Exception:  # noqa: BLE001
-                pass
         self.goto(CHAT + ("/requests" if requests else ""))
         if requests and other:      # 隠れているリクエスト：「その他」ボタンを押して開く（出ていなければ、隠れたリクエストはない）
             btn = p.locator('[data-testid="dm-message-requests-other-button"]').first
             try:
                 btn.wait_for(state="visible", timeout=8000)
             except Exception:  # noqa: BLE001
-                self.no_items = True
                 return
             btn.click(timeout=15000)
             time.sleep(1)
         sel = ('[data-testid^="dm-message-request-item-"]' if requests else '[data-testid^="dm-conversation-item-"]')
-
-        def wait_items(n):
-            for _ in range(n):
-                if chat_pin_visible(p):
-                    raise ChatLocked("チャットの暗証番号が必要です（「DM返信」タブの「チャットの暗証番号を入力する」から入れてください）")
-                if p.locator(sel).count():     # 一覧の中身が出るまで待つ
-                    return True
-                time.sleep(1)
-            return False
-
-        found = wait_items(20 if not requests else 12)
-        if not found and not requests:      # 会話の一覧が出ないときは、1回だけ読み直す
-            try:
-                p.reload(wait_until="domcontentloaded")
-            except Exception:  # noqa: BLE001
-                pass
-            found = wait_items(20)
-        self.no_items = not found
+        for i in range(20 if not requests else 12):
+            if chat_pin_visible(p):
+                raise ChatLocked("チャットの暗証番号が必要です（「DM返信」タブの「チャットの暗証番号を入力する」から入れてください）")
+            if p.locator(sel).count():     # 一覧の中身が出るまで待つ（右側の「会話を選択」の表示は目印にしない）
+                break
+            time.sleep(1)
         time.sleep(2)
 
     def dm_request_keys(self):
@@ -494,10 +471,8 @@ class Browser:
         human_pause(1, 2)
 
     def dm_open_chat(self, key):
-        """会話を開く。一覧のクリックでは開かないことがあるので、会話のURL（/i/chat/ID-ID）を直接開く。"""
-        conv = re.sub(r"[^0-9:]", "", key).replace(":", "-")
-        self.goto(f"{CHAT}/{conv}")
-        self.page.wait_for_selector('[data-testid="dm-composer-textarea"]', timeout=30000)
+        self.page.locator(f'[data-testid="dm-conversation-item-{key}"]').first.click()
+        self.page.wait_for_selector('[data-testid="dm-composer-textarea"]', timeout=20000)
         human_pause(1, 2)
         return self._last_message()
 

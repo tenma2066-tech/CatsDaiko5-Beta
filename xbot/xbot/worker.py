@@ -166,44 +166,8 @@ def run_dms(s, manual=False):
         if manual:
             store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
         return
-    # 1) ふつうの会話：一覧だけ先に読み、会話ごとに新しいブラウザで開く
-    #    （X のチャットは、同じブラウザで別の会話・リクエスト画面へ移ると表示されなくなるため）
-    keys = []
-    backoff = float(store.get("dm_chat_backoff_until") or 0)
-    if rs and time.time() < backoff:
-        store.update_status(note=f"会話が開けない状態が続いたため、{logic.fmt_jst(backoff)} まで会話の確認を休んでいます（リクエストと予約投稿は動いています）")
-    elif rs:
-        with DMBrowser() as b:
-            b.dm_open_inbox()
-            keys = b.dm_chat_keys(min(3, int(s["dm_scan_limit"])))   # 1回に開くのは3件まで（時間がかかるため）
-        counts["chats"] = len(keys)
-        started, fails, opened = time.time(), 0, 0
-        for key in keys:
-            if counts["limited"]:
-                store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
-                break
-            if time.time() - started > 240:          # 4分を超えたら、ほかの仕事（予約投稿など）を先にする
-                break
-            try:
-                with DMBrowser() as b:
-                    b.dm_open_inbox()
-                    got = b.dm_open_chat(key)
-                    opened += 1
-                    fails = 0
-                    _handle(b, s, rs, key, got, dry, counts)
-            except ChatLocked:
-                raise
-            except Exception as e:  # noqa: BLE001
-                fails += 1
-                if fails >= 2:     # 続けて開けない → 1時間休む（同じ失敗をくり返して、予約投稿を止めないように）
-                    store.put("dm_chat_backoff_until", time.time() + 3600)
-                    store.log("warn", "dm", f"会話を続けて開けなかったので、1時間は会話の確認を休みます（{type(e).__name__}）")
-                    break
-        if opened:
-            store.put("dm_chat_backoff_until", 0)
-    # 2) メッセージリクエスト（新しいブラウザで）
-    with DMBrowser(sync=False) as b:
-        # 2) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
+    with DMBrowser() as b:
+        # 1) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
         #    失敗しても、ふつうの会話の確認は続ける
         if s.get("dm_accept_requests", True):
             for scope, other in (("リクエスト", False), ("リクエスト（その他）", True)):
@@ -232,6 +196,22 @@ def run_dms(s, manual=False):
                 except Exception as e:  # noqa: BLE001
                     b.shot("dm-request-fail")
                     store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）。続きの確認は進めます")
+        # 2) ふつうの会話
+        if rs:
+            b.dm_open_inbox()
+            keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
+            counts["chats"] = len(keys)
+            for key in keys:
+                if counts["limited"]:
+                    store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
+                    break
+                b.dm_open_inbox()
+                try:
+                    got = b.dm_open_chat(key)
+                except Exception as e:  # noqa: BLE001
+                    store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
+                    continue
+                _handle(b, s, rs, key, got, dry, counts)
     store.update_status(last_dm_check=time.time(), dm_checked=counts["chats"], dm_replied=counts["replied"],
                         dm_requests=counts["requests"], dm_accepted=counts["accepted"])
     if manual or counts["replied"] or counts["accepted"]:
@@ -358,12 +338,16 @@ def main():
                 try:
                     from .browser import CHAT, DMBrowser
                     with DMBrowser() as b:
-                        b.dm_open_inbox()
-                        print(f"[probe] 1) chats first: conv={len(b.dm_chat_keys(50))}", flush=True)
-                        b.dm_open_inbox(requests=True)
-                        print(f"[probe] 2) requests: req={len(b.dm_request_keys())}", flush=True)
-                        b.dm_open_inbox(requests=True, other=True)
-                        print(f"[probe] 3) other: req={len(b.dm_request_keys())} no_items={getattr(b, 'no_items', None)}", flush=True)
+                        for label, url in (("chat-direct", CHAT), ("requests", CHAT + "/requests"), ("chat-after-requests", CHAT)):
+                            b.goto(url)
+                            for t in (3, 8, 15, 25):
+                                time.sleep(t - (0 if t == 3 else {8: 3, 15: 8, 25: 15}[t]))
+                                n_conv = b.page.locator('[data-testid^="dm-conversation-item-"]').count()
+                                n_req = b.page.locator('[data-testid^="dm-message-request-item-"]').count()
+                                other = b.page.locator('[data-testid="dm-message-requests-other-button"]').count()
+                                row = b.page.locator('[data-testid="dm-message-requests-inbox-row"]').count()
+                                pin = b.page.locator('[data-testid="pin-code-input-container"]').count()
+                                print(f"[probe] {label} t={t}s url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:12]} conv={n_conv} req={n_req} other_btn={other} req_row={row} pin={pin}", flush=True)
                         b.shot("probe-chat")
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
