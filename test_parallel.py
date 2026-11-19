@@ -58,6 +58,9 @@ def fixture_real_job_worker(pipe, job, arguments, slot, learned_version, names):
                 time.sleep(0.01)
             return Handler(transfer), None
 
+        def get_codes(self, upload_managed_items=False, tries=1):   # 試運転は廃止したので、コード発行まで進む
+            return ("T-" + str(self.save_file.xp), "1234")
+
     audit = SimpleNamespace(ok=True, cats_checked=0, critical_count=0,
                             warning_count=0, findings=[], as_dict=lambda: {"ok": True})
     A.engine.core.ServerHandler = Handler
@@ -219,7 +222,7 @@ class ParallelJobTests(unittest.TestCase):
             status = self.status(job)
             self.assertEqual(status["status"], "done", status["error"])
             self.assertEqual(status["report"], [{"label": "XP", "before": before, "after": before + 1}])
-            self.assertIsNone(status["result"])
+            self.assertTrue(status["result"])                      # 試運転は廃止：コードまで発行される
 
     def test_transfer_lock_prevents_overlap_with_another_server_process(self):
         lock_dir = Path(self.temp.name) / "workers" / "locks"

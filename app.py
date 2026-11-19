@@ -1993,15 +1993,38 @@ def api_cats_refresh():
     return jsonify(state=_names["state"])
 
 
+def _clean_run_body(data):
+    """/run に送られてきた内容の形をそろえる（画面以外から変な形で送られても、500 にしない）。"""
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None
+    out = dict(data)
+    for k in ("items", "subs", "others", "events"):          # 文字（または数字）の一覧だけを受け付ける
+        v = out.get(k)
+        out[k] = [x for x in v if isinstance(x, (str, int)) and not isinstance(x, bool)][:2000] if isinstance(v, list) else []
+        if k != "events":
+            out[k] = [str(x) for x in out[k]]
+    for k in ("qty", "cat_settings"):
+        if not isinstance(out.get(k), dict):
+            out[k] = {}
+    for k in ("transfer", "confirm", "chars", "coupon"):
+        v = out.get(k)
+        out[k] = v if isinstance(v, str) else ("" if v is None or isinstance(v, (list, dict, bool)) else str(v))
+    return out
+
+
 @app.post("/run")
 def run():
     _gc_jobs()
     admin_free = bool(session.get("admin")) and PAYMENTS_ENABLED   # 管理者でログイン中のブラウザは全メニュー無料
     if _maint()["on"] and PAYMENTS_ENABLED and not admin_free:
         return _maintenance_response()
-    data = request.get_json(silent=True) or {}
-    transfer = str(data.get("transfer", "")).strip()
-    confirm = str(data.get("confirm", "")).strip()
+    data = _clean_run_body(request.get_json(silent=True))
+    if data is None:
+        return jsonify(error="注文の内容を読み取れませんでした。画面を再読み込みしてから、もう一度お試しください。"), 400
+    transfer = str(data.get("transfer", "")).strip()[:64]
+    confirm = str(data.get("confirm", "")).strip()[:16]
     if bool(transfer) != bool(confirm):
         return jsonify(error="引継ぎコードと暗証番号は「両方入力」か「両方空欄」にしてください。"), 400
     clone = bool(data.get("clone", False))
@@ -2013,9 +2036,9 @@ def run():
     if clone:  # 実験的な独立アカウント複製：編集項目は使わない。引継ぎコードが必須
         if not (transfer and confirm):
             return jsonify(error="複製には、引継ぎコードと暗証番号が必要です。"), 400
-        data = {"clone": True, "dry": data.get("dry", False), "safe": False}
-    safe = bool(data.get("safe", False))
-    dry = bool(data.get("dry", False))
+        data = {"clone": True, "dry": False, "safe": False}
+    safe = False   # 安全モード・試運転は廃止（送られてきても使わない）
+    dry = False
     if integrity_only:
         safe = False
         data = {"transfer": transfer, "confirm": confirm, "dry": dry}
@@ -3176,7 +3199,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <label class="sw specialsw"><input type="checkbox" id="integrity">
         <span><b>バン保証（セーブの検査・既知異常の自動修復）　{{ prices.ban_guarantee }}円</b><small>既存セーブを検査し、確認済みのエラーキャラと直接参照だけを修復します。修復不要なら再登録しません。修復が必要な場合は新しい引継ぎコードを発行します。既存セーブの引継ぎコードが必要です。</small></span></label>
       <label class="sw specialsw"><input type="checkbox" id="clone">
-        <span><b>アカウント複製（試験提供）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。公式の機能ではないため、成功・継続利用は保証されません。まず「試運転」で確認できます。</small></span></label>
+        <span><b>アカウント複製（試験提供）　{{ prices.clone }}円</b><small>入力セーブを別データとして読み込み、複製側に新しい問い合わせコードを発行して、元・複製それぞれの引継ぎコードを出します。公式の機能ではないため、成功・継続利用は保証されません。</small></span></label>
       </details>
     </div>
   </section>
@@ -3317,11 +3340,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <ul class="checks" id="checks" aria-live="polite"></ul>
     </div>
     <details class="panel more">
-      <summary><b>オプション</b><small>安全モード・試運転・結果の保存</small></summary>
-      <label class="sw"><input type="checkbox" id="safe">
-        <span><b>安全モード</b><small>ゲーム側に見つかるとBANされる可能性がある項目（猫缶・レアチケ・プラチケ・レジェチケ）と、プラチケに換わるプラチナのかけらを、今回の実行から自動で外します。</small></span></label>
-      <label class="sw"><input type="checkbox" id="dry">
-        <span><b>試運転（コードを発行しない）</b><small>書き換えまで行い、変更内容だけ見せます。アップロードはしません。</small></span></label>
+      <summary><b>オプション</b><small>結果の保存</small></summary>
+      <input type="checkbox" id="safe" hidden disabled><input type="checkbox" id="dry" hidden disabled>
       <label class="sw"><input type="checkbox" id="keepResults" checked>
         <span><b>発行したコードをこの端末に残す</b><small>完了時の引継ぎコードと暗証番号を、このブラウザに最大10件まで保存します。画面を閉じたり、サーバーの表示期限（30分）が過ぎたりしても「状況」タブで確認できます。共用の端末ではオフにしてください。</small></span></label>
     </details>
@@ -3436,7 +3456,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <p class="ordno">受付番号 <code id="payOrderShort"></code> <button type="button" class="btn mini" id="payCopy">番号をコピー</button><code id="payOrderNo" hidden></code><br><small>画面を閉じても、コピーした番号で再開できます。お問い合わせのときもこの番号をお伝えください。</small></p>
     <div class="payamt"><b id="payAmount"></b><span>円</span></div>
     <ul class="paylist" id="payList"></ul>
-    <div class="payerr" id="paySkip" data-lv="wait" hidden><b>安全モードのため実行されない項目</b><span id="paySkipList"></span><span>これらは料金に含まれません。実行したい場合は「やめる」→入力画面で安全モードをオフにしてください（BANの恐れがあります）。</span></div>
+    <div class="payerr" id="paySkip" data-lv="wait" hidden><b>実行されない項目</b><span id="paySkipList"></span><span>これらは料金に含まれません。</span></div>
     <ol class="paysteps" id="paySteps">
       <li>PayPay アプリの<b>「送る」</b>を開く</li>
       <li><b>送金リンク</b>を作る（金額は<b>上の金額ちょうど</b>・<b>パスコードなし</b>）</li>
@@ -3477,7 +3497,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
         <li>PayPay で<b>「保留」</b>になっても<b>再送金は不要</b>です。アプリで保留を解除すると、自動で続きます。</li>
         <li>完了後の<b>引継ぎコードと暗証番号</b>は、スクショなどで必ず控えてください。</li>
       </ul>
-      <small>猫缶・レアチケなど一部の項目は、ゲーム側に見つかるとBANされる可能性があります。気になる方は確認画面の「安全モード」をオンにすると外せます。最終的な判断はご自身でお願いします。</small>
+      <small>猫缶・レアチケなど一部の項目は、ゲーム側に見つかるとBANされる可能性があります。気になる項目は選ばないでください。最終的な判断はご自身でお願いします。</small>
     </div>
     <h3>料金</h3>
     <ul class="paylist">
@@ -3485,16 +3505,15 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <li>クラッシュ解除（ガマトト・オトート砲台）：1件 {{ prices.crash }}円</li>
       <li>バン保証（サブ→特別メニュー）：{{ prices.ban_guarantee }}円</li>
       <li>アカウント複製（サブ→特別メニュー）：{{ prices.clone }}円</li>
-      <li>それ以外の項目：1件 {{ prices.other }}円（試運転も同額）</li>
+      <li>それ以外の項目：1件 {{ prices.other }}円</li>
       <li>旧レジェンド・真レジェンド（サブ）：冠1クリア {{ prices.other }}円から、段階が上がるごとに +{{ prices.other }}円（冠4まで {{ prices.other * 4 }}円・イディ／ノーヴァまで {{ prices.other * 5 }}円）</li>
     </ul>
     <h3>よくある質問</h3>
-    <details><summary>BANされませんか？</summary><p>アイテムの多くは問題が起きにくいものですが、絶対ではありません。猫缶・レアチケなどは特に注意が必要な項目で、「安全モード」をオンにすると自動で外せます。心配な場合は、検査と修復を行う「バン保証」もご利用ください。</p></details>
+    <details><summary>BANされませんか？</summary><p>アイテムの多くは問題が起きにくいものですが、絶対ではありません。猫缶・レアチケなどは特に注意が必要な項目なので、気になる方は選ばないでください。心配な場合は、検査と修復を行う「バン保証」もご利用ください。</p></details>
     <details><summary>失敗したらどうなりますか？</summary><p>お支払いはそのまま有効です。再送金なしで、もう一度実行できます。それでも解決しないときは、注文番号を添えて <a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a> にご連絡ください。</p></details>
     <details><summary>リンクがエラーになる</summary><p>金額が違う・パスコード付き・期限切れ・受け取り済みのリンクは使えません。金額を確認して、新しいリンクを作り直してください。</p></details>
     <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のその送金から、保留を解除してください。解除されると、サーバーが自動で確認して実行します（画面を閉じていても大丈夫です）。あとで同じブラウザで開くと、結果の引継ぎコードが表示されます。同じリンクを送り直したり、再送金したりしないでください。</p></details>
     <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
-    <details><summary>安全モード・試運転とは</summary><p>安全モードはBANの恐れがある項目を外します。試運転はコードを発行せず、変更内容だけ確認します（料金は同じ）。</p></details>
     <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、「① メニュー」画面の上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
       <div class="tools"><input type="text" id="claimNo" placeholder="注文番号" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn" id="claimGo">再開</button></div></details>
     <p class="ordno">お問い合わせ：<a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a>　あなたのユーザーID：<code>{{ uid }}</code></p>
@@ -3926,7 +3945,7 @@ function renderChecks(pc,qm,total){
   const risky=[...new Set([...maxed,...qkeys])].filter(x=>HIGH.includes(x));
   if(risky.length){
     if(safe) add('warn','安全モードのため、'+risky.join('・')+' は今回スキップします。');
-    else add('warn',risky.join('・')+' は、ゲーム側に見つかるとBANされる可能性がある項目です。安全モードをオンにすると外せます。');
+    else add('warn',risky.join('・')+' は、ゲーム側に見つかるとBANされる可能性がある項目です。気になる場合は外してください。');
   }
   const over=overInputs().map(e=>e.dataset.label||e.dataset.item);
   if(over.length) add('bad','数量が上限を超えています：'+over.join('・'));
@@ -3959,8 +3978,8 @@ function renderChecks(pc,qm,total){
   L.forEach(([lv,tx])=>{ const li=document.createElement('li'); li.dataset.lv=lv;
     li.append(el('i',null,lv==='ok'?'✓':lv==='warn'?'!':'✕'),el('span',null,tx)); ul.append(li); });
 }
-/* 安全モードでスキップする項目は、料金に含めない（サーバーと同じ数え方） */
-function chargeable(name){ return !($('#safe').checked&&HIGH.includes(String(name).split('#')[0])); }
+/* 安全モードは廃止：すべての項目を料金に含める（サーバーと同じ数え方） */
+function chargeable(name){ return true; }
 function estimate(pc,qm){
   if($('#integrity').checked) return PRICES.ban_guarantee;
   if($('#clone').checked) return PRICES.clone;
@@ -4033,7 +4052,7 @@ function renderExtras(pc,qm,total,bm){
   if(stepOf(curView)===4) updateBar();
   if(!jobRunning) $('#go').textContent=goLabel();
 }
-try{ if(localStorage.getItem('nyanko-safe2')==='1') $('#safe').checked=true; }catch(e){}
+try{ localStorage.removeItem('nyanko-safe2'); }catch(e){}   /* 安全モードは廃止 */
 $('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe2',$('#safe').checked?'1':'0')}catch(e){} refresh(); });
 $('#dry').addEventListener('change',refresh);
 ['#ptH','#coupon','#oldDone','#evPre'].forEach(q=>{ const e=$(q); if(e) e.addEventListener('input',refresh); });
@@ -4302,7 +4321,7 @@ function applyPreset(p,silent){
   $('#chars').value=p.chars||'';
   Object.keys(catSettings).forEach(k=>delete catSettings[k]);
   Object.entries(p.cats||{}).forEach(([n,c])=>catSettings[n]=Object.assign({base_level:'',plus_level:'',form:'',talents_all:false},c));
-  $('#safe').checked=p.safe===true; $('#dry').checked=!!p.dry;
+  $('#safe').checked=false; $('#dry').checked=false;   /* 安全モード・試運転は廃止 */
   $('#clone').checked=false; $('#integrity').checked=false;
   chipSig=null; refresh();
   if(!silent) toast('「'+p.name+'」を呼び出しました');

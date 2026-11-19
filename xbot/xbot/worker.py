@@ -334,34 +334,24 @@ def main():
                 check_login()
             elif req == "snapshot":
                 snapshot()
-            elif req == "dm_probe":            # DM画面の作りを調べる（診断用・何も送らない）
+            elif req == "dm_probe":            # DM画面の診断（読むだけ・何も送らない・件数と部品名だけ記録）
                 try:
                     from .browser import CHAT, DMBrowser
                     with DMBrowser() as b:
-                        shots = []
-                        shots = []
-                        b.goto(CHAT)
-                        time.sleep(12)
-                        info = b.deep_probe()
-                        print(f"[probe] inbox: tids={[t for t in info['tids'] if 'request' in t[0] or 'inbox' in t[0]]}", flush=True)
-                        b.goto(CHAT + "/requests")
-                        time.sleep(12)
-                        main_n = b.page.locator('[data-testid^="dm-message-request-item-"]').count()
-                        print(f"[probe] requests main items={main_n}", flush=True)
-                        shots.append(b.shot("probe-requests-main"))
-                        other = b.page.locator('[data-testid="dm-message-requests-other-button"]').first
-                        print(f"[probe] other button count={b.page.locator('[data-testid=\"dm-message-requests-other-button\"]').count()} text={(other.inner_text() or '')[:30]!r}", flush=True)
-                        other.click(timeout=15000)
-                        time.sleep(10)
-                        info = b.deep_probe()
-                        print(f"[probe] other: url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:30]}", flush=True)
-                        print(f"[probe] other: tids={[t for t in info['tids'] if t[0] not in ('BottomBar','premium-signup-tab','primaryColumn') and not t[0].startswith(('AppTabBar','SideNav','UserAvatar'))]}", flush=True)
-                        print(f"[probe] other: labels={info['labels']} roles={info['roles']}", flush=True)
-                        shots.append(b.shot("probe-requests-other"))
-                        store.update_status(snapshots=[x for x in shots if x], snapshot_at=time.time())
+                        for label, url in (("chat-direct", CHAT), ("requests", CHAT + "/requests"), ("chat-after-requests", CHAT)):
+                            b.goto(url)
+                            for t in (3, 8, 15, 25):
+                                time.sleep(t - (0 if t == 3 else {8: 3, 15: 8, 25: 15}[t]))
+                                n_conv = b.page.locator('[data-testid^="dm-conversation-item-"]').count()
+                                n_req = b.page.locator('[data-testid^="dm-message-request-item-"]').count()
+                                other = b.page.locator('[data-testid="dm-message-requests-other-button"]').count()
+                                row = b.page.locator('[data-testid="dm-message-requests-inbox-row"]').count()
+                                pin = b.page.locator('[data-testid="pin-code-input-container"]').count()
+                                print(f"[probe] {label} t={t}s url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:12]} conv={n_conv} req={n_req} other_btn={other} req_row={row} pin={pin}", flush=True)
+                        b.shot("probe-chat")
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
-                    store.log("error", "check", f"DM画面を調べられませんでした: {e}")
+                    store.log("error", "check", f"DM画面を調べられませんでした: {type(e).__name__}")
             elif req == "check_dm":            # 管理サイトの「今すぐDMを確認」
                 try:
                     run_dms(s, manual=True)

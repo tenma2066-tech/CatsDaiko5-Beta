@@ -282,30 +282,23 @@ check("修復対象がなければコード再発行・アップロードしな�
 check("保全チェック結果を返す", isinstance(integrity.get("audit"), dict) and integrity.get("integrity") == {"repaired_count": 0, "upload_required": False}, integrity)
 check("保全チェックでは検査概要を表示", any("保全検査" in x for x in integrity["log"]), integrity["log"])
 
-print("\n[5] 安全モード")
+print("\n[5] 安全モード（廃止：送られても使わない）")
 applied.clear()
 code, st = run({"safe": True, "items": ["猫缶", "XP"], "qty": {"レアチケ": "5", "NP": "7"}})
 check("完了する", st["status"] == "done", st.get("error"))
 items_applied = [x for call in applied for x in call[0]]
-check("猫缶とレアチケは外れる", "猫缶" not in items_applied and "レアチケ" not in items_applied, items_applied)
+check("safe を送っても猫缶・レアチケは外れない", "猫缶" in items_applied and "レアチケ" in items_applied, items_applied)
 check("XPとNPは適用", "XP" in items_applied and "NP" in items_applied)
-check("スキップが注意に出る", any("安全モード" in w for w in st["warn"]), st["warn"])
-code, st = run({"safe": True, "items": ["猫缶"]})
-check("高リスクだけなら400", code == 400, st)
-applied.clear()
-code, st = run({"safe": False, "items": ["猫缶"]})
-check("安全モードOFFなら猫缶も適用", code == 200 and any("猫缶" in call[0] for call in applied))
+check("安全モードの注意は出ない", not any("安全モード" in w for w in st["warn"]), st["warn"])
 
-print("\n[6] 試運転")
+print("\n[6] 試運転（廃止：送られても使わない）")
 Handler.uploaded = 0
 code, st = run({"safe": False, "dry": True, "items": ["XP"], "chars": "10"})
 check("完了する", st["status"] == "done", st.get("error"))
-check("コードは出ない", st["result"] is None)
-check("アップロードしていない", Handler.uploaded == 0, Handler.uploaded)
-check("dryフラグ", st["dry"] is True)
+check("dry を送ってもコードを発行する", st["result"] is not None)
+check("dry を送ってもアップロードする", Handler.uploaded == 1, Handler.uploaded)
+check("dryフラグは立たない", st["dry"] is False)
 check("変更内容は出る", len(st["report"]) >= 1)
-code, st = run({"safe": False, "items": ["XP"]})
-check("通常実行ではアップロードする", Handler.uploaded == 1)
 
 print("\n[7] 一部が壊れても止まらない")
 orig = engine.unlock_cats_by_ids
@@ -459,9 +452,9 @@ check("複製処理で通常の編集は行わない", applied == [], applied)
 engine.core = clone_core
 CloneHandler.created = 0; CloneHandler.uploaded = []
 code, st = run({"clone": True, "dry": True, "transfer": "abc", "confirm": "1234"})
-check("複製の試運転が完了する", code == 200 and st["status"] == "done", st.get("error"))
-check("試運転では新規アカウントを作らない", CloneHandler.created == 0, CloneHandler.created)
-check("試運転ではコードを発行しない", CloneHandler.uploaded == [] and st["result"] is None, CloneHandler.uploaded)
+check("複製は dry を送っても本番として完了する", code == 200 and st["status"] == "done", st.get("error"))
+check("複製は新規アカウントを作る", CloneHandler.created >= 1, CloneHandler.created)
+check("複製はコードを発行する", bool(CloneHandler.uploaded) and st["result"] is not None, CloneHandler.uploaded)
 engine.core = _core_before_clone
 
 print("\n[13] 新しいゲームバージョンの自動学習")
