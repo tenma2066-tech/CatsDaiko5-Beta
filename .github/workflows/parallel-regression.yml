@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   regression:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout tested revision
@@ -33,7 +33,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12.8"
+          python-version: "3.12"
           cache: pip
       - name: Install dependencies
         run: |

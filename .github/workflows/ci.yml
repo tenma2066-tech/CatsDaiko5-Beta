@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -24,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12.8"
+          python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
@@ -47,3 +47,9 @@ jobs:
           python -m unittest -v test_cat_customization.py
           python -m unittest -v test_github_auth_store.py
           python -m unittest -v test_item_types.py
+          python -m unittest -v test_new_features.py
+          python -m unittest -v test_order_flow.py
+          python -m unittest -v test_hold_e2e.py
+          python -m unittest -v test_paypay_hold.py
+          python -m unittest -v test_paypay_gateway.py
+          python -m unittest -v test_github_runtime_store.py
