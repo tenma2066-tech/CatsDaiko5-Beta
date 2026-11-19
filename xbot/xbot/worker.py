@@ -169,24 +169,38 @@ def run_dms(s, manual=False):
     # 1) ふつうの会話：一覧だけ先に読み、会話ごとに新しいブラウザで開く
     #    （X のチャットは、同じブラウザで別の会話・リクエスト画面へ移ると表示されなくなるため）
     keys = []
-    if rs:
+    backoff = float(store.get("dm_chat_backoff_until") or 0)
+    if rs and time.time() < backoff:
+        store.update_status(note=f"会話が開けない状態が続いたため、{logic.fmt_jst(backoff)} まで会話の確認を休んでいます（リクエストと予約投稿は動いています）")
+    elif rs:
         with DMBrowser() as b:
             b.dm_open_inbox()
-            keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
+            keys = b.dm_chat_keys(min(3, int(s["dm_scan_limit"])))   # 1回に開くのは3件まで（時間がかかるため）
         counts["chats"] = len(keys)
+        started, fails, opened = time.time(), 0, 0
         for key in keys:
             if counts["limited"]:
                 store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
                 break
+            if time.time() - started > 240:          # 4分を超えたら、ほかの仕事（予約投稿など）を先にする
+                break
             try:
-                with DMBrowser(sync=False) as b:
-                    b.dm_open_inbox()              # チャットの準備（暗号の読み込み）は一覧の画面で終わるので、先に開く
+                with DMBrowser() as b:
+                    b.dm_open_inbox()
                     got = b.dm_open_chat(key)
+                    opened += 1
+                    fails = 0
                     _handle(b, s, rs, key, got, dry, counts)
             except ChatLocked:
                 raise
             except Exception as e:  # noqa: BLE001
-                store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
+                fails += 1
+                if fails >= 2:     # 続けて開けない → 1時間休む（同じ失敗をくり返して、予約投稿を止めないように）
+                    store.put("dm_chat_backoff_until", time.time() + 3600)
+                    store.log("warn", "dm", f"会話を続けて開けなかったので、1時間は会話の確認を休みます（{type(e).__name__}）")
+                    break
+        if opened:
+            store.put("dm_chat_backoff_until", 0)
     # 2) メッセージリクエスト（新しいブラウザで）
     with DMBrowser(sync=False) as b:
         # 2) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
