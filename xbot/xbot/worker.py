@@ -180,6 +180,7 @@ def run_dms(s, manual=False):
                 break
             try:
                 with DMBrowser(sync=False) as b:
+                    b.dm_open_inbox()              # チャットの準備（暗号の読み込み）は一覧の画面で終わるので、先に開く
                     got = b.dm_open_chat(key)
                     _handle(b, s, rs, key, got, dry, counts)
             except ChatLocked:
