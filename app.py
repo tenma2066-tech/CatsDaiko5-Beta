@@ -853,6 +853,19 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
             except Exception:  # noqa: BLE001
                 job["warn"].append(f"「{m['name']}」をクリアにできませんでした。")
         _log(job, f"イベントステージ {done}件 をクリアにしました。")
+        # クリアしたマップで手に入るドロップキャラ（1=キャラ本体、3=第3形態）も獲得済みにする
+        base, third = [], []
+        for i in ev_ids:
+            for cid, form in EVENT_BY_ID[i].get("drops") or []:
+                (third if int(form) >= 3 else base).append(int(cid))
+        try:
+            if base or third:
+                r = engine.unlock_cats_by_ids(save, sorted(set(base + third)))
+                if third:
+                    engine.apply_cat_customizations(save, {c: {"form": 3} for c in sorted(set(third))})
+                _log(job, f"ドロップキャラ：{len(r.get('unlocked', []))}体を獲得、第3形態 {len(set(third))}体。")
+        except Exception:  # noqa: BLE001
+            job["warn"].append("イベントステージのドロップキャラの一部を入れられなかった可能性があります。")
     if restart:                                      # 初期垢作成：リスタートパックと同じ中身を入れる（ほかの指定はこのあと上書き）
         rp = restart_pack()
         try:
@@ -1865,7 +1878,7 @@ def index():
         ("qty", "アイテム", f"個数を決めて付与します。最大まで入れたいときは「すべて最大値」を押してください。空欄は変更しません（1項目 {p['other']}円）", ITEMS),
         ("chars", "キャラ", f"キャラを選び、レベル・形態・本能を1体ずつ設定します（1体・1項目ごとに {p['chara']}円）", []),
         ("subs", "サブ", f"キャラ・ステージなどをまとめて解放・強化します（1項目 {p['other']}円。レジェンドストーリーは段階が上がるごとに +{p['other']}円）", SUBS),
-        ("events", "イベステ", f"イベントステージを、マップごとにクリア済みにします（1マップ {p['other']}円）。大狂乱・絶など、前のステージのクリアが必要なものは、それを選ぶと押せるようになります", EVENT_MAPS),
+        ("events", "イベステ", f"イベントステージを、マップごとにクリア済みにします（1マップ {p['other']}円）。「キャラ付き」のマップは、そこでドロップするキャラも獲得済みにします。大狂乱・絶など、前のステージのクリアが必要なものは、それを選ぶと押せるようになります", EVENT_MAPS),
         ("others", "その他", f"会員状態やミッションなどを設定します（1項目 {p['other']}円・クラッシュ修正は {p['crash']}円）", OTHERS),
     ]
     totals = {k: len(v) for k, _, _, v in groups}
@@ -3273,7 +3286,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       </div>
       <label class="sw" style="margin:8px 0"><input type="checkbox" id="evPre"><span><b>前提のステージはクリア済み</b><small>大狂乱・絶など前提があるマップを、前提を選ばずに頼むときにチェック（引継ぎコードのデータのみ）。前提が終わっていなかった場合は、こちらで一緒にクリアします。</small></span></label>
       <div class="list" id="evlist">
-        {% for m in lst %}<label class="opt" data-q="{{ m.name }} {{ m.cat }}"><input type="checkbox" name="events" value="{{ m.id }}"{% if m.reqs %} data-req="{{ m.reqs | join(',') }}"{% endif %}><span>{{ m.name }}{% if m.stars > 1 %}<em class="lp">冠{{ m.stars }}</em>{% endif %}{% if m.reqs %}<small class="evreq">前提：{% if m.reqs | length > 3 %}狂乱9種すべて{% else %}{% for r in m.reqs %}{{ ev_names[r] }}{{ '・' if not loop.last }}{% endfor %}{% endif %}</small>{% endif %}</span></label>{% endfor %}
+        {% for m in lst %}<label class="opt" data-q="{{ m.name }} {{ m.cat }}"><input type="checkbox" name="events" value="{{ m.id }}"{% if m.reqs %} data-req="{{ m.reqs | join(',') }}"{% endif %}><span>{{ m.name }}{% if m.stars > 1 %}<em class="lp">冠{{ m.stars }}</em>{% endif %}{% if m.drops %}<em class="lp" title="クリアするとドロップキャラも獲得">キャラ付き</em>{% endif %}{% if m.reqs %}<small class="evreq">前提：{% if m.reqs | length > 3 %}狂乱9種すべて{% else %}{% for r in m.reqs %}{{ ev_names[r] }}{{ '・' if not loop.last }}{% endfor %}{% endif %}</small>{% endif %}</span></label>{% endfor %}
       </div>
       {% else %}
       <div class="tools">
