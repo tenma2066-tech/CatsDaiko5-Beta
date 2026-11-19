@@ -166,8 +166,9 @@ class AppTests(unittest.TestCase):
         self.patch.stop()
 
     def test_new_options_are_listed(self):
-        for name in ("プラチナのかけら", "1億DL記念チケット"):
-            self.assertIn(name, self.app.ITEMS)
+        self.assertIn("プラチナのかけら", self.app.ITEMS)
+        self.assertNotIn("1億DL記念チケット", self.app.ITEMS)   # メニューから外した（古い注文のため engine には残す）
+        self.assertNotIn('data-item="1億DL記念チケット"', self.client.get("/").get_data(as_text=True))
         for name in ("ユーザーランク報酬全受け取り", "チュートリアルクリア",
                      "ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正"):
             self.assertIn(name, self.app.OTHERS)
