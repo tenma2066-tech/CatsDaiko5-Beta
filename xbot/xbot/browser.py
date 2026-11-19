@@ -59,10 +59,14 @@ CHAT = "https://x.com/i/chat"
 
 
 class DMBrowser:
-    """DM（チャット）用：iPhone 側のログイン情報をパソコン（Chromium）側に写して開く。"""
+    """DM（チャット）用：iPhone 側のログイン情報をパソコン（Chromium）側に写して開く。
+    X のチャットは、1つのブラウザで別の会話やリクエスト画面へ移ると表示されなくなるため、場面ごとに新しく起動する。"""
+
+    def __init__(self, sync=True):
+        self.sync = sync
 
     def __enter__(self):
-        if (store.get("engine") or "iphone") == "iphone":
+        if self.sync and (store.get("engine") or "iphone") == "iphone":
             with Browser(engine="iphone") as b0:
                 ck = b0.ctx.cookies(["https://x.com"])
             self.b = Browser(engine="pc").__enter__()

@@ -166,22 +166,28 @@ def run_dms(s, manual=False):
         if manual:
             store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
         return
-    with DMBrowser() as b:
-        # 1) ふつうの会話（X は、リクエスト画面を開いたあとだと会話の一覧が出なくなるので、先に見る）
-        if rs:
+    # 1) ふつうの会話：一覧だけ先に読み、会話ごとに新しいブラウザで開く
+    #    （X のチャットは、同じブラウザで別の会話・リクエスト画面へ移ると表示されなくなるため）
+    keys = []
+    if rs:
+        with DMBrowser() as b:
             b.dm_open_inbox()
             keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
-            counts["chats"] = len(keys)
-            for key in keys:
-                if counts["limited"]:
-                    store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
-                    break
-                try:
-                    got = b.dm_open_chat(key)     # 一覧には戻らず、会話のURLを直接開く
-                except Exception as e:  # noqa: BLE001
-                    store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
-                    continue
-                _handle(b, s, rs, key, got, dry, counts)
+        counts["chats"] = len(keys)
+        for key in keys:
+            if counts["limited"]:
+                store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
+                break
+            try:
+                with DMBrowser(sync=False) as b:
+                    got = b.dm_open_chat(key)
+                    _handle(b, s, rs, key, got, dry, counts)
+            except ChatLocked:
+                raise
+            except Exception as e:  # noqa: BLE001
+                store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
+    # 2) メッセージリクエスト（新しいブラウザで）
+    with DMBrowser(sync=False) as b:
         # 2) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
         #    失敗しても、ふつうの会話の確認は続ける
         if s.get("dm_accept_requests", True):
