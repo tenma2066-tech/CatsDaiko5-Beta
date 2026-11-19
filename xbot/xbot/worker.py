@@ -167,7 +167,23 @@ def run_dms(s, manual=False):
             store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
         return
     with DMBrowser() as b:
-        # 1) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
+        # 1) ふつうの会話（X は、リクエスト画面を開いたあとだと会話の一覧が出なくなるので、先に見る）
+        if rs:
+            b.dm_open_inbox()
+            keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
+            counts["chats"] = len(keys)
+            for key in keys:
+                if counts["limited"]:
+                    store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
+                    break
+                b.dm_open_inbox()
+                try:
+                    got = b.dm_open_chat(key)
+                except Exception as e:  # noqa: BLE001
+                    store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
+                    continue
+                _handle(b, s, rs, key, got, dry, counts)
+        # 2) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
         #    失敗しても、ふつうの会話の確認は続ける
         if s.get("dm_accept_requests", True):
             for scope, other in (("リクエスト", False), ("リクエスト（その他）", True)):
@@ -196,22 +212,6 @@ def run_dms(s, manual=False):
                 except Exception as e:  # noqa: BLE001
                     b.shot("dm-request-fail")
                     store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）。続きの確認は進めます")
-        # 2) ふつうの会話
-        if rs:
-            b.dm_open_inbox()
-            keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
-            counts["chats"] = len(keys)
-            for key in keys:
-                if counts["limited"]:
-                    store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
-                    break
-                b.dm_open_inbox()
-                try:
-                    got = b.dm_open_chat(key)
-                except Exception as e:  # noqa: BLE001
-                    store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
-                    continue
-                _handle(b, s, rs, key, got, dry, counts)
     store.update_status(last_dm_check=time.time(), dm_checked=counts["chats"], dm_replied=counts["replied"],
                         dm_requests=counts["requests"], dm_accepted=counts["accepted"])
     if manual or counts["replied"] or counts["accepted"]:
@@ -338,21 +338,12 @@ def main():
                 try:
                     from .browser import CHAT, DMBrowser
                     with DMBrowser() as b:
-                        for label, url in (("chat-direct", CHAT), ("requests", CHAT + "/requests"), ("chat-after-requests", CHAT)):
-                            b.goto(url)
-                            for t in (3, 8, 15, 25):
-                                time.sleep(t - (0 if t == 3 else {8: 3, 15: 8, 25: 15}[t]))
-                                n_conv = b.page.locator('[data-testid^="dm-conversation-item-"]').count()
-                                n_req = b.page.locator('[data-testid^="dm-message-request-item-"]').count()
-                                other = b.page.locator('[data-testid="dm-message-requests-other-button"]').count()
-                                row = b.page.locator('[data-testid="dm-message-requests-inbox-row"]').count()
-                                pin = b.page.locator('[data-testid="pin-code-input-container"]').count()
-                                print(f"[probe] {label} t={t}s url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:12]} conv={n_conv} req={n_req} other_btn={other} req_row={row} pin={pin}", flush=True)
-                        b.dm_open_inbox(requests=True)
-                        b.dm_open_inbox(requests=True, other=True)
-                        print(f"[probe] other: no_items={getattr(b, 'no_items', None)}", flush=True)
                         b.dm_open_inbox()
-                        print(f"[probe] fixed chat-after-requests conv={b.page.locator('[data-testid^=\"dm-conversation-item-\"]').count()}", flush=True)
+                        print(f"[probe] 1) chats first: conv={len(b.dm_chat_keys(50))}", flush=True)
+                        b.dm_open_inbox(requests=True)
+                        print(f"[probe] 2) requests: req={len(b.dm_request_keys())}", flush=True)
+                        b.dm_open_inbox(requests=True, other=True)
+                        print(f"[probe] 3) other: req={len(b.dm_request_keys())} no_items={getattr(b, 'no_items', None)}", flush=True)
                         b.shot("probe-chat")
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
