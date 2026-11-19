@@ -156,6 +156,27 @@ _SUB_PRIORITY = {
 }
 
 
+def _load_event_maps():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "event_maps.json"), encoding="utf-8") as f:
+            return json.load(f)["maps"]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+EVENT_MAPS = _load_event_maps()                     # イベント・コラボステージの一覧（ゲームデータから作成）
+EVENT_BY_ID = {m["id"]: m for m in EVENT_MAPS}
+EV_PREFIX = "EV:"                                   # 注文の中では「その他」に EV:マップ番号 として入れる
+
+
+def _event_ids(others):
+    out = []
+    for x in others:
+        if str(x).startswith(EV_PREFIX) and str(x)[3:].isdigit() and int(str(x)[3:]) in EVENT_BY_ID:
+            out.append(int(str(x)[3:]))
+    return out
+
+
 def _legend_kinds(subs):
     return {engine.LEGEND_TIERS[x][0] for x in subs if x in engine.LEGEND_TIERS}
 
@@ -813,7 +834,22 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
     qty = dict(qty or {})
     pt_add = int(qty.pop(PT_KEY, 0) or 0)
     restart = RESTART_KEY in others
-    others = [x for x in others if x != RESTART_KEY]
+    ev_ids = _event_ids(others)
+    others = [x for x in others if x != RESTART_KEY and not str(x).startswith(EV_PREFIX)]
+    if ev_ids:                                       # イベント・コラボステージのクリア（前提が終わっていなければ、前提も一緒に）
+        done = 0
+        for i in ev_ids:
+            m = EVENT_BY_ID[i]
+            try:
+                req = m.get("req")
+                if req and req not in ev_ids and not engine.event_map_cleared(save, req, EVENT_BY_ID[req]["stages"]):
+                    engine.clear_event_map(save, req, EVENT_BY_ID[req]["stars"], EVENT_BY_ID[req]["stages"])
+                    job["warn"].append(f"「{EVENT_BY_ID[req]['name']}」が未クリアだったため、一緒にクリアしました（料金はかかりません）。")
+                engine.clear_event_map(save, i, m["stars"], m["stages"])
+                done += 1
+            except Exception:  # noqa: BLE001
+                job["warn"].append(f"「{m['name']}」をクリアにできませんでした。")
+        _log(job, f"イベントステージ {done}件 をクリアにしました。")
     if restart:                                      # 初期垢作成：リスタートパックと同じ中身を入れる（ほかの指定はこのあと上書き）
         rp = restart_pack()
         try:
@@ -1225,13 +1261,15 @@ def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, ca
     restart = RESTART_KEY in others
     pt_min = int(qty.get(PT_KEY, 0) or 0)
     plain_qty = {k for k in qty if k != PT_KEY}
-    plain_others = [x for x in others if x not in CRASH_ITEMS and x != RESTART_KEY]
+    events = _event_ids(others)
+    plain_others = [x for x in others if x not in CRASH_ITEMS and x != RESTART_KEY and not str(x).startswith(EV_PREFIX)]
     # 種類ごとの数量指定（「マタタビ#3」など）は、元の項目1件としてまとめて数える
     legend = [x for x in subs if x in engine.LEGEND_TIERS]
     legend_units = sum(engine.LEGEND_TIERS[x][1] for x in legend)   # レジェンドは段階が上がるごとに1件分（+25円）ずつ高くなる
     other_n = len(set(items) | {str(k).split("#")[0] for k in plain_qty}) + len(subs) - len(legend) + len(plain_others)
     rows = [("初期垢作成（リスタートパック）", 1 if restart else 0, PRICES["restart"]),
             ("レジェンドストーリー（段階ごとに1件分）", legend_units, PRICES["other"]),
+            ("イベントステージ（1マップごと）", len(events), PRICES["other"]),
             ("キャラ指定（レベル・形態・本能など1項目ずつ）", chara_units(cat_nums, cat_settings), PRICES["chara"]),
             ("クラッシュ解除", len(crash), PRICES["crash"]),
             ("プレイ時間（10分ごと）", pt_min // 10, PRICES["playtime10"]),
@@ -1377,6 +1415,9 @@ def _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integ
         if qty: parts.append("数量: " + "・".join(f"{engine.type_label(k)}={v}" for k, v in list(qty.items())[:12]) + ("…" if len(qty) > 12 else ""))
         if cat_nums: parts.append(f"キャラ{len(cat_nums)}体({_compress(cat_nums)[:40]})／設定{chara_units(cat_nums, cat_settings)}件")
         if subs: parts.append("サブ: " + "・".join(subs))
+        evs = _event_ids(others)
+        others = [x for x in others if not str(x).startswith(EV_PREFIX)]
+        if evs: parts.append(f"イベステ{len(evs)}件: " + "・".join(EVENT_BY_ID[i]["name"] for i in evs[:5]) + ("…" if len(evs) > 5 else ""))
         if others: parts.append("その他: " + "・".join(others))
     parts.append("既存データ" if has_transfer else "新規アカウント")
     if dry: parts.append("試運転")
@@ -1818,10 +1859,10 @@ if _is_server_process():
 def index():
     p = PRICES
     groups = [
-        ("items", "アイテム", f"選んだものを最大値まで付与します（1項目 {p['other']}円）", ITEMS),
-        ("qty", "数量指定", f"個数を決めて付与します。空欄は変更しません（1項目 {p['other']}円）", ITEMS),
+        ("qty", "アイテム", f"個数を決めて付与します。最大まで入れたいときは「すべて最大値」を押してください。空欄は変更しません（1項目 {p['other']}円）", ITEMS),
         ("chars", "キャラ", f"キャラを選び、レベル・形態・本能を1体ずつ設定します（1体・1項目ごとに {p['chara']}円）", []),
         ("subs", "サブ", f"キャラ・ステージなどをまとめて解放・強化します（1項目 {p['other']}円。レジェンドストーリーは段階が上がるごとに +{p['other']}円）", SUBS),
+        ("events", "イベステ", f"イベント・コラボステージを、マップごとにクリア済みにします（1マップ {p['other']}円）。大狂乱・絶など、前のステージのクリアが必要なものは、それを選ぶと押せるようになります", EVENT_MAPS),
         ("others", "その他", f"会員状態やミッションなどを設定します（1項目 {p['other']}円・クラッシュ修正は {p['crash']}円）", OTHERS),
     ]
     totals = {k: len(v) for k, _, _, v in groups}
@@ -1965,6 +2006,23 @@ def run():
     items = [x for x in data.get("items", []) if x in ITEMS]
     subs = _one_legend_tier([x for x in data.get("subs", []) if x in SUBS])
     others = [x for x in data.get("others", []) if x in OTHERS]
+    if not clone and not integrity_only:
+        ev = []
+        for x in data.get("events") or []:
+            try:
+                i = int(x)
+            except (TypeError, ValueError):
+                continue
+            if i in EVENT_BY_ID and i not in ev:
+                ev.append(i)
+        if len(ev) > 400:
+            return jsonify(error="イベントステージは1回に400件までにしてください。"), 400
+        for i in ev:   # 前提（狂乱→大狂乱、○○→絶・○○ など）を満たさないものは頼めない
+            req = EVENT_BY_ID[i].get("req")
+            if req and req not in ev and not (transfer and data.get("events_pre_done")):
+                return jsonify(error=f"「{EVENT_BY_ID[i]['name']}」は、先に「{EVENT_BY_ID[req]['name']}」をクリアしている必要があります。"
+                                     f"一緒に選ぶか、クリア済みなら「前提のステージはクリア済み」にチェックしてください。", code="need_event_pre"), 400
+        others = others + [f"{EV_PREFIX}{i}" for i in ev]
     kinds = _legend_kinds(subs)
     if "uncanny" in kinds and "old" not in kinds and not clone and not integrity_only:
         # 真レジェンドは、旧レジェンドの冠1が終わっていないと遊べない
@@ -3003,6 +3061,7 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .ptrow{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
 .ptrow input{width:110px;font:inherit;font-size:16px;padding:9px 10px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .ptrow select{font:inherit;font-size:16px;padding:9px 8px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+label.opt.locked{opacity:.45}.evreq{display:block;font-size:11.5px;color:var(--muted)}
 .lp{margin-left:8px;padding:0 7px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;font-weight:700;color:var(--muted);white-space:nowrap}
 .soon{margin-left:6px;padding:0 8px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;color:var(--muted)}
 .modecard:disabled{opacity:.55;cursor:not-allowed}
@@ -3202,6 +3261,16 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <p class="note">カンマ・スペース・改行で区切ります。ハイフンで範囲指定できます（例：100-120）。<br>
         番号はDBの表記どおり（1始まり）で入力してください。すでに持っているキャラは変更しません。
         図鑑に無い番号と、エラーキャラになる番号は自動で除外します。</p>
+      {% elif key == 'events' %}
+      <div class="tools">
+        <input type="search" id="evq" placeholder="マップ名で絞り込み（例：狂乱、降臨、コラボ名）" autocomplete="off" aria-label="イベステを絞り込み" style="flex:1;min-width:0;font:inherit;font-size:16px;padding:9px 11px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)">
+        <button type="button" class="btn" data-all="events" data-v="0">解除</button>
+        <span class="count" id="n-events">0 / {{ totals[key] }}</span>
+      </div>
+      <label class="sw" style="margin:8px 0"><input type="checkbox" id="evPre"><span><b>前提のステージはクリア済み</b><small>大狂乱・絶など前提があるマップを、前提を選ばずに頼むときにチェック（引継ぎコードのデータのみ）。前提が終わっていなかった場合は、こちらで一緒にクリアします。</small></span></label>
+      <div class="list" id="evlist">
+        {% for m in lst %}<label class="opt" data-q="{{ m.name }} {{ m.cat }}"><input type="checkbox" name="events" value="{{ m.id }}"{% if m.req %} data-req="{{ m.req }}"{% endif %}><span>{{ m.name }}<em class="lp">{{ m.cat }}{% if m.stars > 1 %}・冠{{ m.stars }}{% endif %}</em>{% if m.req %}<small class="evreq">前提：{{ lst | selectattr('id', 'equalto', m.req) | map(attribute='name') | first }}</small>{% endif %}</span></label>{% endfor %}
+      </div>
       {% else %}
       <div class="tools">
         <button type="button" class="btn" data-all="{{ key }}" data-v="1">全選択</button>
@@ -3460,10 +3529,10 @@ function restartOn(){ const r=$('#restart'); return !!(r&&r.checked&&!r.disabled
 function couponCode(){ const c=$('#coupon'); return c?c.value.normalize('NFKC').toUpperCase().replace(/\s/g,''):''; }
 const HIGH={{ high|tojson }};
 const ERRNUMS={{ error_nums|tojson }};
-const GROUPS=['items','subs','others'];
-const TABS=['start','input','items','qty','chars','subs','others','confirm','status'];
-const MENU=['items','qty','chars','subs','others'];
-let curView='input', lastMenu='items';
+const GROUPS=['events','subs','others'];
+const TABS=['start','input','qty','events','chars','subs','others','confirm','status'];
+const MENU=['qty','events','chars','subs','others'];
+let curView='input', lastMenu='qty';
 const STEP_TEXT=['準備','取得','書き換え','発行'];
 let curJob=null, pollTimer=null, tickTimer=null, jobStart=0, jobRunning=false;
 let lastOk=0, fails=0, state=null;
@@ -3607,8 +3676,20 @@ function normLegend(){
   document.querySelectorAll('input[name=subs]:checked').forEach(x=>{ const k=LEG.exec(x.value); if(k&&(!best[k[1]]||legLv(k)>best[k[1]])) best[k[1]]=legLv(k); });
   document.querySelectorAll('input[name=subs]:checked').forEach(x=>{ const k=LEG.exec(x.value); if(k&&legLv(k)!==best[k[1]]) x.checked=false; });
 }
+/* イベステ：前提（大狂乱←狂乱、絶・○○←○○）を満たさないものは押せない */
+function evDeps(){
+  const pre=$('#evPre')&&$('#evPre').checked;
+  const on=new Set(picked('events'));
+  $$('input[name=events][data-req]').forEach(x=>{
+    const ok=pre||on.has(x.dataset.req);
+    if(!ok&&x.checked){ x.checked=false; on.delete(x.value); }
+    x.disabled=!ok; x.closest('label').classList.toggle('locked',!ok);
+  });
+}
+{ const q=$('#evq'); if(q) q.addEventListener('input',()=>{ const v=q.value.trim().toLowerCase();
+    $$('#evlist label').forEach(l=>{ l.hidden=!!v&&!(l.dataset.q||'').toLowerCase().includes(v); }); }); }
 function refresh(){
-  normLegend();
+  normLegend(); evDeps();
   { const w=$('#oldDoneWrap'); if(w) w.hidden=!needOld(); }
   let total=0;
   const pc=parseNums($('#chars').value), cn=pc.err?0:pc.nums.length; total+=cn;
@@ -3866,7 +3947,7 @@ function estimate(pc,qm){
   if($('#clone').checked) return PRICES.clone;
   const oth=picked('others');
   const crash=oth.filter(x=>CRASH.includes(x)).length;
-  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])]).size+subUnits()+oth.length-crash;
+  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])]).size+subUnits()+oth.length-crash+picked('events').length;
   let units=0;
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
   return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other+(restartOn()?PRICES.restart:0)+Math.floor(ptMin().min/10)*PRICES.playtime10;
@@ -3900,6 +3981,7 @@ function renderCart(pc,qm){
     const qbase=[...new Set(qkeys.map(k=>k.split('#')[0]))].filter(x=>!items.includes(x));
     if(items.length) { total+=items.length*PRICES.other; line('アイテム（最大まで）',items.join('・'),yen(items.length*PRICES.other,PRICES.other,items.length),'items'); }
     if(qbase.length){ total+=qbase.length*PRICES.other; line('アイテム（数量指定）',qkeys.map(k=>{ const e=document.querySelector('input.q[data-item="'+CSS.escape(k)+'"]'); return (e&&e.dataset.label||k)+' '+Number(qm[k]).toLocaleString('ja-JP'); }).join('・'),yen(qbase.length*PRICES.other,PRICES.other,qbase.length),'qty'); }
+    const evs=picked('events'); if(evs.length){ total+=evs.length*PRICES.other; const nm=evs.map(v=>{ const e=document.querySelector('input[name=events][value="'+v+'"]'); return e?e.closest('label').querySelector('span').firstChild.textContent:v; }); line('イベントステージ',nm.slice(0,8).join('・')+(nm.length>8?' ほか'+(nm.length-8)+'件':''),yen(evs.length*PRICES.other,PRICES.other,evs.length),'events'); }
     const subs=picked('subs'); if(subs.length){ const su=subUnits(subs); total+=su*PRICES.other; line('サブ',subs.join('・'),yen(su*PRICES.other,PRICES.other,su),'subs'); }
     const oth=picked('others'), crash=oth.filter(x=>CRASH.includes(x)), rest=oth.filter(x=>!CRASH.includes(x));
     if(crash.length){ total+=crash.length*PRICES.crash; line('クラッシュ修正',crash.join('・'),yen(crash.length*PRICES.crash,PRICES.crash,crash.length),'others'); }
@@ -3935,7 +4017,7 @@ function renderExtras(pc,qm,total,bm){
 try{ if(localStorage.getItem('nyanko-safe2')==='1') $('#safe').checked=true; }catch(e){}
 $('#safe').addEventListener('change',()=>{ try{localStorage.setItem('nyanko-safe2',$('#safe').checked?'1':'0')}catch(e){} refresh(); });
 $('#dry').addEventListener('change',refresh);
-['#ptH','#coupon','#oldDone'].forEach(q=>{ const e=$(q); if(e) e.addEventListener('input',refresh); });
+['#ptH','#coupon','#oldDone','#evPre'].forEach(q=>{ const e=$(q); if(e) e.addEventListener('input',refresh); });
 $('#clone').addEventListener('change',()=>{ if($('#clone').checked){ $('#integrity').checked=false; if($('#restart')) $('#restart').checked=false; } refresh(); });
 $('#integrity').addEventListener('change',()=>{ if($('#integrity').checked){ $('#clone').checked=false; if($('#restart')) $('#restart').checked=false; } refresh(); });
 
@@ -4264,7 +4346,7 @@ async function start(){
   if(needOld()&&!special()&&(!t||!$('#oldDone').checked)){ show('subs'); toast(!t?'新しいアカウントでは、旧レジェンドの段階も一緒に選んでください':'「旧レジェンドの冠1はクリア済み」にチェックするか、旧レジェンドの段階も選んでください'); return; }
   if(ptv.min>0&&picked('others').includes('プレイ時間カンスト')){ show('others'); toast('「プレイ時間カンスト」と「プレイ時間を増やす」は同時に選べません'); return; }
   if(restartOn()&&(t||c)){ show('input'); $('#inputErr').textContent='初期垢作成は新しいアカウントで行います。引継ぎコードと暗証番号を空欄にしてください。'; return; }
-  if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('items'); return; }
+  if(refresh()===0){ toast('項目を選ぶか、数量・キャラ番号を入力してください'); show('qty'); return; }
   const bad=overInputs()[0];
   if(bad){ show('qty'); const d=bad.closest('details'); if(d) d.open=true; toast('「'+(bad.dataset.label||bad.dataset.item)+'」が上限を超えています'); bad.scrollIntoView({block:'center'}); return; }
   }
@@ -4299,7 +4381,7 @@ async function start(){
 function runBody(t,c){
   return {safe:$('#safe').checked, dry:$('#dry').checked, clone:$('#clone').checked, integrity_only:$('#integrity').checked, transfer:t, confirm:c,
           items:picked('items'), qty:qtyMap(), chars:$('#chars').value, cat_settings:catSettingsPayload(), subs:picked('subs'), others:picked('others'),
-          old_legend_done:!!($('#oldDone')&&$('#oldDone').checked), playtime_add_min:special()?0:ptMin().min, restart_pack:!special()&&restartOn(), coupon:IS_ADMIN?'':couponCode()};
+          old_legend_done:!!($('#oldDone')&&$('#oldDone').checked), events:picked('events').map(Number), events_pre_done:!!($('#evPre')&&$('#evPre').checked), playtime_add_min:special()?0:ptMin().min, restart_pack:!special()&&restartOn(), coupon:IS_ADMIN?'':couponCode()};
 }
 $('#go').addEventListener('click',start);
 

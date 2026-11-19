@@ -972,6 +972,37 @@ LEGEND_FINALE = {
 }
 
 
+# レジェンドのステージで手に入る EX キャラ（ステージの報酬データより・セーブ内部のID）
+LEGEND_EX = {
+    "old": [113, 118, 131, 157],         # ノルン・レイ・ねねこ・ヌボボ
+    "uncanny": [42, 49, 54, 58, 62],     # ネコアイス・ねこ泥棒・10式戦車・ネコ魔剣士・ネコポン
+}
+
+
+def _event_group(save, map_id):
+    """イベントステージ（1000番台）・コラボステージ（2000番台）のマップ。"""
+    t = 1 if map_id < 2000 else 2
+    return save.event_stages.chapters[t].chapters[map_id - 1000 * t]
+
+
+def event_map_cleared(save, map_id, stages) -> bool:
+    ch = _event_group(save, map_id).chapters[0]
+    last = ch.stages[min(int(stages), len(ch.stages)) - 1]
+    return int(getattr(last, "clear_amount", 0) or 0) > 0
+
+
+def clear_event_map(save, map_id, stars, stages) -> int:
+    """イベント・コラボのマップを、全部の冠（星）・全部のステージでクリアにする（クリア回数は増やさない）。"""
+    g = _event_group(save, map_id)
+    n = 0
+    for star in range(min(int(stars), len(g.chapters))):
+        for si in range(min(int(stages), len(g.chapters[star].stages))):
+            g.clear_stage(star, si, 1, False, True)
+            n += 1
+        g.chapters[star].chapter_unlock_state = 3
+    return n
+
+
 OLD_LEGEND_LAST_MAP = 47      # 旧レジェンドの物語の最後のマップ「伝説のおわり」（ステージ8つ）
 OLD_LEGEND_LAST_STAGES = 8
 
@@ -1003,6 +1034,8 @@ def clear_legend_crowns(save, kind: str, crowns: int) -> int:
             g.chapters[star].chapter_unlock_state = 3
         if top < len(g.chapters):                          # 次の冠を挑戦できる状態にする
             g.chapters[top].chapter_unlock_state = max(1, int(g.chapters[top].chapter_unlock_state or 0))
+    if int(crowns) >= 1:                                   # レジェンドのステージで手に入る EX キャラも入れる（初クリア報酬）
+        unlock_cats_by_ids(save, LEGEND_EX[kind])
     if int(crowns) >= 5:                                   # 入手ステージ（イディ／ノーヴァ）もクリアして、キャラを入れる
         fin = LEGEND_FINALE[kind]
         ex = save.event_stages.chapters[4].chapters[fin["ex_map"]]
