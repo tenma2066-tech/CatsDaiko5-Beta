@@ -348,6 +348,11 @@ def main():
                                 row = b.page.locator('[data-testid="dm-message-requests-inbox-row"]').count()
                                 pin = b.page.locator('[data-testid="pin-code-input-container"]').count()
                                 print(f"[probe] {label} t={t}s url={b.page.url.split('?')[0].rsplit('/', 1)[-1][:12]} conv={n_conv} req={n_req} other_btn={other} req_row={row} pin={pin}", flush=True)
+                        b.dm_open_inbox(requests=True)
+                        b.dm_open_inbox(requests=True, other=True)
+                        print(f"[probe] other: no_items={getattr(b, 'no_items', None)}", flush=True)
+                        b.dm_open_inbox()
+                        print(f"[probe] fixed chat-after-requests conv={b.page.locator('[data-testid^=\"dm-conversation-item-\"]').count()}", flush=True)
                         b.shot("probe-chat")
                     store.log("info", "check", "DM画面を調べました（何も送っていません）")
                 except Exception as e:  # noqa: BLE001
