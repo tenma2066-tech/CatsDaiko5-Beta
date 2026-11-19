@@ -490,8 +490,10 @@ class Browser:
         human_pause(1, 2)
 
     def dm_open_chat(self, key):
-        self.page.locator(f'[data-testid="dm-conversation-item-{key}"]').first.click()
-        self.page.wait_for_selector('[data-testid="dm-composer-textarea"]', timeout=20000)
+        """会話を開く。一覧のクリックでは開かないことがあるので、会話のURL（/i/chat/ID-ID）を直接開く。"""
+        conv = re.sub(r"[^0-9:]", "", key).replace(":", "-")
+        self.goto(f"{CHAT}/{conv}")
+        self.page.wait_for_selector('[data-testid="dm-composer-textarea"]', timeout=30000)
         human_pause(1, 2)
         return self._last_message()
 

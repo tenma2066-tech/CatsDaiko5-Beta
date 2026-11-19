@@ -176,9 +176,8 @@ def run_dms(s, manual=False):
                 if counts["limited"]:
                     store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
                     break
-                b.dm_open_inbox()
                 try:
-                    got = b.dm_open_chat(key)
+                    got = b.dm_open_chat(key)     # 一覧には戻らず、会話のURLを直接開く
                 except Exception as e:  # noqa: BLE001
                     store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
                     continue
