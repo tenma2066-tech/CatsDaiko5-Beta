@@ -6,7 +6,7 @@ name: xbot deploy
 #   run.txt の中身: 1行目 = step（install / caddy / status）、2行目 = domain（caddy のとき）
 on:
   push:
-    branches: [claude/zealous-ritchie-5o2epn]
+    branches: [main]
     paths: ["xbot/deploy/run.txt"]
   workflow_dispatch:
     inputs:

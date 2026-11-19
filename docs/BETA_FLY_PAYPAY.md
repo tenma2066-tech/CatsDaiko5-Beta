@@ -1,6 +1,6 @@
 # Beta（Fly.io + PayPay決済）引き継ぎメモ
 
-最終更新: 2026-11-15（料金改定まで反映） / ブランチ: `claude/zealous-ritchie-5o2epn`（Beta リポジトリ）
+最終更新: 2026-11-15（料金改定まで反映） / ブランチ: `main`（2026-11-20 に `claude/zealous-ritchie-5o2epn` から移行）（Beta リポジトリ）
 
 ## 1. 目的と全体像
 - CatsDaiko5（安定版）の内容をベースに、Beta は **ログインを廃止し、PayPay決済が確認できてから実行**する個人利用版。
@@ -75,7 +75,7 @@
 - テスト: `test_order_flow.py`（注文・料金・保留復帰・永続化）、`test_paypay_gateway.py` ほか
 
 ## 6. 運用
-- デプロイ: `claude/zealous-ritchie-5o2epn` への push で自動（`*.md` と `docs/**` のみの変更は対象外）。手動は Actions →「Deploy to Fly.io」。
+- デプロイ: `main` への push で自動（`*.md` と `docs/**` のみの変更は対象外）。手動は Actions →「Deploy to Fly.io」。
 - GitHub Secrets: `FLY_API_TOKEN`（orgトークン）, `ADMIN_PASSWORD`。`SECRET_KEY` と `PAYPAY_ENCRYPTION_KEY` は初回に自動生成して Fly secrets に保存（値は表示されない・上書きしない）。
 - PayPay接続: `/admin` に ADMIN_PASSWORD で入り、受取側アカウントの電話番号/パスワード → SMS認証。接続済み。
 - データ: ボリューム `data` → `/data/paypay`（アカウント `account.enc`、注文 `orders.enc`、台帳 `payments.sqlite3`）。`PAYPAY_ENCRYPTION_KEY` を失うと読めなくなる。

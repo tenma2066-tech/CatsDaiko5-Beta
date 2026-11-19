@@ -3,7 +3,7 @@ name: VPS diagnostics
 on:
   workflow_dispatch:
   push:
-    branches: [claude/zealous-ritchie-5o2epn]
+    branches: [main]
     paths: [".github/workflows/vps-diag.yml"]
 
 jobs:

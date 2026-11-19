@@ -4,7 +4,7 @@ name: Deploy to VPS
 # 任意: VPS_USER（既定 root）, SITE_DOMAIN（独自ドメイン。なければ <IP>.sslip.io で自動HTTPS）
 on:
   push:
-    branches: [claude/zealous-ritchie-5o2epn]
+    branches: [main]
     paths-ignore: ["**.md", "docs/**", ".github/workflows/vps-diag.yml", ".github/workflows/diag.yml", "xbot/**", ".github/workflows/xbot-*.yml"]
   workflow_dispatch:
     inputs:
