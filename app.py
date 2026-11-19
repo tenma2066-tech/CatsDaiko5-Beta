@@ -841,10 +841,11 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
         for i in ev_ids:
             m = EVENT_BY_ID[i]
             try:
-                req = m.get("req")
-                if req and req not in ev_ids and not engine.event_map_cleared(save, req, EVENT_BY_ID[req]["stages"]):
-                    engine.clear_event_map(save, req, EVENT_BY_ID[req]["stars"], EVENT_BY_ID[req]["stages"])
-                    job["warn"].append(f"「{EVENT_BY_ID[req]['name']}」が未クリアだったため、一緒にクリアしました（料金はかかりません）。")
+                for req in m.get("reqs") or []:
+                    if req not in ev_ids and not engine.event_map_cleared(save, req, EVENT_BY_ID[req]["stages"]):
+                        engine.clear_event_map(save, req, EVENT_BY_ID[req]["stars"], EVENT_BY_ID[req]["stages"])
+                        ev_ids.append(req)   # 同じ前提を二度クリアしない
+                        job["warn"].append(f"「{EVENT_BY_ID[req]['name']}」が未クリアだったため、一緒にクリアしました（料金はかかりません）。")
                 engine.clear_event_map(save, i, m["stars"], m["stages"])
                 done += 1
             except Exception:  # noqa: BLE001
@@ -1867,7 +1868,7 @@ def index():
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
-        MAIN_HTML, legend_levels={k: v[1] for k, v in engine.LEGEND_TIERS.items()}, is_admin=bool(session.get("admin")) and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
+        MAIN_HTML, ev_names={m["id"]: m["name"] for m in EVENT_MAPS}, legend_levels={k: v[1] for k, v in engine.LEGEND_TIERS.items()}, is_admin=bool(session.get("admin")) and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
@@ -2017,10 +2018,11 @@ def run():
                 ev.append(i)
         if len(ev) > 400:
             return jsonify(error="イベントステージは1回に400件までにしてください。"), 400
-        for i in ev:   # 前提（狂乱→大狂乱、○○→絶・○○ など）を満たさないものは頼めない
-            req = EVENT_BY_ID[i].get("req")
-            if req and req not in ev and not (transfer and data.get("events_pre_done")):
-                return jsonify(error=f"「{EVENT_BY_ID[i]['name']}」は、先に「{EVENT_BY_ID[req]['name']}」をクリアしている必要があります。"
+        for i in ev:   # 前提（狂乱→大狂乱、○○→絶・○○、絶→亜種 など）を満たさないものは頼めない
+            missing = [r for r in EVENT_BY_ID[i].get("reqs") or [] if r not in ev]
+            if missing and not (transfer and data.get("events_pre_done")):
+                need = "・".join(EVENT_BY_ID[r]["name"] for r in missing[:3]) + ("ほか" if len(missing) > 3 else "")
+                return jsonify(error=f"「{EVENT_BY_ID[i]['name']}」は、先に「{need}」をクリアしている必要があります。"
                                      f"一緒に選ぶか、クリア済みなら「前提のステージはクリア済み」にチェックしてください。", code="need_event_pre"), 400
         others = others + [f"{EV_PREFIX}{i}" for i in ev]
     kinds = _legend_kinds(subs)
@@ -3269,7 +3271,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       </div>
       <label class="sw" style="margin:8px 0"><input type="checkbox" id="evPre"><span><b>前提のステージはクリア済み</b><small>大狂乱・絶など前提があるマップを、前提を選ばずに頼むときにチェック（引継ぎコードのデータのみ）。前提が終わっていなかった場合は、こちらで一緒にクリアします。</small></span></label>
       <div class="list" id="evlist">
-        {% for m in lst %}<label class="opt" data-q="{{ m.name }} {{ m.cat }}"><input type="checkbox" name="events" value="{{ m.id }}"{% if m.req %} data-req="{{ m.req }}"{% endif %}><span>{{ m.name }}<em class="lp">{{ m.cat }}{% if m.stars > 1 %}・冠{{ m.stars }}{% endif %}</em>{% if m.req %}<small class="evreq">前提：{{ lst | selectattr('id', 'equalto', m.req) | map(attribute='name') | first }}</small>{% endif %}</span></label>{% endfor %}
+        {% for m in lst %}<label class="opt" data-q="{{ m.name }} {{ m.cat }}"><input type="checkbox" name="events" value="{{ m.id }}"{% if m.reqs %} data-req="{{ m.reqs | join(',') }}"{% endif %}><span>{{ m.name }}<em class="lp">{{ m.cat }}{% if m.stars > 1 %}・冠{{ m.stars }}{% endif %}</em>{% if m.reqs %}<small class="evreq">前提：{% if m.reqs | length > 3 %}狂乱9種すべて{% else %}{% for r in m.reqs %}{{ ev_names[r] }}{{ '・' if not loop.last }}{% endfor %}{% endif %}</small>{% endif %}</span></label>{% endfor %}
       </div>
       {% else %}
       <div class="tools">
@@ -3681,7 +3683,7 @@ function evDeps(){
   const pre=$('#evPre')&&$('#evPre').checked;
   const on=new Set(picked('events'));
   $$('input[name=events][data-req]').forEach(x=>{
-    const ok=pre||on.has(x.dataset.req);
+    const ok=pre||x.dataset.req.split(',').every(r=>on.has(r));
     if(!ok&&x.checked){ x.checked=false; on.delete(x.value); }
     x.disabled=!ok; x.closest('label').classList.toggle('locked',!ok);
   });
