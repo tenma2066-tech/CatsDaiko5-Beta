@@ -33,19 +33,13 @@ jobs:
       - name: VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
           ACTION: ${{ inputs.action }}
         run: |
           set -euo pipefail
           : "${VPS_HOST:?VPS_HOST is required}" "${SSHPASS:?VPS_PASSWORD is required}"
-          : "${VPS_KNOWN_HOSTS:?VPS_KNOWN_HOSTS is required}"
-          install -d -m 0700 ~/.ssh
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 0600 ~/.ssh/known_hosts
-          ssh-keygen -F "$VPS_HOST" -f ~/.ssh/known_hosts >/dev/null
           sudo apt-get install -y sshpass >/dev/null
-          remote=(sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "root@$VPS_HOST")
+          remote=(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=15 "root@$VPS_HOST")
           case "$ACTION" in
             status) "${remote[@]}" 'systemctl show paykyash -p LoadState -p ActiveState -p SubState' ;;
             install) git archive HEAD:exchange | "${remote[@]}" 'set -eu; umask 077; d=$(mktemp -d); trap '\''rm -rf "$d"'\'' EXIT; tar xf - -C "$d"; bash "$d/deploy/install.sh"' ;;

@@ -11,7 +11,7 @@
 
 ## 初回設置
 
-1. リポジトリのルートから VPS 上で `sudo bash exchange/deploy/install.sh` を実行します。main に統合した後は GitHub Actions の「Exchange VPS」で install を選んでも設置できます。Actions は xbot と同じ VPS_HOST・VPS_PASSWORD を使います。加えて GitHub Secret `VPS_KNOWN_HOSTS` に、VPS の管理コンソールなど信頼できる経路で確認した SSH ホスト公開鍵を known_hosts 形式（`VPS_HOSTと同じホスト名またはIP ssh-ed25519 公開鍵`）で登録します。鍵が一致しない場合は接続前に設定を確認してください。install はモックテスト後にリリースを切り替えます。サービスの起動は別操作です。
+1. リポジトリのルートから VPS 上で `sudo bash exchange/deploy/install.sh` を実行します。main に統合した後は GitHub Actions の「Exchange VPS」で install を選んでも設置できます。Actions は xbot と同じ VPS_HOST・VPS_PASSWORD を使います。SSH はパスワード認証で、各ランナーの初回接続時に受け取ったホスト鍵を信頼します。install はモックテスト後にリリースを切り替えます。サービスの起動は別操作です。
 2. VPS 上で `sudoedit /etc/paykyash/secrets.json` を開き、Discord アプリの bot_token と管理者の admin_id を設定します。BOT を対象サーバーに bot・applications.commands スコープで招待します。
 3. 旧 BOT がある場合は受付を停止し、実行中の取引が終わったことを確認して旧プロセスを停止します。旧 system フォルダをバックアップし、運用中の JSON と config.json.bak をひとまとまりで /var/lib/paykyash に移します。注文・使用済みリンク・本人確認・保留・セッションを同じ時点で引き継いでください。secrets.json と *.example.json は除外します。移したファイルの所有者は paykyash:paykyash、権限は 0600 にします。
 4. PayPay は移行済みの有効なセッションとその更新に対応します。旧版のブラウザによる WAF 回避を含む新規認証は移植していません。初回認証や更新不能時の再認証には、別途 PayPay が提供・承認する認証経路の実装が必要です。
