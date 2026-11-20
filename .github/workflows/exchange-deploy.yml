@@ -6,9 +6,13 @@ on:
     inputs:
       action:
         type: choice
-        options: [status, install]
+        options: [status, install, password, domain]
         default: status
         required: true
+      domain:
+        description: "domain のときだけ。登録した専用 DuckDNS ホスト名"
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
@@ -23,6 +27,7 @@ jobs:
           python -m pip install -r exchange/requirements.txt
           python exchange/system/tests/test_flows.py
           python exchange/system/tests/test_recovery.py
+          python exchange/system/tests/test_web.py
   deploy:
     needs: test
     concurrency: exchange-deploy
@@ -34,6 +39,8 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          DOMAIN: ${{ inputs.domain }}
+          WEB_PASSWORD: ${{ secrets.EXCHANGE_ADMIN_PASSWORD }}
           ACTION: ${{ inputs.action }}
         run: |
           set -euo pipefail
@@ -42,5 +49,17 @@ jobs:
           remote=(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=15 "root@$VPS_HOST")
           case "$ACTION" in
             status) "${remote[@]}" 'systemctl show paykyash -p LoadState -p ActiveState -p SubState' ;;
+            password)
+              : "${WEB_PASSWORD:?EXCHANGE_ADMIN_PASSWORD を設定してください}"
+              printf '%s' "$WEB_PASSWORD" | "${remote[@]}" 'python3 /opt/paykyash/current/password.py'
+              ;;
+            domain)
+              [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.duckdns\.org$ ]]
+              getent ahostsv4 "$DOMAIN" | awk '{print $1}' | sort -u > /tmp/exchange-domain-ip
+              getent ahostsv4 "$VPS_HOST" | awk '{print $1}' | sort -u > /tmp/exchange-vps-ip
+              test -s /tmp/exchange-domain-ip && cmp -s /tmp/exchange-domain-ip /tmp/exchange-vps-ip
+              printf '%s\n' "$DOMAIN" | "${remote[@]}" 'bash /opt/paykyash/current/domain.sh'
+              curl -fsS --retry 12 --retry-all-errors --retry-delay 5 --max-time 10 "https://$DOMAIN/health" | grep -qx ok
+              ;;
             install) git archive HEAD:exchange | "${remote[@]}" 'set -eu; umask 077; d=$(mktemp -d); trap '\''rm -rf "$d"'\'' EXIT; tar xf - -C "$d"; bash "$d/deploy/install.sh"' ;;
           esac

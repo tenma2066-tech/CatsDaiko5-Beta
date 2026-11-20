@@ -1,0 +1,40 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>換金管理 · PayPay / Kyash</title><link rel="stylesheet" href="/style.css"></head><body>
+{% macro csrf() %}<input type="hidden" name="csrf" value="{{ session.csrf }}">{% endmacro %}
+{% macro selector(selected='p2k') %}<label>換金方向<select name="direction">{% for key,label in directions.items() %}<option value="{{ key }}" {% if selected == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endmacro %}
+<header><div class="bar"><span class="brand"><span class="mark" aria-hidden="true">⇄</span> 換金管理</span>{% if session %}<form action="/logout" method="post">{{ csrf() }}<button class="quiet">ログアウト</button></form>{% else %}<span class="sub">PayPay / Kyash</span>{% endif %}</div></header>
+{% if page == 'login' %}
+<main class="entry"><section class="login"><span class="service-name">PayPay / Kyash</span><h1>管理者ログイン</h1>
+{% if message %}<p role="alert" class="notice">{{ message }}</p>{% endif %}
+{% if configured %}<form action="/login" method="post"><label>管理パスワード<input autofocus autocomplete="current-password" type="password" name="password" required maxlength="512"></label><button>ログイン</button></form>
+{% else %}<p>管理パスワードの設定を待っています。</p>{% endif %}</section></main>
+{% else %}
+<nav aria-label="管理メニュー"><div>{% for key,url,label in [('overview','/','換金'),('history','/history','取引履歴'),('connections','/connections','接続・設定')] %}<a href="{{ url }}" {% if page == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</div></nav>
+<main><div class="title"><h1>{{ {'overview':'換金','history':'取引履歴','connections':'接続・設定'}[page] }}</h1></div>
+{% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
+{% if page == 'overview' %}
+<div class="stats"><div>PayPay<strong>{{ '設定済み' if connections.paypay else '未接続' }}</strong></div><div>Kyash<strong>{{ '設定済み' if connections.kyash else '未接続' }}</strong></div><div>確認待ち<strong>{{ stats.HOLD + stats.UNCERTAIN + holds|length }}<small> 件</small></strong></div></div>
+<div class="columns"><section><h2>換金を実行</h2>{% if not ready %}<p class="notice">換金の受付を停止しています。両サービスの接続・送金元登録と受付設定を確認してください。 <a href="/connections">接続・設定を開く</a></p>{% endif %}
+<form action="/do/exchange" method="post">{{ csrf() }}<fieldset {% if not ready %}disabled{% endif %}>{{ selector() }}
+<label>送金リンク<input name="link" type="url" autocomplete="off" placeholder="https://" required maxlength="512"></label>
+<label>PayPay パスコード <small>設定した場合のみ</small><input name="passcode" type="password" inputmode="numeric" autocomplete="off" maxlength="16"></label>
+<label class="check"><input type="checkbox" name="confirm" value="yes" required>受取と払い出しの実行を確認しました</label><button>換金を実行</button></fieldset></form></section>
+<section><h2>手数料の見積もり</h2><form action="/do/estimate" method="post">{{ csrf() }}{{ selector(quote.direction if quote else 'p2k') }}
+<label>受取額（円）<input name="amount" type="number" placeholder="3,000" min="1" max="999999999" required inputmode="numeric" value="{{ quote['in'] if quote else '' }}"></label><button class="secondary">見積もる</button></form>
+{% if quote %}<dl><dt>基本手数料</dt><dd>{{ yen(quote.fee_jpy) }}</dd><dt>払い出し見込み</dt><dd>{{ yen(quote.out) }}</dd></dl><small>残高種別の加算は実際のリンクを確認した時点で決まります。</small>{% endif %}</section></div>
+{% elif page == 'connections' %}
+<div class="columns">{% for svc,label in services.items() %}<section><div class="heading"><h2>{{ label }}</h2><span class="pill">{{ '設定済み' if connections[svc] else '未接続' }}</span></div>
+{% if svc == 'paypay' %}<p>既存セッションの更新に対応しています。初回ログインは未対応です。</p>
+{% elif not connections.kyash %}{% if kyash_auth_pending %}<form method="post" action="/do/kyash-verify">{{ csrf() }}<label>届いた認証リンク<input type="password" name="verification" autocomplete="off" required></label><button>認証を完了</button></form>{% else %}<form method="post" action="/do/kyash-login">{{ csrf() }}<label>Kyash メールアドレス<input type="email" name="email" required autocomplete="off"></label><label>Kyash パスワード<input type="password" name="password" required autocomplete="off"></label><button>Kyash に接続</button></form>{% endif %}{% endif %}
+<hr><h3>送金元の登録</h3>
+{% if bindings[svc] %}<p>{{ bindings[svc].name or bindings[svc].user_name or '登録済み' }}</p>
+{% elif challenges[svc] and connections[svc] %}<form method="post" action="/do/register">{{ csrf() }}<input type="hidden" name="service" value="{{ svc }}"><label>{{ yen(challenges[svc].amount) }} の本人確認用送金リンク<input type="url" name="link" required></label>{% if svc=='paypay' %}<label>パスコード（任意）<input type="password" name="passcode" autocomplete="off"></label>{% endif %}<p>本人確認に送金リンクを使用します。{% if svc=='kyash' or config.reg_receive_paypay %}指定額を受け取ります。{% endif %}</p><button>本人確認を実行</button></form>
+{% else %}<form action="/do/challenge" method="post">{{ csrf() }}<input type="hidden" name="service" value="{{ svc }}"><button class="secondary" {% if not connections[svc] %}disabled{% endif %}>本人確認を開始</button></form>{% endif %}</section>{% endfor %}</div>
+<section><h2>運用設定</h2><form action="/do/settings" method="post">{{ csrf() }}<label class="check"><input type="checkbox" name="enabled" value="yes" {% if config.enabled %}checked{% endif %}>接続と本人確認の完了後に換金を受け付ける</label><label class="check"><input type="checkbox" name="auto_send" value="yes" {% if config.auto_send %}checked{% endif %}>着金確認後に自動で払い出す</label><button class="secondary">設定を保存</button></form></section>
+{% elif page == 'history' %}
+{% if holds %}<section><h2>入金確認中</h2>{% for h in holds %}<p>{{ h.created_at }} · {{ yen(h.amount) }} · {{ h.state }}</p>{% endfor %}</section>{% endif %}
+<section><h2>注文一覧</h2>{% for o in orders %}<details><summary><b>{{ o.id }}</b> · {{ directions[o.direction] }} · {{ yen(o.in_amount) }} <span class="pill">{{ states.get(o.status,o.status) }}</span></summary><p>{{ o.created_at }} · 手数料 {{ yen(o.fee_jpy) }} · 払い出し {{ yen(o.out_amount) }}</p>
+{% if o.hold_reason %}<p>{{ o.hold_reason }}</p>{% endif %}{% if o.payout and o.payout.link %}<label>払い出しリンク<input readonly value="{{ o.payout.link }}"></label>{% endif %}
+{% if o.status == 'UNCERTAIN' %}<form method="post" action="/do/confirm">{{ csrf() }}<input type="hidden" name="order" value="{{ o.id }}"><label>明細で確認した結果<select name="result" required><option value="">選択してください</option><option value="sent">送金済み</option><option value="unsent">未送金</option></select></label><label class="check"><input type="checkbox" name="confirm" value="yes" required>この注文の送金先・金額・明細を照合しました</label><button>照合結果を保存</button></form>
+{% elif o.status in ('PAID','FAILED') or (o.status=='HOLD' and o.hold_code=='REVIEW') %}<form method="post" action="/do/retry">{{ csrf() }}<input type="hidden" name="order" value="{{ o.id }}"><label class="check"><input type="checkbox" name="confirm" value="yes" required>着金と未払いを確認しました</label><button>払い出しを実行</button></form>{% endif %}</details>
+{% else %}<p class="empty">取引はまだありません。</p>{% endfor %}</section>
+{% endif %}</main>{% endif %}</body></html>

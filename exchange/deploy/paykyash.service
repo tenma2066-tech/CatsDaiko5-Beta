@@ -1,5 +1,5 @@
 [Unit]
-Description=PayPay Kyash Discord bot
+Description=PayPay Kyash owner web service
 Wants=network-online.target
 After=network-online.target
 
@@ -11,7 +11,8 @@ StateDirectory=paykyash
 StateDirectoryMode=0700
 UMask=0077
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/paykyash/current/venv/bin/python -u /opt/paykyash/current/system/bot.py
+EnvironmentFile=/etc/paykyash/web.env
+ExecStart=/opt/paykyash/current/venv/bin/python -u /opt/paykyash/current/system/web.py
 Restart=on-failure
 RestartSec=20
 NoNewPrivileges=true

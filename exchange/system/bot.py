@@ -276,6 +276,8 @@ async def log_trade(o: dict) -> None:
 # ============================================================
 
 async def _dm(user_id: int, **kw) -> bool:
+    if user_id < 0:  # Web 所有者の送金結果は注文履歴に保存される
+        return False
     try:
         u = await bot.fetch_user(int(user_id))
         await u.send(**kw)

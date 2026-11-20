@@ -1,41 +1,18 @@
-# 換金 Discord BOT の VPS 版
+# PayPay / Kyash 換金管理（Web）
 
-店舗と xbot が動作する Ubuntu 24.04 VPS の独立した systemd サービスです。Discord への接続は外向きで、ドメイン・公開ポート・Caddy の設定は不要です。
+管理者本人がスマートフォンや PC のブラウザから使うサービスです。ログイン後に換金、手数料の見積もり、注文履歴、接続・本人確認の状態を表示します。Discord の設定は不要です。
 
-| 用途 | 場所 |
-|---|---|
-| 実行コード・専用 venv | /opt/paykyash/current |
-| 設定・注文・利用済みリンク・本人確認・決済セッション | /var/lib/paykyash |
-| Discord トークンと管理者 ID | /etc/paykyash/secrets.json |
-| サービス・専用ユーザー | paykyash.service・paykyash |
+## VPS への設置
 
-## 初回設置
+GitHub Actions の「Exchange VPS」は店と同じ VPS_HOST・VPS_PASSWORD で VPS に接続します。
 
-1. リポジトリのルートから VPS 上で `sudo bash exchange/deploy/install.sh` を実行します。main に統合した後は GitHub Actions の「Exchange VPS」で install を選んでも設置できます。Actions は xbot と同じ VPS_HOST・VPS_PASSWORD を使います。SSH はパスワード認証で、各ランナーの初回接続時に受け取ったホスト鍵を信頼します。install はモックテスト後にリリースを切り替えます。サービスの起動は別操作です。
-2. VPS 上で `sudoedit /etc/paykyash/secrets.json` を開き、Discord アプリの bot_token と管理者の admin_id を設定します。BOT を対象サーバーに bot・applications.commands スコープで招待します。
-3. 旧 BOT がある場合は受付を停止し、実行中の取引が終わったことを確認して旧プロセスを停止します。旧 system フォルダをバックアップし、運用中の JSON と config.json.bak をひとまとまりで /var/lib/paykyash に移します。注文・使用済みリンク・本人確認・保留・セッションを同じ時点で引き継いでください。secrets.json と *.example.json は除外します。移したファイルの所有者は paykyash:paykyash、権限は 0600 にします。
-4. PayPay は移行済みの有効なセッションとその更新に対応します。旧版のブラウザによる WAF 回避を含む新規認証は移植していません。初回認証や更新不能時の再認証には、別途 PayPay が提供・承認する認証経路の実装が必要です。
-5. `sudo systemctl enable --now paykyash` で起動します。`systemctl is-active paykyash` でプロセス状態を確認し、Discord の /ヘルス、/注文一覧、/保留一覧で移行結果を確かめます。/ログ設定 で通知先を指定し、/パネル で利用者向けの入口を設置できます。
+1. main で action=install を実行します。テスト後に paykyash.service を登録し、Docker の内部アドレスの 8091 番で起動します。データは /var/lib/paykyash、コードは /opt/paykyash/current です。
+2. GitHub のリポジトリ Secret に EXCHANGE_ADMIN_PASSWORD を設定し、action=password を実行します。VPS には照合用ハッシュを保存します。設定前はログインできません。
+3. DuckDNS で換金専用ホストの IPv4 を VPS に向けます。action=domain の domain 欄にホスト名を入力すると、DNS を確認し、既存 Caddy に専用サイトを追加して HTTPS を確認します。
+4. 専用 URL にアクセスしてログインします。接続・設定画面から Kyash の認証、本人確認、換金受付と自動払い出しの切り替えができます。PayPay は既存の有効なセッションを利用します。新規 PayPay 認証は未対応で、両方の接続と送金元の登録が揃うまで換金は実行できません。
 
-## 更新
+## 運用
 
-Discord の /設定 から受付を停止し、注文と保留の状態を確認してから `sudo systemctl stop paykyash` を実行します。設置手順を再実行し、`sudo systemctl start paykyash` と /ヘルス で確認後、受付を再開します。設置済みリリースは /opt/paykyash/releases に残ります。送金結果が不明な UNCERTAIN 注文は明細と突き合わせて /送金確認 で処理します。
+送金結果が不明な注文は UNCERTAIN として停止します。取引履歴で本人が該当明細を照合した後に結果を記録できます。Kyash の受取中に停止した注文は RECEIPT_REVIEW で保留し、自動払い出しを止めます。注文台帳の破損や消失時はサービスを停止して同時点の /var/lib/paykyash バックアップを復元してください。ダウンロードした旧 Discord 版を同じデータで並行起動しないでください。
 
-店舗の自動デプロイは店舗コードの更新で動きます。`.dockerignore` と店舗のデプロイワークフローだけを変更した場合、即時反映が必要なら店舗の「Deploy to VPS」を手動実行します。
-
-## 決済の復旧
-
-- `RECEIPT_REVIEW` は Kyash の着金結果が不明な注文です。管理者が受取明細・金額・送信者を当該注文と照合してください。着金が確認できた場合だけ、理由を残して `/強制状態変更` で HOLD に変更し、払い出し先を確認して `/再送` してください。未着金が確定した場合は CANCELED にします。
-- `UNCERTAIN` は送金・返金の成否が不明な注文です。Kyash 明細が注文固有の UUID を返す場合は `/送金確認` で自動照合できます。旧注文や UUID が提供されない明細は手動照合が必要です。
-- `orders.json` の異常・初期化後の消失では注文処理を停止します。サービスを止め、原因を確認して同じ時点の台帳一式を復元してください。バックアップには /var/lib/paykyash 全体（orders.json.initialized を含む）を保存します。
-
-## ローカル検証
-
-exchange ディレクトリで以下を実行します。取引テストは一時ディレクトリと外部サービスのモックを使用します。
-
-```sh
-python3 -m venv /tmp/paykyash-test
-/tmp/paykyash-test/bin/pip install -r requirements.txt
-/tmp/paykyash-test/bin/python system/tests/test_flows.py
-/tmp/paykyash-test/bin/python system/tests/test_recovery.py
-```
+更新時は受付を停止し、実行中の取引が終了した後、VPS で systemctl stop paykyash を実行してから install を再実行します。既存のパスワードとホスト設定は引き継がれます。
