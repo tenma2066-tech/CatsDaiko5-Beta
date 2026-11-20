@@ -1,0 +1,23 @@
+[Unit]
+Description=PayPay Kyash Discord bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=paykyash
+Group=paykyash
+WorkingDirectory=/var/lib/paykyash
+StateDirectory=paykyash
+StateDirectoryMode=0700
+UMask=0077
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/paykyash/current/venv/bin/python -u /opt/paykyash/current/system/bot.py
+Restart=on-failure
+RestartSec=20
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

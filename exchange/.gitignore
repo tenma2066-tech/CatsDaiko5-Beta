@@ -1,0 +1,25 @@
+# --- 絶対に外に出してはいけないもの ---
+secrets.json
+system/secrets.json
+system/paypay_accounts.json
+system/paypay_tokens.json
+system/paypay_udid_map.json
+system/kyash_accounts.json
+system/kyash_config.json
+
+# --- 運用データ (system/ の中に溜まる) ---
+system/config.json
+system/config.json.bak
+system/*.broken_*
+system/orders.json
+system/used_links.json
+system/pending_holds.json
+system/detections.json
+# 本人確認の紐付け (Discord ID と PayPay/Kyash の名義が並ぶ = 個人情報そのもの)
+system/aml_accounts.json
+system/bot.lock
+
+# --- その他 ---
+*.tmp
+__pycache__/
+*.pyc

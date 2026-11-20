@@ -1,0 +1,52 @@
+name: Exchange VPS
+on:
+  pull_request:
+    paths: ["exchange/**", ".github/workflows/exchange-deploy.yml"]
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [status, install]
+        default: status
+        required: true
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install -r exchange/requirements.txt
+          python exchange/system/tests/test_flows.py
+          python exchange/system/tests/test_recovery.py
+  deploy:
+    needs: test
+    concurrency: exchange-deploy
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          : "${VPS_HOST:?VPS_HOST is required}" "${SSHPASS:?VPS_PASSWORD is required}"
+          : "${VPS_KNOWN_HOSTS:?VPS_KNOWN_HOSTS is required}"
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+          ssh-keygen -F "$VPS_HOST" -f ~/.ssh/known_hosts >/dev/null
+          sudo apt-get install -y sshpass >/dev/null
+          remote=(sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "root@$VPS_HOST")
+          case "$ACTION" in
+            status) "${remote[@]}" 'systemctl show paykyash -p LoadState -p ActiveState -p SubState' ;;
+            install) git archive HEAD:exchange | "${remote[@]}" 'set -eu; umask 077; d=$(mktemp -d); trap '\''rm -rf "$d"'\'' EXIT; tar xf - -C "$d"; bash "$d/deploy/install.sh"' ;;
+          esac

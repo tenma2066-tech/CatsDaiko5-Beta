@@ -1,0 +1,64 @@
+{
+  "_README": "雛形。BOTを初回起動すると system/config.json が既定値で自動生成されるので、通常は編集不要。設定は Discord の /設定 /方向設定 /払い出し設定 /ログ設定 /残高種別設定 /本人確認設定 から変える。管理者IDはここではなく secrets.json に書く。",
+  "allowed_guild_ids": [],
+  "log_channel_id": 0,
+  "error_channel_id": 0,
+  "detect_channel_id": 0,
+  "log_receive_fail": true,
+  "enabled": true,
+  "auto_send": true,
+  "maintenance_note": "",
+  "directions": {
+    "p2k": {
+      "enabled": true,
+      "fee_percent": 5.0,
+      "fee_fixed_jpy": 0,
+      "min_jpy": 500,
+      "max_jpy": 50000
+    },
+    "k2p": {
+      "enabled": true,
+      "fee_percent": 5.0,
+      "fee_fixed_jpy": 0,
+      "min_jpy": 500,
+      "max_jpy": 50000
+    }
+  },
+  "daily_limit_jpy": 100000,
+  "paypay_payout": "link",
+  "kyash_payout": "transfer",
+  "check_balance_before_receive": true,
+  "payout_reserve_jpy": 0,
+  "balance_cache_sec": 60,
+  "wallet_policy": {
+    "money_only": {
+      "mode": "allow",
+      "extra_fee_percent": 0.0
+    },
+    "mixed": {
+      "mode": "allow",
+      "extra_fee_percent": 3.0
+    },
+    "light_only": {
+      "mode": "deny",
+      "extra_fee_percent": 10.0
+    },
+    "unknown": {
+      "mode": "hold",
+      "extra_fee_percent": 0.0
+    }
+  },
+  "mixed_fee_mode": "flat",
+  "mixed_max_light_ratio": 0.5,
+  "reg_amount": 1,
+  "reg_amount_max": 1,
+  "reg_window_sec": 300,
+  "reg_max_attempts": 5,
+  "reg_allow_rebind": false,
+  "reg_receive_paypay": true,
+  "hold_watch_hours": 24,
+  "hold_history_pages": 5,
+  "hold_taken_grace_min": 30,
+  "remind_stuck": true,
+  "stuck_remind_hours": 6.0
+}

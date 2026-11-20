@@ -5,7 +5,8 @@ name: Deploy to VPS
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "docs/**", ".github/workflows/vps-diag.yml", ".github/workflows/diag.yml", "xbot/**", ".github/workflows/xbot-*.yml"]
+    # 配布条件や Docker 除外設定だけを更新した時の反映は workflow_dispatch を使う。
+    paths-ignore: [".dockerignore", ".github/workflows/vps-deploy.yml", "**.md", "docs/**", ".github/workflows/vps-diag.yml", ".github/workflows/diag.yml", "exchange/**", ".github/workflows/exchange-deploy.yml", "xbot/**", ".github/workflows/xbot-*.yml"]
   workflow_dispatch:
     inputs:
       allow_running:
@@ -71,7 +72,7 @@ jobs:
           set -eu
           NEW="/tmp/catsdaiko-src-$GITHUB_RUN_ID"
           echo "NEW_SRC=$NEW" >> "$GITHUB_ENV"
-          tar czf - --exclude=.git . | $SSH_CMD "$TARGET" "rm -rf $NEW && mkdir -p $NEW && tar xzf - -C $NEW"
+          tar czf - --exclude=.git --exclude=./exchange . | $SSH_CMD "$TARGET" "rm -rf $NEW && mkdir -p $NEW && tar xzf - -C $NEW"
       - name: Setup and start on server
         if: env.SKIP != 'true'
         env:
