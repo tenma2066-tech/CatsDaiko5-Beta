@@ -3606,10 +3606,15 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <h2 id="reviewTitle">ご利用ありがとうございました！✨</h2>
     <div class="rvmsg">
       <p>この度はにゃんこ代行をご利用いただき、ありがとうございました！</p>
-      <p>代行内容に問題がなければ、よろしければ下のポストに、ご利用後の感想や評価をリプライしていただけると嬉しいです！🙇‍♂️<br>今後のサービス改善の参考にもなりますので、率直なご感想をお待ちしております。</p>
+      <p><b>コードをお渡しする前に、ご利用後の感想や評価を、下のポストへのリプライでお願いしています。</b>🙇‍♂️<br>今後のサービス改善の参考にもなりますので、率直なご感想をお待ちしております。</p>
     </div>
-    <a id="reviewLink" class="btn pri" href="https://x.com/paysms1212/status/2119246650996932810" target="_blank" rel="noopener">🔗 ポストを開いて、コードを表示する</a>
-    <p class="sub" style="text-align:center">ポストを開くと、<b>引継ぎコードと暗証番号</b>が表示されます。<br>リプライは任意です。開いたらこの画面に戻ってきてください。</p>
+    <ol class="howto" style="margin:8px 0">
+      <li>下のボタンを押すと、X でポストへの<b>リプライ画面</b>が開きます。</li>
+      <li>感想・評価を書いて<b>リプライ</b>してください。</li>
+      <li>この画面に戻ると、<b>引継ぎコードと暗証番号</b>が表示されます。</li>
+    </ol>
+    <a id="reviewLink" class="btn pri" href="https://x.com/intent/tweet?in_reply_to=2119246650996932810" target="_blank" rel="noopener">💬 X でリプライする</a>
+    <p class="sub" style="text-align:center" id="reviewWait">リプライ画面が開かないときは <a href="https://x.com/paysms1212/status/2119246650996932810" target="_blank" rel="noopener" id="reviewPost">ポストを直接開く</a></p>
     <p class="sub" style="text-align:center">またのご利用をお待ちしております！🐱✨</p>
   </div>
 </div>
@@ -4151,8 +4156,22 @@ function rvApply(){
   [['#donePanel',window.__doneResult],['#res',window.__resResult]].forEach(([q,r])=>{ const e=$(q); if(e) e.classList.toggle('rvlock',needReview(r)); });
   try{ renderHist(); }catch(e){}
 }
-$('#reviewLink').addEventListener('click',()=>{
-  /* リンクを開いた時点で、待っていた結果を見られるようにする（X のアプリに移っても、戻ってきたら表示されている） */
+/* リプライ画面を開いてから、少なくとも RV_WAIT 秒たって、この画面に戻ってきたらコードを表示する。
+   本当にリプライしたかは確かめられない（X の API が必要）ので、「書く時間を取ってもらう」ところまで。 */
+const RV_WAIT=20;
+let rvClicked=0, rvTimer=null;
+function rvTick(){
+  if(!rvClicked) return;
+  const left=Math.ceil(RV_WAIT-(Date.now()-rvClicked)/1000);
+  if(left<=0){ clearInterval(rvTimer); rvTimer=null; rvClicked=0; rvUnlock(); return; }
+  if(document.visibilityState==='visible') $('#reviewWait').textContent='リプライが済んだら、そのままお待ちください（あと '+left+' 秒でコードが表示されます）';
+}
+function rvStart(){ if(!rvClicked){ rvClicked=Date.now(); rvTimer=setInterval(rvTick,1000); } $('#reviewLink').textContent='💬 もう一度リプライ画面を開く'; }
+$('#reviewLink').addEventListener('click',rvStart);
+$('#reviewPost').addEventListener('click',rvStart);
+document.addEventListener('visibilitychange',rvTick);
+function rvUnlock(){
+  /* 待っていた結果を見られるようにする（X のアプリに移っても、戻ってきたら表示されている） */
   rvWait.forEach(r=>rvKeys(r).forEach(k=>rvOk.add(k)));
   [window.__doneResult,window.__resResult].forEach(r=>{ if(r) rvKeys(r).forEach(k=>rvOk.add(k)); });
   rvWait=[];
@@ -4160,7 +4179,7 @@ $('#reviewLink').addEventListener('click',()=>{
   $('#reviewPanel').hidden=true; if($('#donePanel').hidden&&$('#payPanel').hidden&&$('#helpPanel').hidden) document.body.style.overflow='';
   rvApply();
   const t=rvThen; rvThen=[]; setTimeout(()=>t.forEach(f=>{ try{ f(); }catch(e){} }),0);
-});
+}
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-rvopen]'); if(b) rvOpen(); });
 /* コピーの前に確認：まだリンクを開いていなければ、お知らせを出す */
 function rvGuard(result,fn){ if(needReview(result)) rvOpen(result); else fn(); }
