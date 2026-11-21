@@ -3050,6 +3050,12 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .code div{flex:1;min-width:0}
 .code small{display:block;font-size:12px;color:var(--muted)}
 .code strong{display:block;font-size:22px;letter-spacing:.04em;word-break:break-all;font-variant-numeric:tabular-nums}
+.rvlock .code strong,.rvlock .hn b{filter:blur(7px);-webkit-user-select:none;user-select:none;pointer-events:none}
+.rvhint{display:none;margin:8px 0 0;padding:8px 10px;border-radius:10px;background:var(--soft);font-size:13px}
+.rvlock>.rvhint,.rvlock .rvhint{display:block}
+#reviewPanel{z-index:40}
+#reviewPanel .rvmsg p{margin:8px 0;line-height:1.7}
+#reviewLink{display:block;text-align:center;padding:14px 16px;text-decoration:none;font-size:16px;margin:14px 0 6px}
 .note{margin:10px 0 0;font-size:12px;color:var(--muted)}
 .fail{margin-top:12px;border:2px solid var(--bad);background:var(--badbg);border-radius:14px;padding:12px;font-size:14px;font-weight:700}
 .srv{margin-top:12px;font-size:13px;color:var(--muted)}
@@ -3437,6 +3443,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <div class="fail" id="fail" hidden></div>
       <div class="result" id="res" hidden>
         <h3 id="res-title">完了しました</h3>
+        <p class="rvhint">🔒 コードは、お知らせのリンクを開くと見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">お知らせを開く</button></p>
         <div id="res-single">
           <div class="code"><div><small>引継ぎコード</small><strong id="r-transfer"></strong></div><button class="btn" type="button" data-copy="r-transfer">コピー</button></div>
           <div class="code"><div><small>暗証番号</small><strong id="r-confirm"></strong></div><button class="btn" type="button" data-copy="r-confirm">コピー</button></div>
@@ -3574,6 +3581,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <h2 id="doneTitle">完了しました</h2>
     <p class="sub">下の<b>引継ぎコード</b>と<b>暗証番号</b>を、必ず今すぐ控えてください（スクリーンショットでもOK）。この表示は30分で消えます。</p>
     <div id="doneCodes"></div>
+    <p class="rvhint">🔒 コードは、表示されたお知らせのリンクを開くと見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">お知らせを開く</button></p>
     <div id="doneCoupon" class="couponbox" hidden></div>
     <h3>ゲームでの引き継ぎ手順</h3>
     <ol class="howto">
@@ -3591,6 +3599,18 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     </ul>
     <label class="sw"><input type="checkbox" id="doneAck"><span><b>コードと暗証番号を控えました</b></span></label>
     <div class="mbtns"><button class="btn pri" id="doneClose" type="button" disabled>閉じる</button></div>
+  </div>
+</div>
+<div class="modal" id="reviewPanel" role="dialog" aria-modal="true" aria-labelledby="reviewTitle" hidden>
+  <div class="mbox">
+    <h2 id="reviewTitle">ご利用ありがとうございました！✨</h2>
+    <div class="rvmsg">
+      <p>この度はにゃんこ代行をご利用いただき、ありがとうございました！</p>
+      <p>代行内容に問題がなければ、よろしければ下のポストに、ご利用後の感想や評価をリプライしていただけると嬉しいです！🙇‍♂️<br>今後のサービス改善の参考にもなりますので、率直なご感想をお待ちしております。</p>
+    </div>
+    <a id="reviewLink" class="btn pri" href="https://x.com/paysms1212/status/2119246650996932810" target="_blank" rel="noopener">🔗 ポストを開いて、コードを表示する</a>
+    <p class="sub" style="text-align:center">ポストを開くと、<b>引継ぎコードと暗証番号</b>が表示されます。<br>リプライは任意です。開いたらこの画面に戻ってきてください。</p>
+    <p class="sub" style="text-align:center">またのご利用をお待ちしております！🐱✨</p>
   </div>
 </div>
 <div class="maintbar" id="maintBar" hidden><b>メンテナンス中</b><span id="maintMsg"></span> <a id="maintLink" href="#" hidden rel="noopener">新しいサイトを開く</a></div>
@@ -4118,6 +4138,32 @@ function mmss(s){s=Math.max(0,Math.floor(s)); return pad(Math.floor(s/60))+':'+p
 function clock(d){return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())}
 function uptime(s){const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h>0?h+'時間'+m+'分':m+'分'+pad(s%60)+'秒'}
 function pill(id,s,text){const e=$(id); e.dataset.s=s; e.lastElementChild.textContent=text;}
+/* ---------- コードを見る前のお知らせ（感想ポストのリンクを開くと、コードが見られるようになる） ---------- */
+const RVKEY='nyanko-review-ok';
+function rvHash(t){ let h=5381; t=String(t||''); for(let i=0;i<t.length;i++) h=((h*33)^t.charCodeAt(i))>>>0; return h.toString(36); }   /* コードそのものは保存しない */
+function rvLoad(){ try{ return JSON.parse(localStorage.getItem(RVKEY)||'[]'); }catch(e){ return []; } }
+let rvOk=new Set(rvLoad()), rvWait=[];
+function rvKeys(result){ return resultPairs(result).map(p=>rvHash(p[1].transfer)); }
+function needReview(result){ return !!result&&rvKeys(result).some(k=>!rvOk.has(k)); }
+function rvOpen(result,then){ if(result) rvWait.push(result); if(then) rvThen.push(then); $('#reviewPanel').hidden=false; document.body.style.overflow='hidden'; }
+let rvThen=[];
+function rvApply(){
+  [['#donePanel',window.__doneResult],['#res',window.__resResult]].forEach(([q,r])=>{ const e=$(q); if(e) e.classList.toggle('rvlock',needReview(r)); });
+  try{ renderHist(); }catch(e){}
+}
+$('#reviewLink').addEventListener('click',()=>{
+  /* リンクを開いた時点で、待っていた結果を見られるようにする（X のアプリに移っても、戻ってきたら表示されている） */
+  rvWait.forEach(r=>rvKeys(r).forEach(k=>rvOk.add(k)));
+  [window.__doneResult,window.__resResult].forEach(r=>{ if(r) rvKeys(r).forEach(k=>rvOk.add(k)); });
+  rvWait=[];
+  try{ localStorage.setItem(RVKEY,JSON.stringify([...rvOk].slice(-200))); }catch(e){}
+  $('#reviewPanel').hidden=true; if($('#donePanel').hidden&&$('#payPanel').hidden&&$('#helpPanel').hidden) document.body.style.overflow='';
+  rvApply();
+  const t=rvThen; rvThen=[]; setTimeout(()=>t.forEach(f=>{ try{ f(); }catch(e){} }),0);
+});
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-rvopen]'); if(b) rvOpen(); });
+/* コピーの前に確認：まだリンクを開いていなければ、お知らせを出す */
+function rvGuard(result,fn){ if(needReview(result)) rvOpen(result); else fn(); }
 async function copyText(text){
   try{await navigator.clipboard.writeText(text); return true}catch(e){
     const a=document.createElement('textarea'); a.value=text; a.style.position='fixed'; a.style.opacity='0';
@@ -4126,6 +4172,7 @@ async function copyText(text){
   }
 }
 $$('[data-copy]').forEach(b=>b.addEventListener('click',async()=>{
+  if(/^r-/.test(b.dataset.copy)&&needReview(window.__resResult)){ rvOpen(window.__resResult); return; }
   const ok=await copyText($('#'+b.dataset.copy).textContent);
   toast(ok?'コピーしました':'コピーできませんでした。長押しで選択してください');
 }));
@@ -4247,6 +4294,8 @@ function renderJob(j){
   $('#res-title').textContent=j.integrity_only?'バン保証の結果':j.clone?(j.status==='error'?'複製処理の途中結果':'複製処理の結果'):'完了しました';
   const showRes=!!j.result&&!j.dry;
   $('#res').hidden=!showRes;
+  window.__resResult=showRes?j.result:null;
+  if(showRes){ $('#res').classList.toggle('rvlock',needReview(j.result)); if(needReview(j.result)) rvOpen(j.result); }
   if(showRes&&j.clone){
     $('#res-single').hidden=true; $('#res-clone').hidden=false;
     const o=j.result.original||{}, cp=j.result.copy||{};
@@ -4345,7 +4394,8 @@ function renderHist(){
       info.append(el('small',null,d.getMonth()+1+'/'+d.getDate()+' '+clock(d)+(label?'・'+label:'')));
       info.append(el('b',null,r.transfer),el('span',null,'　暗証番号 '),el('b',null,r.confirm));
       const cp=el('button','btn','コピー'); cp.type='button';
-      cp.addEventListener('click',async()=>{ const ok=await copyText(r.transfer+' '+r.confirm); toast(ok?'コードと暗証番号をコピーしました':'コピーできませんでした'); });
+      cp.addEventListener('click',()=>rvGuard(h.result,async()=>{ const ok=await copyText(r.transfer+' '+r.confirm); toast(ok?'コードと暗証番号をコピーしました':'コピーできませんでした'); }));
+      if(needReview(h.result)) row.classList.add('rvlock');
       row.append(info,cp); box.append(row);
     });
     const del=el('button','btn','この結果を削除'); del.type='button';
@@ -4632,7 +4682,7 @@ function openDone(j){
     [['引継ぎコード',r.transfer],['暗証番号',r.confirm]].forEach(([name,val])=>{
       const row=el('div','code'), d=el('div'); d.append(el('small',null,name),el('strong',null,val||'未発行'));
       const b=el('button','btn','コピー'); b.type='button';
-      b.addEventListener('click',async()=>{ const ok=await copyText(val||''); toast(ok?name+'をコピーしました':'コピーできませんでした'); });
+      b.addEventListener('click',()=>rvGuard(j.result,async()=>{ const ok=await copyText(val||''); toast(ok?name+'をコピーしました':'コピーできませんでした'); }));
       row.append(d,b); box.append(row);
     });
   });
@@ -4641,12 +4691,15 @@ function openDone(j){
   $('#doneCloneNote').hidden=!j.clone;
   $('#doneAck').checked=false; $('#doneClose').disabled=true;
   $('#donePanel').hidden=false; document.body.style.overflow='hidden';
+  window.__doneResult=j.result;
+  $('#donePanel').classList.toggle('rvlock',needReview(j.result));
+  if(needReview(j.result)) rvOpen(j.result);
 }
 function showCoupon(code){
   const b=$('#doneCoupon'); if(!b) return; if(!code){ b.hidden=true; return; }
   b.textContent=''; b.append(el('b',null,'🎟 次回使える10%引きクーポン'));
   const row=el('div','code'), d=el('div'); d.append(el('small',null,'クーポンコード'),el('strong',null,code));
-  const cb=el('button','btn','コピー'); cb.type='button'; cb.addEventListener('click',async()=>{ const ok=await copyText(code); toast(ok?'クーポンをコピーしました':'コピーできませんでした'); });
+  const cb=el('button','btn','コピー'); cb.type='button'; cb.addEventListener('click',()=>rvGuard(window.__doneResult,async()=>{ const ok=await copyText(code); toast(ok?'クーポンをコピーしました':'コピーできませんでした'); }));
   row.append(d,cb); b.append(row, el('small',null,'次回 '+COUPON_MIN+'円以上のご注文で10%引き（1回きり・発行から30日間）。注文の確認画面で入力してください。'));
   b.hidden=false;
 }
@@ -4658,7 +4711,7 @@ async function fetchCoupon(job){   /* 完了直後はクーポンの発行が少
   }
 }
 $('#doneAck').addEventListener('change',()=>{ $('#doneClose').disabled=!$('#doneAck').checked; });
-$('#doneClose').addEventListener('click',()=>{ $('#donePanel').hidden=true; document.body.style.overflow=''; show('status'); });
+$('#doneClose').addEventListener('click',()=>{ if(needReview(window.__doneResult)){ rvOpen(window.__doneResult); return; } $('#donePanel').hidden=true; document.body.style.overflow=''; show('status'); });
 window.addEventListener('beforeunload',e=>{ if(jobRunning){ e.preventDefault(); e.returnValue=''; } });
 function openHelp(){ $('#helpPanel').hidden=false; document.body.style.overflow='hidden'; }
 function closeHelp(){ $('#helpPanel').hidden=true; if($('#payPanel').hidden&&$('#donePanel').hidden) document.body.style.overflow=''; }
