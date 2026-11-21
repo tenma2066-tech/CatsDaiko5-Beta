@@ -175,6 +175,89 @@ class NewFeatures(unittest.TestCase):
         self.assertEqual(G.coupon_list()[0]["state"], "used")
         self.assertIn("すでに使われています", G.coupon_check(code)[1])
 
+    # ---------------- 無料クーポン（管理者が発行・1回きり）
+    def _admin_post(self, data):
+        c = A.app.test_client()
+        with c.session_transaction() as s:
+            s["admin"] = True
+            s["admin_csrf"] = "T"
+        return c, c.post("/admin", data=dict(data, csrf="T"), follow_redirects=True)
+
+    def test_free_coupon_issue_from_admin(self):
+        c, r = self._admin_post({"action": "coupon_free_issue", "days": "7", "note": "お詫び用"})
+        self.assertEqual(r.status_code, 200)
+        row = G.coupon_list()[0]
+        self.assertTrue(row["code"].startswith("FR-"))
+        self.assertEqual((row["kind"], row["note"], row["state"]), ("free", "お詫び用", "active"))
+        self.assertAlmostEqual(row["expires"] - row["created"], 7 * 86400, delta=5)
+        page = r.get_data(as_text=True)
+        self.assertIn(row["code"], page)
+        self.assertIn("無料", page)
+        # 不正な日数は発行しない
+        _, r = self._admin_post({"action": "coupon_free_issue", "days": "0"})
+        self.assertEqual(len(G.coupon_list()), 1)
+        # ログインしていない人は発行できない
+        self.c.post("/admin", data={"action": "coupon_free_issue", "days": "7"})
+        self.assertEqual(len(G.coupon_list()), 1)
+
+    def test_free_coupon_makes_any_order_free_once(self):
+        code = G.coupon_issue_free(30, "")
+        body = {"chars": "1-5", "items": ["XP"], "subs": ["全キャラレベルMAX"], "coupon": code.lower()}
+        self.jobs["JF"] = {"finished": None, "created": time.time(), "status": "running", "error": None, "result": None}
+        with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JF")) as st:
+            r = self.run_(body)
+        self.assertEqual(r.get_json(), {"job": "JF"})       # 支払い無しでそのまま開始
+        st.assert_called_once()
+        o = next(iter(A._orders.values()))
+        o["job_id"] = "JF"
+        self.assertEqual((o["amount"], o["state"], o.get("free_coupon"), o.get("coupon_used")), (0, "started", True, True))
+        self.assertTrue(o["summary"].startswith("【無料クーポン】"))
+        self.assertTrue(any(b["label"].startswith("無料クーポン") for b in o["breakdown"]))
+        self.assertEqual(G.coupon_list()[0]["state"], "used")
+        # 2回目は使えない（別の人でも同じ）
+        for c in (self.c, A.app.test_client()):
+            r2 = self.run_(body, c)
+            self.assertEqual((r2.status_code, r2.get_json()["code"]), (400, "coupon_invalid"))
+        # 安い注文（200円未満）でも使える
+        code2 = G.coupon_issue_free(30)
+        with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JG")):
+            self.assertEqual(self.run_({"items": ["XP"], "coupon": code2}).get_json(), {"job": "JG"})
+
+    def test_free_coupon_order_gets_no_new_coupon_and_can_retry(self):
+        code = G.coupon_issue_free(30)
+        with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JH")):
+            self.run_({"chars": "1-5", "coupon": code})
+        oid, o = next(iter(A._orders.items()))
+        o["job_id"] = "JH"
+        self.jobs["JH"] = {"finished": None, "created": time.time(), "status": "error", "error": "x", "result": None}
+        A._reconcile_orders()
+        self.assertEqual((o["state"], o.get("retry")), ("paid", True))     # 失敗 → 払い直し無しで再実行できる
+        with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JI")):
+            r = self.run_({"chars": "1-9", "items": ["XP"]}).get_json()
+        self.assertEqual((r.get("order"), r.get("prepaid")), (oid, True))  # 無料クーポンの注文を充てる
+        o.update(state="started", job_id="JD")
+        self.jobs["JD"] = {"finished": None, "created": time.time(), "status": "done", "error": None, "result": {"transfer": "t"}}
+        A._reconcile_orders()
+        self.assertFalse(o.get("coupon_issued"))                            # 0円の注文には次回クーポンを出さない
+
+    def test_free_coupon_revoke_and_old_table(self):
+        code = G.coupon_issue_free(30)
+        _, r = self._admin_post({"action": "coupon_revoke", "code": code})
+        self.assertIn("取り消しました", r.get_data(as_text=True))
+        self.assertFalse(G.coupon_check(code)[0])
+        self.assertFalse(G.coupon_revoke(G.coupon_issue("O7", 30)))      # 10%引きのクーポンは取り消し対象外
+        # 種類の列が無い古い台帳でも動く（既存の10%クーポンは10%引きのまま）
+        import sqlite3
+        old = Path(self.tmp.name) / "old.sqlite3"
+        with patch.object(G, "_LEDGER_FILE", old):
+            with G._ledger() as db:
+                db.execute("DROP TABLE IF EXISTS coupons")
+                db.execute("CREATE TABLE coupons (code TEXT PRIMARY KEY, created REAL, expires REAL, state TEXT, issued_order TEXT, used_order TEXT, updated REAL)")
+                db.execute("INSERT INTO coupons VALUES('NK-OLD1-OLD1', ?, ?, 'active', 'Z', NULL, ?)", (time.time(), time.time() + 999, time.time()))
+            self.assertEqual(G.coupon_kind("NK-OLD1-OLD1"), "pct10")
+            self.assertTrue(G.coupon_check("NK-OLD1-OLD1")[0])
+            self.assertTrue(G.coupon_issue_free(1).startswith("FR-"))
+
     def test_coupon_moves_to_new_order_of_same_person(self):
         code = G.coupon_issue("O9", 30)
         r1 = self.run_({"chars": "1-5", "coupon": code}).get_json()

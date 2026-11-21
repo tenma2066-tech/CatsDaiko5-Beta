@@ -1569,6 +1569,28 @@ def _admin_post(token):
                         _log_orders.exception("admin start failed")
                         msg = "支払い済みにしました。実行の開始に失敗したため、利用者の画面に「実行を開始する」ボタンが出ます。"
                 _persist_orders()
+        elif action == "coupon_free_issue":
+            try:
+                days = int(request.form.get("days") or 30)
+                if not 1 <= days <= 365:
+                    raise ValueError
+            except ValueError:
+                msg = "有効期限は1〜365日で入力してください。"
+            else:
+                try:
+                    code = paypay_gateway.coupon_issue_free(days, request.form.get("note", ""))
+                    msg = f"無料クーポン {code} を発行しました（1回だけ・{days}日間有効）。このコードを相手に伝えてください。"
+                except Exception:  # noqa: BLE001
+                    _log_orders.exception("free coupon issue failed")
+                    msg = "無料クーポンを発行できませんでした。"
+        elif action == "coupon_revoke":
+            code = str(request.form.get("code", "")).strip().upper()[:20]
+            try:
+                ok = paypay_gateway.coupon_revoke(code)
+            except Exception:  # noqa: BLE001
+                _log_orders.exception("coupon revoke failed")
+                ok = False
+            msg = f"無料クーポン {code} を取り消しました。" if ok else "取り消せませんでした（未使用の無料クーポンだけ取り消せます）。"
         elif action == "lock":
             session.pop("admin", None)
             return redirect("/admin")
@@ -1683,6 +1705,9 @@ def _admin_page(msg):
                 c["when"] = time.strftime("%m/%d %H:%M", time.localtime(c["created"]))
                 c["until"] = time.strftime("%m/%d", time.localtime(c["expires"]))
                 c["state_ja"] = {"active": "未使用", "reserved": "使用中（支払い待ち）", "used": "使用済み"}.get(c["state"], c["state"])
+                c["free"] = c.get("kind") == "free"
+                if c["state"] == "used" and c.get("used_order") == "revoked":
+                    c["state_ja"] = "取り消し"
                 if c["state"] == "active" and time.time() > c["expires"]:
                     c["state_ja"] = "期限切れ"
                 coupons.append(c)
@@ -2190,6 +2215,7 @@ def run():
     breakdown = [{"label": l, "count": n, "unit": p} for l, n, p in rows]
     coupon = unicodedata.normalize("NFKC", str(data.get("coupon", ""))).strip().upper().replace(" ", "")[:20]
     base_amount = amount
+    free_coupon = False
     if coupon:
         # 同じ人が支払う前に注文を作り直したとき：前の（未払いの）注文が押さえているクーポンを、新しい注文へ移す
         me0 = _owner()
@@ -2203,19 +2229,27 @@ def run():
                 paypay_gateway.coupon_release(coupon, k)
             except Exception:  # noqa: BLE001
                 _log_orders.exception("coupon release failed")
-        if base_amount < COUPON_MIN:
-            return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
         ok, why = paypay_gateway.coupon_check(coupon)
-        if not ok:
-            return jsonify(error=why, code="coupon_invalid"), 400
-        amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
-        breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount})
+        if ok and paypay_gateway.coupon_kind(coupon) == "free":
+            if _draining():
+                return _updating_response()
+            free_coupon = True
+            amount = 0           # 管理者が発行した無料クーポン：金額に関係なく1回だけ0円
+            breakdown.append({"label": f"無料クーポン {coupon}", "count": 1, "unit": -base_amount})
+        else:
+            if base_amount < COUPON_MIN:
+                return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
+            if not ok:
+                return jsonify(error=why, code="coupon_invalid"), 400
+            amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
+            breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount})
     summary = _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))
     me = _owner()
     with _orders_lock:
         # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）
         credit = next((k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
-                       if o["owner"] == me and o["state"] == "paid" and o.get("retry") and o["amount"] >= amount), None)
+                       if o["owner"] == me and o["state"] == "paid" and o.get("retry")
+                       and (o["amount"] >= amount or o.get("free_coupon"))), None)
         if credit:
             o = _orders[credit]
             breakdown = [b for b in breakdown if not str(b.get("label", "")).startswith("クーポン")]   # 支払い済みを充てるので、クーポンは使わない
@@ -2232,6 +2266,14 @@ def run():
             with _orders_lock:
                 _orders.pop(order_id, None)
             return jsonify(error="このクーポンはすでに使われたか、ほかの注文で使用中です。", code="coupon_invalid"), 400
+    if free_coupon and not credit:
+        # 無料クーポン：支払いは無いので、そのまま「支払い済み」にして開始する（クーポンは開始時に使用済みになる）
+        with _orders_lock:
+            o = _orders[order_id]
+            o.update(state="paid", free_coupon=True, summary="【無料クーポン】" + summary)
+        resp = _start_paid_order(o)
+        _persist_orders()
+        return resp
     _persist_orders()
     if credit:
         return jsonify(order=credit, amount=paid_amount, skipped=skipped, breakdown=breakdown, state="paid", prepaid=True)
@@ -2751,7 +2793,14 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="restart_official">
 <button class="btn full" onclick="return confirm('公式リスタートパックと同じ中身（日本編1〜3章クリア・お宝金・基本キャラ9種＋もねこ・ネコヴァルキリー・ネコムートLv20・施設Lv20・レアチケ1・にゃんチケ10）を入れて、利用者が選べるようにします。よろしいですか？')">⭐ 公式と同じ中身を入れて公開する</button></form></div>
 <div class="card"><h2>クーポン</h2><p class="sub">支払額200円以上の注文の完了時に自動で発行（次回200円以上で10%引き・1回きり・30日）。新しい順に最大100件。</p>
-{% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code><span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div></div>
+<form method="post" style="margin:8px 0 14px;padding:10px;border:1px dashed var(--line);border-radius:10px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_free_issue">
+<b>🎁 無料クーポンを発行</b><p class="sub" style="margin:4px 0">1回だけ、どのメニューでも0円で実行できるコード（FR-XXXX-XXXX）を作ります。利用者は注文確認の画面でクーポン欄に入れます。</p>
+<label for="fcd">有効期限（日）</label><input id="fcd" name="days" inputmode="numeric" maxlength="3" value="30">
+<label for="fcn">メモ（任意・自分用。例：誰に渡したか）</label><input id="fcn" name="note" maxlength="60" placeholder="例：お詫び用">
+<button class="btn pri full" onclick="return confirm('1回だけ無料で使えるクーポンを発行します。よろしいですか？')">発行する</button></form>
+{% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code>{% if c.free %}<span class="chip ok">無料</span>{% endif %}<span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div>
+{% if c.free and c.note %}<div class="sub" style="font-size:12px">メモ：{{ c.note }}</div>{% endif %}
+{% if c.free and c.state_ja=='未使用' %}<form method="post" style="margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_revoke"><input type="hidden" name="code" value="{{ c.code }}"><button class="btn" style="padding:4px 10px;font-size:12px" onclick="return confirm('このクーポンを取り消します。よろしいですか？')">取り消す</button></form>{% endif %}</div>
 {% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div>
 <div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button class="btn full">管理者モードを終了</button></form></div>
 </section>
@@ -3332,7 +3381,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <div id="cart"></div>
       {% if payments and not is_admin %}<label class="field"><span>クーポンコード（お持ちの方）</span>
         <input type="text" id="coupon" style="text-transform:uppercase" placeholder="例：NK-ABCD-EFGH" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="20"></label>
-      <p class="sub" style="margin-top:4px">{{ coupon_min }}円以上のご注文で10%引き（1円未満切り捨て）。1つのコードは1回だけ使えます。</p>{% endif %}
+      <p class="sub" style="margin-top:4px">{{ coupon_min }}円以上のご注文で10%引き（1円未満切り捨て）。無料クーポン（FR-で始まるコード）は金額に関係なく0円になります。1つのコードは1回だけ使えます。</p>{% endif %}
       <div class="err" id="orderErr" role="alert"></div>
     </div>
     <div class="panel">
@@ -3916,7 +3965,7 @@ $('#cRetry').addEventListener('click',async()=>{
 });
 
 /* ---------- 実行前チェック・モード ---------- */
-function goLabel(){ if(PAYMENTS&&IS_ADMIN&&!jobRunning) return '無料で実行（管理者）'; if(PAYMENTS&&!jobRunning) return 'お支払いへ進む'; return $('#integrity').checked?($('#dry').checked?'バン保証（試運転）':'バン保証'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
+function goLabel(){ if(PAYMENTS&&IS_ADMIN&&!jobRunning) return '無料で実行（管理者）'; if(PAYMENTS&&freeCoupon()&&!jobRunning) return '無料クーポンで実行'; if(PAYMENTS&&!jobRunning) return 'お支払いへ進む'; return $('#integrity').checked?($('#dry').checked?'バン保証（試運転）':'バン保証'):$('#dry').checked?'試運転':$('#clone').checked?'複製':'実行'; }
 function renderChecks(pc,qm,total){
   const L=[]; const add=(lv,t)=>L.push([lv,t]);
   if($('#clone').checked){
@@ -3990,7 +4039,8 @@ function estimate(pc,qm){
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
   return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other+(restartOn()?PRICES.restart:0)+Math.floor(ptMin().min/10)*PRICES.playtime10;
 }
-function payable(base){ if(IS_ADMIN) return 0; return (couponCode()&&base>=COUPON_MIN)?Math.floor(base*9/10):base; }
+function freeCoupon(){ return !IS_ADMIN&&/^FR-/.test(couponCode()); }
+function payable(base){ if(IS_ADMIN||freeCoupon()) return 0; return (couponCode()&&base>=COUPON_MIN)?Math.floor(base*9/10):base; }
 function renderCart(pc,qm){
   const box=$('#cart'); if(!box) return; box.textContent='';
   const t=$('#transfer').value.trim();
@@ -4028,7 +4078,8 @@ function renderCart(pc,qm){
   }
   if(PAYMENTS){
     const cc=couponCode(), pay=payable(total);
-    if(!IS_ADMIN&&cc){
+    if(freeCoupon()&&total>0) line('無料クーポン',cc+'（使えるかは次へ進むときに確認します）',el('span',null,'-'+total.toLocaleString('ja-JP')+'円'),null);
+    else if(!IS_ADMIN&&cc&&!freeCoupon()){
       if(total>=COUPON_MIN) line('クーポン（10%引き）',cc+'（使えるかは次の画面へ進むときに確認します）',el('span',null,'-'+(total-pay).toLocaleString('ja-JP')+'円'),null);
       else box.append(el('p','cnote warn','クーポンは '+COUPON_MIN+'円以上のご注文で使えます（いまは '+total.toLocaleString('ja-JP')+'円）。'));
     }
