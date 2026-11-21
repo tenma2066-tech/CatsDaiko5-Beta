@@ -607,10 +607,19 @@ _COUPON_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # 見間違えやすい 0/O
 def _coupon_table(db):
     db.execute("""CREATE TABLE IF NOT EXISTS coupons (code TEXT PRIMARY KEY, created REAL, expires REAL, state TEXT,
                   issued_order TEXT, used_order TEXT, updated REAL)""")
+    cols = {r[1] for r in db.execute("PRAGMA table_info(coupons)").fetchall()}
+    if "kind" not in cols:   # 種類：pct10＝10%引き（自動発行）／free＝1回だけ無料（管理者が発行）
+        db.execute("ALTER TABLE coupons ADD COLUMN kind TEXT NOT NULL DEFAULT 'pct10'")
+    if "note" not in cols:
+        db.execute("ALTER TABLE coupons ADD COLUMN note TEXT")
+
+
+def _new_coupon_code(prefix: str) -> str:
+    import secrets as _s
+    return prefix + "-" + "".join(_s.choice(_COUPON_CHARS) for _ in range(4)) + "-" + "".join(_s.choice(_COUPON_CHARS) for _ in range(4))
 
 
 def coupon_issue(order_id: str, days: int = 30) -> str:
-    import secrets as _s
     now = time.time()
     with _ledger() as db:
         _coupon_table(db)
@@ -618,13 +627,52 @@ def coupon_issue(order_id: str, days: int = 30) -> str:
         if row:
             return row["code"]
         for _ in range(10):
-            code = "NK-" + "".join(_s.choice(_COUPON_CHARS) for _ in range(4)) + "-" + "".join(_s.choice(_COUPON_CHARS) for _ in range(4))
+            code = _new_coupon_code("NK")
             try:
-                db.execute("INSERT INTO coupons VALUES(?,?,?,?,?,?,?)", (code, now, now + days * 86400, "active", order_id, None, now))
+                db.execute("INSERT INTO coupons(code, created, expires, state, issued_order, used_order, updated, kind) "
+                           "VALUES(?,?,?,?,?,?,?,'pct10')", (code, now, now + days * 86400, "active", order_id, None, now))
                 return code
             except sqlite3.IntegrityError:
                 continue
     raise PayPayError("coupon_issue", "クーポンを発行できませんでした。")
+
+
+FREE_COUPON_PREFIX = "FR"
+
+
+def coupon_issue_free(days: int = 30, note: str = "") -> str:
+    """管理者が発行する「1回だけ無料」のクーポン（FR-XXXX-XXXX）。金額に関係なく、1回の注文が0円になる。"""
+    days = max(1, min(int(days), 365))
+    note = str(note or "").strip()[:60] or None
+    now = time.time()
+    with _ledger() as db:
+        _coupon_table(db)
+        for _ in range(10):
+            code = _new_coupon_code(FREE_COUPON_PREFIX)
+            try:
+                db.execute("INSERT INTO coupons(code, created, expires, state, issued_order, used_order, updated, kind, note) "
+                           "VALUES(?,?,?,?,?,?,?,'free',?)", (code, now, now + days * 86400, "active", "admin", None, now, note))
+                return code
+            except sqlite3.IntegrityError:
+                continue
+    raise PayPayError("coupon_issue", "クーポンを発行できませんでした。")
+
+
+def coupon_kind(code: str):
+    """クーポンの種類（'pct10' / 'free'）。見つからなければ None。"""
+    with _ledger() as db:
+        _coupon_table(db)
+        row = db.execute("SELECT kind FROM coupons WHERE code=?", (code,)).fetchone()
+    return (row["kind"] or "pct10") if row else None
+
+
+def coupon_revoke(code: str) -> bool:
+    """未使用の無料クーポンを取り消す（使用中・使用済みは取り消さない）。"""
+    with _ledger() as db:
+        _coupon_table(db)
+        cur = db.execute("UPDATE coupons SET state='used', used_order='revoked', updated=? WHERE code=? AND state='active' AND kind='free'",
+                         (time.time(), code))
+        return cur.rowcount == 1
 
 
 def coupon_check(code: str):
