@@ -508,6 +508,28 @@ class Worker(unittest.TestCase):
         self.w._auto_dm(dict(s, status=store.get("status")))
         self.assertEqual(store.get("status")["dm_fail_streak"], 0)    # うまくいったら元に戻る
 
+    def test_chats_use_a_browser_that_never_opened_requests(self):
+        """実験の結果：リクエスト画面を開いたブラウザでは会話の一覧が0件になる。会話は別のブラウザで見る。"""
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('全部','always','どうも',?)", (time.time(),))
+        convs = [{"conv": "1:9"}, {"conv": "2:9"}]
+        FB = self.fake_browser(convs, {"1:9": ("やあ", False, False), "2:9": ("どうも", False, False)},
+                               requests={"5:9": ("はじめまして", False, True)})
+
+        class LikeX(FB):
+            def __init__(self, *a, **k):
+                self.saw_requests = False
+            def dm_open_inbox(self, requests=False, other=False):
+                self.saw_requests = self.saw_requests or requests
+                super().dm_open_inbox(requests, other)
+            def dm_chat_keys(self, limit):
+                return [] if self.saw_requests else super().dm_chat_keys(limit)
+        self.w.DMBrowser = LikeX
+        self._quiet()
+        c = self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
+        self.assertEqual(c["chats"], 2)
+        self.assertEqual(sorted(x[0] for x in self.sent), ["1:9", "2:9", "5:9"])
+
     def test_dm_run_time_limit(self):
         with store.db() as d:
             d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('全部','always','どうも',?)", (time.time(),))

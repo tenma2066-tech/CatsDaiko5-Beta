@@ -225,61 +225,72 @@ def _run_dms(s, manual, yield_to_post, started):
 
 
 def _dm_body(s, rs, dry, counts, started, yield_to_post):
-    with DMBrowser() as b:
-        # 1) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
-        #    失敗しても、ふつうの会話の確認は続ける
-        if s.get("dm_accept_requests", True):
-            for scope, other in (("リクエスト", False), ("リクエスト（その他）", True)):
-                try:
-                    b.dm_open_inbox(requests=True, other=other)
-                    keys = b.dm_request_keys()
-                    counts["requests"] += len(keys)
-                    seen = set()
-                    for _ in range(0 if dry else min(5, len(keys))):   # 下書きモードでは許可しない（件数だけ知らせる）
-                        _checkpoint(counts, started, yield_to_post)
-                        b.dm_open_inbox(requests=True, other=other)
-                        cur = [k for k in b.dm_request_keys() if k not in seen]   # 許可すると一覧が変わるので、毎回読み直す
-                        if not cur:
-                            break
-                        key = cur[0]
-                        seen.add(key)
-                        got = b.dm_open_request(key)
-                        b.dm_accept()
-                        who = b.dm_peer()
-                        counts["accepted"] += 1
-                        store.log("info", "dm", f"{scope}を許可しました{'：' + who if who else ''}")
-                        if rs:
-                            _handle(b, s, rs, key, got, dry, counts, who=who)
-                        time.sleep(random.uniform(5, 15))
-                except (ChatLocked, _Stop):
-                    raise
-                except Exception as e:  # noqa: BLE001
-                    b.shot("dm-request-fail")
-                    store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）。続きの確認は進めます")
-        # 2) ふつうの会話
-        if rs:
-            b.dm_open_inbox()
-            keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
-            counts["chats"] = len(keys)
-            fails = 0
-            for key in keys:
-                if counts["limited"]:
-                    store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
-                    break
+    """ふつうの会話 → メッセージリクエスト の順に、それぞれ別のブラウザで確認する。
+    実験（xbot/lab、2026-11-22）で、リクエスト画面を開いたあとは同じブラウザで会話の一覧が0件になると分かったため。"""
+    if rs:
+        with DMBrowser() as b:
+            _dm_chats(b, s, rs, dry, counts, started, yield_to_post)
+    if s.get("dm_accept_requests", True):
+        _checkpoint(counts, started, yield_to_post)
+        with DMBrowser() as b:
+            _dm_requests(b, s, rs, dry, counts, started, yield_to_post)
+
+
+def _dm_requests(b, s, rs, dry, counts, started, yield_to_post):
+    """メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信。失敗しても止めない。"""
+    for scope, other in (("リクエスト", False), ("リクエスト（その他）", True)):
+        try:
+            b.dm_open_inbox(requests=True, other=other)
+            keys = b.dm_request_keys()
+            counts["requests"] += len(keys)
+            seen = set()
+            for _ in range(0 if dry else min(5, len(keys))):   # 下書きモードでは許可しない（件数だけ知らせる）
                 _checkpoint(counts, started, yield_to_post)
-                b.dm_open_inbox()
-                try:
-                    got = b.dm_open_chat(key)
-                    fails = 0
-                except Exception as e:  # noqa: BLE001
-                    fails += 1
-                    store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
-                    if fails >= OPEN_FAIL_STOP:
-                        counts["open_fail"] = True
-                        store.log("warn", "dm", f"会話を開けないのが{fails}回続いたので、今回の確認はここまでにしました")
-                        break
-                    continue
-                _handle(b, s, rs, key, got, dry, counts)
+                b.dm_open_inbox(requests=True, other=other)
+                cur = [k for k in b.dm_request_keys() if k not in seen]   # 許可すると一覧が変わるので、毎回読み直す
+                if not cur:
+                    break
+                key = cur[0]
+                seen.add(key)
+                got = b.dm_open_request(key)
+                b.dm_accept()
+                who = b.dm_peer()
+                counts["accepted"] += 1
+                store.log("info", "dm", f"{scope}を許可しました{'：' + who if who else ''}")
+                if rs:
+                    _handle(b, s, rs, key, got, dry, counts, who=who)
+                time.sleep(random.uniform(5, 15))
+        except (ChatLocked, _Stop):
+            raise
+        except Exception as e:  # noqa: BLE001
+            b.shot("dm-request-fail")
+            store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）。続きの確認は進めます")
+
+
+def _dm_chats(b, s, rs, dry, counts, started, yield_to_post):
+    """ふつうの会話：一覧を読み、1件ずつ開いて、最後が相手のメッセージならルールで返信。"""
+    b.dm_open_inbox()
+    keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
+    counts["chats"] = len(keys)
+    fails = 0
+    for key in keys:
+        if counts["limited"]:
+            store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
+            break
+        _checkpoint(counts, started, yield_to_post)
+        b.dm_open_inbox()
+        try:
+            got = b.dm_open_chat(key)
+            fails = 0
+        except Exception as e:  # noqa: BLE001
+            fails += 1
+            store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
+            if fails >= OPEN_FAIL_STOP:
+                counts["open_fail"] = True
+                store.log("warn", "dm", f"会話を開けないのが{fails}回続いたので、今回の確認はここまでにしました")
+                break
+            continue
+        _handle(b, s, rs, key, got, dry, counts)
 
 
 def _post_due_now():
