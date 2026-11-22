@@ -4772,24 +4772,39 @@ function applyMaint(m,hasOrders){
   $('#maintBar').hidden=false;
   $('#maintWall').hidden=!!hasOrders;   /* 未完了の注文がある人には、続きを見られるよう全面表示にしない */
 }
+/* 結果（引継ぎコード）を見せた注文を、この端末に記録する（タブを開き直しても・X から戻っても残る）。
+   これがないと、前の注文のコードを「まだ見ていない」と思って自動で出してしまう（2026-11 の不具合）。 */
+const SHOWN_KEY='nyanko-shown-orders';
+function shownOrders(){ try{ const v=JSON.parse(localStorage.getItem(SHOWN_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function markShown(order){ if(!order) return; try{ const v=shownOrders(); if(!v.includes(order)) localStorage.setItem(SHOWN_KEY,JSON.stringify(v.concat(order).slice(-50))); }catch(e){} }
+function wasShown(order,seen){ return shownOrders().includes(order)||(seen||[]).includes('r:'+order); }
 async function loadResume(quiet){
   try{
     const r=quiet?await fetch('/api/orders/mine',{cache:'no-store'}):await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
     const j=await r.json(); const list=j.orders||[];
-    // 実行が始まった注文（管理者の承認・保留解除など）→ 見ていなければ自動で状況画面へ
     let seen=[]; try{ seen=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); }catch(e){}
-    // 完了済みでサーバーの表示期限が過ぎていても、保存したコードを1回だけ自動で表示する
-    const saved=list.find(o=>o.state==='done'&&!o.job&&o.result&&!seen.includes('r:'+o.order));
-    if(saved&&!jobRunning&&$('#donePanel').hidden){
-      try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat('r:'+saved.order).slice(-20))); }catch(e){}
-      if(payOrder===saved.order) closePay();
-      show('status'); openDone({result:saved.result,clone:saved.clone,coupon:saved.coupon_issued}); keepResult('o:'+saved.order,{result:saved.result,clone:saved.clone});
-    }
+    // いま見ている（見た）実行の注文は「結果を見せた」として記録する
+    list.forEach(o=>{ if(o.job&&o.job===curJob&&o.state==='done') markShown(o.order); });
+    // 1) 実行が始まった注文（管理者の承認・保留解除・別のタブで戻った など）→ 見ていなければ、その注文の状況画面へ（こちらを優先）
     const live=list.find(o=>o.job&&(o.state==='started'||o.state==='done')&&!seen.includes(o.job));
     if(live&&!jobRunning&&curJob!==live.job){
       try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat(live.job).slice(-20))); }catch(e){}
       if(payOrder&&payOrder===live.order) closePay();
-      if($('#donePanel').hidden){ toast('お支払いが確認できました。実行を開始します'); setRunning(true); show('status'); jobStart=Date.now(); watch(live.job); }
+      if($('#donePanel').hidden){
+        if(live.state==='started') toast('お支払いが確認できました。実行を開始します');
+        setRunning(true); show('status'); jobStart=Date.now(); watch(live.job);
+        if(live.state==='done') markShown(live.order);
+      }
+    }
+    // 2) 完了済みでサーバーの表示期限（30分）が過ぎていても、まだこの端末で見せていなければ1回だけ自動で表示する。
+    //    対象は「いちばん新しい完了の注文」だけ（前の注文のコードを、今回のものと取り違えて出さない）
+    const newest=list.find(o=>o.state==='done'&&o.result);
+    const saved=(!live&&newest&&!newest.job&&!wasShown(newest.order,seen))?newest:null;
+    if(saved&&!jobRunning&&$('#donePanel').hidden){
+      markShown(saved.order);
+      try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat('r:'+saved.order).slice(-20))); }catch(e){}
+      if(payOrder===saved.order) closePay();
+      show('status'); openDone({result:saved.result,clone:saved.clone,coupon:saved.coupon_issued}); keepResult('o:'+saved.order,{result:saved.result,clone:saved.clone});
     }
     // 支払い画面を開いている注文が「支払い済み」になった → その場で開始ボタンに切り替える
     if(payOrder){ const me=list.find(o=>o.order===payOrder); if(me&&me.state==='paid'&&!$('#payPanel').hidden&&$('#payGo').textContent!=='支払い済み・実行を開始'){ payDead=false; clearInterval(holdTimer); holdTimer=null; $('#payLinkField').hidden=true; $('#payGo').disabled=false; $('#payGo').textContent='支払い済み・実行を開始'; $('#payErr').hidden=true; $('#payInfo').textContent='お支払いが確認できました。ボタンを押すと実行を開始します（再送金は不要です）。'; } }
@@ -4803,7 +4818,7 @@ async function loadResume(quiet){
       row.append(el('span',null,(d.getMonth()+1)+'/'+d.getDate()+' '+clock(d)+'　'+Number(o.amount).toLocaleString('ja-JP')+'円　'+(STATE_JA[o.state]||o.state)));
       if(o.state==='done'&&!o.job&&o.result){
         const b=el('button','btn','コードを見る'); b.type='button';
-        b.addEventListener('click',()=>{ show('status'); openDone({result:o.result,clone:o.clone,coupon:o.coupon_issued}); });
+        b.addEventListener('click',()=>{ markShown(o.order); show('status'); openDone({result:o.result,clone:o.clone,coupon:o.coupon_issued}); });
         row.append(b); box.append(row);
       }else if(o.job){
         const b=el('button','btn',o.state==='done'?'結果を見る':'状況を見る'); b.type='button';

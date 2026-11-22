@@ -138,6 +138,7 @@ done
 python3 selftest.py                         # 最後が「NG 0件」
 python3 smoke_bcsfe.py                      # bcsfe の機能がそろっているか
 python3 xbot/test_logic.py                  # xbot を触ったとき（X には接続しない）
+python3 -m unittest test_ui_results         # 完了画面のコードの取り違えがないか（ブラウザのテスト。Chromium がなければ飛ばす）
 ```
 
 - 料金・注文・支払い・クーポンを変えたら、**先にテストを足す**（`test_new_features.py` などに例が多い）。
