@@ -204,7 +204,11 @@ class Web(unittest.TestCase):
         page = self.c.get("/?tab=posts").get_data(as_text=True)
         self.assertIn("テスト投稿", page)
         self.assertIn("下書きモード中", page)
-        too_long = "あ" * 148
+        long_ok = "あ" * 3000                     # Plus の長文ポスト：280字を超えても予約できる
+        self.c.post("/post/new", data={"csrf": csrf, "text": long_ok, "at": "2030-01-02T09:00"})
+        with store.db() as d:
+            self.assertEqual(d.execute("SELECT text FROM posts ORDER BY id DESC").fetchone()["text"], long_ok)
+        too_long = "あ" * (logic.MAX_POST_LEN // 2 + 1)
         self.c.post("/post/new", data={"csrf": csrf, "text": too_long})
         self.assertIn("長すぎます", self.c.get("/?tab=posts").get_data(as_text=True))
         self.c.post("/post/new", data={"csrf": csrf, "text": "x", "images": [(io.BytesIO(b"x"), "a.heic")]}, content_type="multipart/form-data")
