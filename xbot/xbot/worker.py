@@ -209,7 +209,7 @@ def _run_dms(s, manual, yield_to_post, started):
             store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
         return counts
     try:
-        _dm_body(s, rs, dry, counts, started, yield_to_post)
+        _dm_body(s, rs, dry, counts, started, yield_to_post, manual=manual)
     except _Stop:
         if counts.get("yielded"):
             store.log("info", "dm", "予約投稿の時刻になったので、DMの確認をいったん切り上げました（投稿のあとで続けます）")
@@ -224,17 +224,20 @@ def _run_dms(s, manual, yield_to_post, started):
     return counts
 
 
-OTHER_MAX = 3   # 「その他」のリクエストを1回の確認で許可する最大数（1件ごとにブラウザを起動し直すので控えめに）
+OTHER_EVERY_SEC = 60 * 60   # 「その他」のリクエストを見る間隔（自動のとき）。開くと Cloudflare に警戒されるので、たまにだけ
 
 
-def _dm_body(s, rs, dry, counts, started, yield_to_post):
+def _dm_body(s, rs, dry, counts, started, yield_to_post, manual=False):
     """ふつうの会話 → リクエスト（メイン）→ リクエスト（その他）の順に、それぞれ別のブラウザで確認する。
 
     実験（xbot/lab、2026-11-22。各2回くり返して同じ結果）で分かったこと：
       ・リクエストの「その他」を開いたブラウザは、起動し直すまで URL で開いた DM 画面が描かれない
         （会話の一覧・リクエスト画面とも。再読み込み・新しいタブでも直らない。画面の中のリンクで戻っても、次に URL を開くとまた壊れる）
       ・メインのリクエスト画面だけなら、そのあと会話の一覧も普通に出る
-    なので「その他」はブラウザの最後の仕事にし、2件目以降は1件ごとにブラウザを起動し直す。"""
+      ・原因は X の前にある Cloudflare：「その他」を押すと cf_clearance・__cf_bm が書き換わり、
+        そのブラウザからは X のどのページ（/home も）も 403 になる（ボットと判定された）
+    なので「その他」は、自動では1時間に1回だけ・ブラウザの最後の仕事にして、1回に1件だけ許可する。
+    Cloudflare の判定をすり抜ける細工（Cookie を戻すなど）はしない。"""
     if rs:
         with DMBrowser() as b:
             _dm_chats(b, s, rs, dry, counts, started, yield_to_post)
@@ -243,7 +246,10 @@ def _dm_body(s, rs, dry, counts, started, yield_to_post):
     _checkpoint(counts, started, yield_to_post)
     with DMBrowser() as b:
         _dm_requests_main(b, s, rs, dry, counts, started, yield_to_post)
-    _dm_requests_other(s, rs, dry, counts, started, yield_to_post)
+    last = float((s.get("status") or {}).get("dm_other_at") or 0)
+    if manual or time.time() - last >= OTHER_EVERY_SEC:
+        store.update_status(dm_other_at=time.time())
+        _dm_requests_other(s, rs, dry, counts, started, yield_to_post)
 
 
 def _accept_one(b, s, rs, key, dry, counts, scope):
@@ -281,28 +287,21 @@ def _dm_requests_main(b, s, rs, dry, counts, started, yield_to_post):
 
 
 def _dm_requests_other(s, rs, dry, counts, started, yield_to_post):
-    """隠れている「その他」のリクエスト：1件ごとに新しいブラウザで開く（開いたあとは、そのブラウザでは何もしない）。"""
+    """隠れている「その他」のリクエスト：新しいブラウザで開き、1件だけ許可する（開いたあとは、そのブラウザでは他のことをしない）。"""
     scope = "リクエスト（その他）"
-    seen = set()
-    for i in range(OTHER_MAX):
-        _checkpoint(counts, started, yield_to_post)
-        try:
-            with DMBrowser() as b:
-                b.dm_open_inbox(requests=True, other=True)
-                keys = b.dm_request_keys()
-                if i == 0:
-                    counts["requests"] += len(keys)
-                cur = [k for k in keys if k not in seen]
-                if dry or not cur:
-                    return
-                seen.add(cur[0])
-                _accept_one(b, s, rs, cur[0], dry, counts, scope)
-        except (ChatLocked, _Stop):
-            raise
-        except Exception as e:  # noqa: BLE001
-            store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）")
-            return
-        time.sleep(random.uniform(5, 15))
+    _checkpoint(counts, started, yield_to_post)
+    try:
+        with DMBrowser() as b:
+            b.dm_open_inbox(requests=True, other=True)
+            keys = b.dm_request_keys()
+            counts["requests"] += len(keys)
+            if dry or not keys:
+                return
+            _accept_one(b, s, rs, keys[0], dry, counts, scope)
+    except (ChatLocked, _Stop):
+        raise
+    except Exception as e:  # noqa: BLE001
+        store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）")
 
 
 def _dm_chats(b, s, rs, dry, counts, started, yield_to_post):

@@ -259,7 +259,7 @@ class Worker(unittest.TestCase):
         self.w = worker
         with store.db() as d:
             d.execute("DELETE FROM posts"); d.execute("DELETE FROM rules"); d.execute("DELETE FROM replied"); d.execute("DELETE FROM handoffs")
-        store.update_status(dm_fail_streak=0)
+        store.update_status(dm_fail_streak=0, dm_other_at=0)
 
     def fake_browser(self, convs, incoming, requests=None):
         test = self
@@ -370,7 +370,11 @@ class Worker(unittest.TestCase):
         self.w.random.uniform = lambda a, b: 0
         self.w.time.sleep = lambda x: None
         self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
-        self.assertEqual(sorted(self.accepted), ["5:9", "o6:9", "o7:9"])     # 「その他」の分も許可する
+        self.assertEqual(sorted(self.accepted), ["5:9", "o6:9"])             # 「その他」は1回に1件だけ
+        self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
+        self.assertEqual(sorted(self.accepted), ["5:9", "o6:9"])             # 1時間たつまでは「その他」を開かない
+        self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True), manual=True)
+        self.assertEqual(sorted(self.accepted), ["5:9", "o6:9", "o7:9"])     # 手動の確認では開く
         self.assertEqual(len(self.sent), 3)
 
     def test_draft_does_not_block_real_reply_and_rule_change_rechecks(self):
@@ -530,8 +534,8 @@ class Worker(unittest.TestCase):
         self.assertEqual(c["chats"], 2)
         self.assertEqual(sorted(x[0] for x in self.sent), ["1:9", "2:9", "5:9"])
 
-    def test_other_requests_each_in_a_fresh_browser(self):
-        """実験の結果：「その他」を開いたブラウザは、そのあと URL で開いた DM 画面がすべて壊れる。"""
+    def test_other_requests_last_in_its_own_browser(self):
+        """実験の結果：「その他」を開くと Cloudflare に警戒され、そのブラウザでは X のページが 403 になる。"""
         with store.db() as d:
             d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('はじめて','first_time','ようこそ',?)", (time.time(),))
         convs = [{"conv": "1:9"}]
@@ -552,10 +556,12 @@ class Worker(unittest.TestCase):
         self.w.DMBrowser = LikeX
         self._quiet()
         c = self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
-        self.assertEqual(sorted(self.accepted), ["5:9", "o1:9", "o2:9", "o3:9"])
-        self.assertEqual(sorted(x[0] for x in self.sent), ["1:9", "5:9", "o1:9", "o2:9", "o3:9"])
-        self.assertEqual(c["accepted"], 4)
-        self.assertEqual(len(launches), 2 + self.w.OTHER_MAX)          # 会話・メイン・その他×3
+        self.assertEqual(sorted(self.accepted), ["5:9", "o1:9"])
+        self.assertEqual(sorted(x[0] for x in self.sent), ["1:9", "5:9", "o1:9"])
+        self.assertEqual(c["accepted"], 2)
+        self.assertEqual(len(launches), 3)                              # 会話・メイン・その他（その他は最後で、それ以上使わない）
+        self.assertTrue(launches[-1].broken)
+        self.assertFalse(any(x.broken for x in launches[:-1]))
 
     def test_dm_run_time_limit(self):
         with store.db() as d:
