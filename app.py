@@ -103,6 +103,8 @@ _load_prices()
 CRASH_ITEMS = ("ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正")
 ORDER_TTL = 1800
 
+import mimetypes
+mimetypes.add_type("image/webp", ".webp")   # 本番のコンテナでは .webp の種類が登録されていないことがある
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
     ("nyanko-web:" + ADMIN_PASSWORD).encode()  # ワーカープロセス間でも同じ値になるよう固定（本番は SECRET_KEY を設定）
