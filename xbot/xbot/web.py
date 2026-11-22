@@ -111,6 +111,8 @@ def index():
         events = [dict(r) for r in d.execute("SELECT * FROM events ORDER BY id DESC LIMIT 150")]
         today = d.execute("SELECT COUNT(*) c FROM posts WHERE state='posted' AND done_at>=?", (logic.jst_day_start(time.time()),)).fetchone()["c"]
         hour = d.execute("SELECT COUNT(*) c FROM replied WHERE dry=0 AND at>=?", (time.time() - 3600,)).fetchone()["c"]
+        handoffs = [dict(r) for r in d.execute("SELECT h.*, u.name FROM handoffs h LEFT JOIN rules u ON u.id=h.rule_id "
+                                               "WHERE h.done=0 ORDER BY h.at DESC LIMIT 50")]
         recent = [dict(r) for r in d.execute("SELECT r.*, u.name FROM replied r LEFT JOIN rules u ON u.id=r.rule_id WHERE r.rule_id IS NOT NULL ORDER BY r.at DESC LIMIT 50")]
     for p in posts:
         p["rep"] = logic.describe_repeat(json.loads(p["repeat"])) if p.get("repeat") else ""
@@ -119,12 +121,12 @@ def index():
         p["done"] = logic.fmt_jst(p["done_at"])
     for e in events:
         e["when"] = logic.fmt_jst(e["at"])
-    for r in recent:
+    for r in recent + handoffs:
         r["when"] = logic.fmt_jst(r["at"])
     st = s.get("status") or {}
     alive = time.time() - float(st.get("heartbeat") or 0) < 90
     return render_template_string(
-        PAGE, view="main", tab=tab, s=s, st=st, alive=alive, posts=posts, rules=rules, events=events, recent=recent,
+        PAGE, view="main", tab=tab, s=s, st=st, alive=alive, posts=posts, rules=rules, events=events, recent=recent, handoffs=handoffs,
         today=today, hour=hour, kinds=logic.KINDS, csrf=csrf(), msg=session.pop("flash", ""), fmt=logic.fmt_jst,
         login_open=time.time() < float(s["login_until"] or 0), now_local=time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + 600)),
         max_len=logic.MAX_POST_LEN, warp_ok=_warp_ok())
@@ -326,12 +328,12 @@ def _rule_form():
         raise ValueError("条件の種類が正しくありません。")
     name = (f.get("name") or "").strip()[:60] or logic.KINDS[kind]
     reply = (f.get("reply") or "").strip()
-    if not reply:
+    if not reply and kind != "handoff":
         raise ValueError("返信する文を入れてください。")
     if len(reply) > 2000:
         raise ValueError("返信する文は2000文字までです。")
     kw = (f.get("keywords") or "").strip()[:500]
-    if kind == "keyword" and not logic.keywords_of({"keywords": kw}):
+    if kind in logic.KEYWORD_KINDS and not logic.keywords_of({"keywords": kw}):
         raise ValueError("キーワードを1つ以上入れてください。")
     pr = (f.get("priority") or "100").strip()
     if not pr.isdigit():
@@ -373,6 +375,14 @@ def rule_op(rid, op):
             d.execute("UPDATE rules SET name=?, kind=?, keywords=?, match=?, reply=?, priority=? WHERE id=?",
                       (r["name"], r["kind"], r["keywords"], r["match"], r["reply"], r["priority"], rid))
             flash("ルールを保存しました。")
+    return back("dm")
+
+
+@app.post("/handoff/<int:hid>/done")
+def handoff_done(hid):
+    with store.db() as d:
+        d.execute("UPDATE handoffs SET done=1 WHERE id=?", (hid,))
+    flash("「対応済み」にしました。")
     return back("dm")
 
 

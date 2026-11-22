@@ -258,7 +258,8 @@ class Worker(unittest.TestCase):
         from xbot import worker
         self.w = worker
         with store.db() as d:
-            d.execute("DELETE FROM posts"); d.execute("DELETE FROM rules"); d.execute("DELETE FROM replied")
+            d.execute("DELETE FROM posts"); d.execute("DELETE FROM rules"); d.execute("DELETE FROM replied"); d.execute("DELETE FROM handoffs")
+        store.update_status(dm_fail_streak=0)
 
     def fake_browser(self, convs, incoming, requests=None):
         test = self
@@ -406,6 +407,121 @@ class Worker(unittest.TestCase):
         self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
         self.assertEqual(sorted(self.accepted), ["5:9", "6:9"])
         self.assertEqual(sorted(x[0] for x in self.sent), ["5:9", "6:9"])
+
+    # ---------------- 高性能化（claude/xbot-next）
+    def _quiet(self):
+        self.w.random.uniform = lambda a, b: 0
+        self.w.time.sleep = lambda x: None
+
+    def test_logic_reply_name_and_backoff(self):
+        self.assertEqual(logic.render_reply("{name}さん、ありがとう", "たろう"), "たろうさん、ありがとう")
+        self.assertEqual(logic.render_reply("{name}さん、ありがとう", None), "、ありがとう")
+        self.assertEqual(logic.render_reply("こんにちは", None), "こんにちは")
+        self.assertEqual(logic.dm_next_delay(5, 0), 300)
+        self.assertEqual(logic.dm_next_delay(5, 1), 600)
+        self.assertEqual(logic.dm_next_delay(5, 3), 2400)
+        self.assertEqual(logic.dm_next_delay(5, 20), logic.DM_BACKOFF_MAX)       # 最大3時間
+        h = {"id": 1, "enabled": 1, "kind": "handoff", "keywords": "返金, 詐欺", "match": "any", "priority": 1}
+        self.assertTrue(logic.rule_matches(h, "返金してください", False))
+        self.assertFalse(logic.rule_matches(h, "料金は？", False))
+
+    def test_handoff_is_not_answered_and_listed(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, keywords, reply, priority, created) VALUES('トラブル','handoff','返金','',1,?)", (time.time(),))
+            d.execute("INSERT INTO rules(name, kind, reply, priority, created) VALUES('受け皿','always','{name}さん、確認します',999,?)", (time.time(),))
+        convs = [{"conv": "1:9"}, {"conv": "2:9"}]
+        inc = {"1:9": ("返金してほしい", False, False), "2:9": ("質問です", False, False)}
+        self.w.DMBrowser = self.fake_browser(convs, inc)
+        self._quiet()
+        s = dict(store.get_all(), dry_run=False, dm_accept_requests=False)
+        c = self.w.run_dms(s)
+        self.assertEqual(self.sent, [("2:9", "テスト太郎（@taro_test）さん、確認します", False)])   # 要対応には返さない・受け皿は返す
+        self.assertEqual(c["handoff"], 1)
+        with store.db() as d:
+            rows = [dict(r) for r in d.execute("SELECT * FROM handoffs")]
+        self.assertEqual((len(rows), rows[0]["snippet"], rows[0]["done"]), (1, "返金してほしい", 0))
+        self.w.run_dms(s)                                  # 二度数えない・二度返さない
+        with store.db() as d:
+            self.assertEqual(d.execute("SELECT COUNT(*) c FROM handoffs").fetchone()["c"], 1)
+        self.assertEqual(len(self.sent), 1)
+        from xbot import web
+        cl = web.app.test_client(); cl.post("/login", data={"password": "test-pass"})
+        page = cl.get("/?tab=dm").get_data(as_text=True)
+        self.assertIn("要対応（1件）", page)
+        self.assertIn("返金してほしい", page)
+        with cl.session_transaction() as ss:
+            csrf = ss["csrf"]
+        cl.post(f"/handoff/{rows[0]['id']}/done", data={"csrf": csrf})
+        self.assertNotIn("要対応（", cl.get("/?tab=dm").get_data(as_text=True))
+
+    def test_handoff_rule_form_allows_empty_reply(self):
+        from xbot import web
+        cl = web.app.test_client(); cl.post("/login", data={"password": "test-pass"}); cl.get("/")
+        with cl.session_transaction() as ss:
+            csrf = ss["csrf"]
+        cl.post("/rule/new", data={"csrf": csrf, "name": "トラブル", "kind": "handoff", "keywords": "返金", "reply": "", "priority": "1"})
+        cl.post("/rule/new", data={"csrf": csrf, "name": "空", "kind": "keyword", "keywords": "x", "reply": "", "priority": "1"})   # ふつうのルールは返信文が必要
+        cl.post("/rule/new", data={"csrf": csrf, "name": "kwなし", "kind": "handoff", "keywords": "", "reply": "", "priority": "1"})
+        with store.db() as d:
+            self.assertEqual([r["name"] for r in d.execute("SELECT name FROM rules")], ["トラブル"])
+
+    def test_dm_yields_to_due_post(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('全部','always','どうも',?)", (time.time(),))
+        convs = [{"conv": f"{i}:9"} for i in range(5)]
+        inc = {c["conv"]: ("こんにちは", False, False) for c in convs}
+        self.w.DMBrowser = self.fake_browser(convs, inc)
+        self._quiet()
+        calls = {"n": 0}
+
+        def due():
+            calls["n"] += 1
+            return calls["n"] >= 3                       # 2件返したところで予約投稿の時刻が来た
+        c = self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=False), yield_to_post=due)
+        self.assertTrue(c["yielded"])
+        self.assertEqual(len(self.sent), 2)
+        c = self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=False))   # 次の回で続きから（返した分は飛ばす）
+        self.assertEqual(len(self.sent), 5)
+
+    def test_open_failures_stop_run_and_backoff(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('全部','always','どうも',?)", (time.time(),))
+        convs = [{"conv": f"{i}:9"} for i in range(6)]
+        FB = self.fake_browser(convs, {})
+        tried = []
+
+        class Broken(FB):
+            def dm_open_chat(self, key):
+                tried.append(key)
+                raise TimeoutError("x")
+        self.w.DMBrowser = Broken
+        self._quiet()
+        s = dict(store.get_all(), dry_run=False, dm_accept_requests=False, dm_enabled=True, dm_interval_min=5)
+        t0 = time.time()
+        nxt = self.w._auto_dm(s)
+        self.assertEqual(len(tried), self.w.OPEN_FAIL_STOP)          # 6件すべてでタイムアウトを待たない
+        self.assertEqual(store.get("status")["dm_fail_streak"], 1)
+        nxt = self.w._auto_dm(dict(s, status=store.get("status")))
+        self.assertEqual(store.get("status")["dm_fail_streak"], 2)
+        self.assertGreaterEqual(nxt - t0, 1200)                       # 2回続いたら 5分×4 = 20分あける
+        self.w.DMBrowser = self.fake_browser(convs, {})
+        self.w._auto_dm(dict(s, status=store.get("status")))
+        self.assertEqual(store.get("status")["dm_fail_streak"], 0)    # うまくいったら元に戻る
+
+    def test_dm_run_time_limit(self):
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('全部','always','どうも',?)", (time.time(),))
+        convs = [{"conv": f"{i}:9"} for i in range(4)]
+        self.w.DMBrowser = self.fake_browser(convs, {c["conv"]: ("やあ", False, False) for c in convs})
+        self._quiet()
+        old = self.w.DM_RUN_MAX_SEC
+        self.w.DM_RUN_MAX_SEC = -1
+        try:
+            c = self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=False))
+        finally:
+            self.w.DM_RUN_MAX_SEC = old
+        self.assertTrue(c["timeout"])
+        self.assertEqual(self.sent, [])
 
 
 def _json_days(row):

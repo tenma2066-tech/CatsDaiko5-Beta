@@ -46,6 +46,9 @@ def _init(db):
     CREATE TABLE IF NOT EXISTS replied (
         conv TEXT NOT NULL, msg_hash TEXT NOT NULL, rule_id INTEGER, at REAL NOT NULL, dry INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (conv, msg_hash));
+    CREATE TABLE IF NOT EXISTS handoffs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, conv TEXT NOT NULL, msg_hash TEXT NOT NULL, who TEXT, rule_id INTEGER,
+        snippet TEXT, at REAL NOT NULL, done INTEGER NOT NULL DEFAULT 0, UNIQUE (conv, msg_hash));
     CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, level TEXT NOT NULL, kind TEXT NOT NULL, msg TEXT NOT NULL);
     """)

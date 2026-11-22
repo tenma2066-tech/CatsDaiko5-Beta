@@ -196,32 +196,37 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <p class="sub">いまは <b>{{ 'オン' if s.dm_enabled else 'オフ' }}</b> です。{{ s.dm_interval_min }}分ごとにDMを確認し、下のルールに当てはまったら返信します（1時間 {{ s.max_replies_hour }}件まで・同じ相手には {{ s.reply_cooldown_hours }}時間あけます）。</p>
 {% if not st.chat_unlocked %}<div class="note">🔒 X の新しいチャットは、最初に<b>4桁の暗証番号</b>の入力が必要です。<a class="btn pri full" href="/chatpin" style="margin-top:8px">チャットの暗証番号を入力する</a></div>{% endif %}
 <form method="post" action="/action/check_dm"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="dm"><button class="btn pri full">📩 今すぐDMを確認する</button></form>
-<p class="sub" style="margin-top:6px">最後の確認：{{ fmt(st.last_dm_check) }}{% if st.last_dm_check %}（会話 {{ st.dm_checked or 0 }}件・{{ '下書き' if s.dry_run else '返信' }} {{ st.dm_replied or 0 }}件）{% endif %}。自動返信がオフでも、このボタンでは確認できます。</p>
+<p class="sub" style="margin-top:6px">最後の確認：{{ fmt(st.last_dm_check) }}{% if st.last_dm_check %}（会話 {{ st.dm_checked or 0 }}件・{{ '下書き' if s.dry_run else '返信' }} {{ st.dm_replied or 0 }}件{% if st.last_dm_secs is not none %}・{{ st.last_dm_secs }}秒{% endif %}）{% endif %}。{% if (st.dm_fail_streak or 0) >= 2 %}<br>⚠️ DMの確認がうまくいかない状態が {{ st.dm_fail_streak }}回 続いています。確認の間隔を自動でのばしています（予約投稿はそのまま動きます）。{% endif %}自動返信がオフでも、このボタンでは確認できます。</p>
 <form method="post" action="/action/{{ 'dm_off' if s.dm_enabled else 'dm_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full">{{ 'DM自動返信をオフにする' if s.dm_enabled else 'DM自動返信をオンにする' }}</button></form>
 <h3>メッセージリクエスト</h3>
 <p class="sub">いまは <b>{{ '自動で許可する' if s.dm_accept_requests else '許可しない' }}</b> です。許可したあと、ルールに合えば返信します（下書きモード中は許可せず、件数だけ記録します）。{% if st.dm_requests is not none %}前回：リクエスト {{ st.dm_requests }}件・許可 {{ st.dm_accepted or 0 }}件{% endif %}</p>
 <form method="post" action="/action/{{ 'req_off' if s.dm_accept_requests else 'req_on' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn full">{{ 'リクエストの自動許可をやめる' if s.dm_accept_requests else 'リクエストを自動で許可する' }}</button></form></div>
 
-<div class="card"><h2>ルールを追加</h2><p class="sub">上から順（優先度の数字が小さい順）に見て、最初に当てはまったルールの文を返します。</p>
+{% if handoffs %}<div class="card"><h2>🙋 要対応（{{ handoffs|length }}件）</h2><p class="sub">「要対応」のルールに当てはまったDMです。X で内容を確認して返信し、終わったら「対応済み」を押してください。</p>
+{% for x in handoffs %}<div class="item"><div class="top"><b>{{ x.who or '（相手不明）' }}</b><span class="chip warn">{{ x.name or '要対応' }}</span></div>
+<div class="sub" style="margin:2px 0 0">{{ x.when }}</div><div class="body">{{ x.snippet }}</div>
+<form method="post" action="/handoff/{{ x.id }}/done"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">対応済みにする</button></form></div>{% endfor %}</div>{% endif %}
+
+<div class="card"><h2>ルールを追加</h2><p class="sub">上から順（優先度の数字が小さい順）に見て、最初に当てはまったルールの文を返します。返信する文に <code>{name}</code> と書くと、相手の名前に置き換わります。<br>どれにも当てはまらないときの返信は、条件「すべてのDMに返す」で優先度を大きい数字（例：999）にすると作れます。<br>返金・トラブルなど自動で答えたくない内容は、条件「要対応」にすると、返信せずにこの画面に知らせます。</p>
 <form method="post" action="/rule/new"><input type="hidden" name="csrf" value="{{ csrf }}">
 {% set r = {'name':'','kind':'keyword','keywords':'','match':'any','reply':'','priority':100} %}<label>ルールの名前</label><input type="text" name="name" value="{{ r.name }}" maxlength="60" placeholder="例：料金の問い合わせ">
 <label>条件</label><select name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if r.kind==k }}>{{ t }}</option>{% endfor %}</select>
 <div class="kwbox"><label>キーワード（「,」か改行で区切る）</label><input type="text" name="keywords" value="{{ r.keywords }}" placeholder="例：料金, 値段, いくら">
 <div class="sw"><label><input type="radio" name="match" value="any" {{ 'checked' if r.match!='all' }}>どれか1つ含む</label><label><input type="radio" name="match" value="all" {{ 'checked' if r.match=='all' }}>すべて含む</label></div></div>
-<label>返信する文</label><textarea name="reply" maxlength="2000" required>{{ r.reply }}</textarea>
+<label>返信する文（「要対応」なら空でもよい）</label><textarea name="reply" maxlength="2000">{{ r.reply }}</textarea>
 <label>優先度（小さいほど先に判定）</label><input type="number" name="priority" value="{{ r.priority }}" min="0" max="9999" inputmode="numeric">
 <button class="btn pri full">保存</button>
 </form></div>
 
 <div class="card"><h2>ルールの一覧</h2>
 {% for r in rules %}<div class="item"><div class="top"><span class="chip {{ 'ok' if r.enabled else '' }}">{{ 'オン' if r.enabled else 'オフ' }}</span><b>{{ r.name }}</b><span class="chip">優先度 {{ r.priority }}</span></div>
-<p class="sub" style="margin:4px 0 0">条件：{{ kinds[r.kind] }}{% if r.kind == 'keyword' %}（{{ r.keywords }}／{{ 'すべて含む' if r.match=='all' else 'どれか1つ' }}）{% endif %}</p>
+<p class="sub" style="margin:4px 0 0">条件：{{ kinds[r.kind] }}{% if r.kind in ('keyword', 'handoff') %}（{{ r.keywords }}／{{ 'すべて含む' if r.match=='all' else 'どれか1つ' }}）{% endif %}</p>
 <div class="body">{{ r.reply }}</div>
 <details style="margin-top:6px"><summary>編集</summary><form method="post" action="/rule/{{ r.id }}/edit"><input type="hidden" name="csrf" value="{{ csrf }}"><label>ルールの名前</label><input type="text" name="name" value="{{ r.name }}" maxlength="60" placeholder="例：料金の問い合わせ">
 <label>条件</label><select name="kind">{% for k, t in kinds.items() %}<option value="{{ k }}" {{ 'selected' if r.kind==k }}>{{ t }}</option>{% endfor %}</select>
 <div class="kwbox"><label>キーワード（「,」か改行で区切る）</label><input type="text" name="keywords" value="{{ r.keywords }}" placeholder="例：料金, 値段, いくら">
 <div class="sw"><label><input type="radio" name="match" value="any" {{ 'checked' if r.match!='all' }}>どれか1つ含む</label><label><input type="radio" name="match" value="all" {{ 'checked' if r.match=='all' }}>すべて含む</label></div></div>
-<label>返信する文</label><textarea name="reply" maxlength="2000" required>{{ r.reply }}</textarea>
+<label>返信する文（「要対応」なら空でもよい）</label><textarea name="reply" maxlength="2000">{{ r.reply }}</textarea>
 <label>優先度（小さいほど先に判定）</label><input type="number" name="priority" value="{{ r.priority }}" min="0" max="9999" inputmode="numeric">
 <button class="btn pri full">保存</button></form></details>
 <div class="row"><form method="post" action="/rule/{{ r.id }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">{{ 'オフにする' if r.enabled else 'オンにする' }}</button></form>
@@ -266,7 +271,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
   if(i) i.addEventListener('change',function(){pv.textContent='';if(i.files.length>4){alert('画像は4枚までです');i.value='';return;}
     for(var k=0;k<i.files.length;k++){var im=document.createElement('img');im.src=URL.createObjectURL(i.files[k]);pv.appendChild(im);}});
   var rp=document.getElementById('prp'); if(rp){var g=function(){document.getElementById('rpweek').hidden=rp.value!=='weekly';document.getElementById('rphours').hidden=rp.value!=='hours';};rp.addEventListener('change',g);g();}
-  document.querySelectorAll('select[name=kind]').forEach(function(s){var f=function(){var b=s.form.querySelector('.kwbox');if(b) b.hidden=s.value!=='keyword';};s.addEventListener('change',f);f();});
+  document.querySelectorAll('select[name=kind]').forEach(function(s){var f=function(){var b=s.form.querySelector('.kwbox');if(b) b.hidden=(s.value!=='keyword'&&s.value!=='handoff');};s.addEventListener('change',f);f();});
 })();
 </script>
 {% endif %}

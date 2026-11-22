@@ -6,7 +6,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 JST = ZoneInfo("Asia/Tokyo")
-KINDS = {"always": "すべてのDMに返す", "keyword": "キーワードが入っていたら返す", "first_time": "はじめての相手にだけ返す"}
+KINDS = {"always": "すべてのDMに返す", "keyword": "キーワードが入っていたら返す", "first_time": "はじめての相手にだけ返す",
+         "handoff": "キーワードが入っていたら「要対応」にする（返信文は空でもよい）"}
+KEYWORD_KINDS = ("keyword", "handoff")
 
 
 def norm(text: str) -> str:
@@ -27,7 +29,7 @@ def rule_matches(rule, message: str, first_time: bool) -> bool:
         return True
     if kind == "first_time":
         return first_time
-    if kind == "keyword":
+    if kind in KEYWORD_KINDS:
         kws = keywords_of(rule)
         if not kws:
             return False
@@ -140,3 +142,23 @@ def render_text(text: str, ts: float) -> str:
 
 def now() -> float:
     return time.time()
+
+
+def render_reply(text: str, who) -> str:
+    """返信文の差し込み：{name} → 相手の名前（分からなければ消す）。"""
+    name = (who or "").strip()
+    out = (text or "").replace("{name}", name)
+    if not name:
+        out = out.replace("さん", "", 1) if "{name}さん" in (text or "") else out
+    return out
+
+
+DM_BACKOFF_MAX = 3 * 3600
+
+
+def dm_next_delay(interval_min, fail_streak: int) -> float:
+    """次のDM確認までの秒数。失敗が続いたら間隔を倍々にのばす（最大3時間）。投稿は止めない。"""
+    base = max(2, int(interval_min)) * 60
+    if fail_streak <= 0:
+        return base
+    return min(DM_BACKOFF_MAX, base * (2 ** min(int(fail_streak), 8)))

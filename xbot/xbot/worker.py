@@ -140,6 +140,21 @@ def _handle(b, s, rs, key, got, dry, counts, who=None):
     if logic.in_cooldown(last_reply_at(key), time.time(), float(s["reply_cooldown_hours"])):
         return
     rule = logic.pick_rule(rs, message, first)
+    if rule and rule["kind"] == "handoff":
+        # 要対応：自動では答えない内容（返金・トラブルなど）。自分に知らせる。返信文があればそれだけ送る
+        if who is None:
+            who = b.dm_peer()
+        with store.db() as d:
+            new = d.execute("INSERT OR IGNORE INTO handoffs(conv, msg_hash, who, rule_id, snippet, at) VALUES(?,?,?,?,?,?)",
+                            (key, h, who or None, rule["id"], (message or "")[:200], time.time())).rowcount
+        if new:
+            store.log("warn", "handoff", f"要対応：{who + ' から' if who else ''}ルール「{rule['name']}」に当てはまるDMが来ました（管理サイトの「DM返信」で確認）")
+        counts["handoff"] = counts.get("handoff", 0) + (1 if new else 0)
+        if not (rule["reply"] or "").strip():
+            with store.db() as d:   # 返信はしないが、同じメッセージを何度も数えない
+                d.execute("INSERT INTO replied(conv, msg_hash, rule_id, at, dry, who) VALUES(?,?,?,?,0,?) "
+                          "ON CONFLICT(conv, msg_hash) DO NOTHING", (key, h, rule["id"], time.time(), who or None))
+            return
     if not rule:
         with store.db() as d:   # 当てはまるルールがない → 次からは見ない
             d.execute("INSERT INTO replied(conv, msg_hash, rule_id, at, dry) VALUES(?,?,?,?,1) "
@@ -147,7 +162,7 @@ def _handle(b, s, rs, key, got, dry, counts, who=None):
         return
     if who is None:
         who = b.dm_peer()
-    b.dm_reply(rule["reply"], dry)
+    b.dm_reply(logic.render_reply(rule["reply"], who), dry)
     with store.db() as d:
         d.execute("INSERT INTO replied(conv, msg_hash, rule_id, at, dry, who) VALUES(?,?,?,?,?,?) "
                   "ON CONFLICT(conv, msg_hash) DO UPDATE SET rule_id=excluded.rule_id, at=excluded.at, dry=excluded.dry, who=excluded.who",
@@ -157,15 +172,59 @@ def _handle(b, s, rs, key, got, dry, counts, who=None):
     time.sleep(random.uniform(20, 60))   # 続けて返さない
 
 
-def run_dms(s, manual=False):
+DM_RUN_MAX_SEC = 10 * 60     # 1回のDM確認の長さの上限（これを超えたら次の回へ）
+OPEN_FAIL_STOP = 2           # 会話を開けないのが続いたら、その回は打ち切る（タイムアウトを積み重ねない）
+
+
+class _Stop(Exception):
+    """DM確認を途中で切り上げる（予約投稿の時刻が来た・時間切れ）。"""
+
+
+def _checkpoint(counts, started, yield_to_post):
+    if yield_to_post and yield_to_post():
+        counts["yielded"] = True
+        raise _Stop()
+    if time.time() - started > DM_RUN_MAX_SEC:
+        counts["timeout"] = True
+        raise _Stop()
+
+
+def run_dms(s, manual=False, yield_to_post=None):
+    """DMを確認する。yield_to_post() が真を返したら、会話の区切りで切り上げて予約投稿を先にする。
+    戻り値は counts（yielded=切り上げた、timeout=時間切れ、open_fail=開けずに打ち切った）。"""
+    started = time.time()
+    try:
+        return _run_dms(s, manual, yield_to_post, started)
+    finally:
+        store.update_status(last_dm_secs=int(time.time() - started))
+
+
+def _run_dms(s, manual, yield_to_post, started):
     rs = rules()
     dry = bool(s["dry_run"])
-    counts = {"replied": 0, "accepted": 0, "requests": 0, "chats": 0, "limited": False}
+    counts = {"replied": 0, "accepted": 0, "requests": 0, "chats": 0, "limited": False, "handoff": 0}
     if not rs and not s.get("dm_accept_requests"):
         store.update_status(last_dm_check=time.time(), dm_checked=0, dm_replied=0)
         if manual:
             store.log("warn", "dm", "DMの確認：返信ルールが1つもありません（「DM返信」タブで追加してください）")
-        return
+        return counts
+    try:
+        _dm_body(s, rs, dry, counts, started, yield_to_post)
+    except _Stop:
+        if counts.get("yielded"):
+            store.log("info", "dm", "予約投稿の時刻になったので、DMの確認をいったん切り上げました（投稿のあとで続けます）")
+        else:
+            store.log("warn", "dm", f"DMの確認が{DM_RUN_MAX_SEC // 60}分を超えたので、今回はここまでにしました")
+    store.update_status(last_dm_check=time.time(), dm_checked=counts["chats"], dm_replied=counts["replied"],
+                        dm_requests=counts["requests"], dm_accepted=counts["accepted"], dm_handoff=counts["handoff"])
+    if manual or counts["replied"] or counts["accepted"]:
+        req = (f"リクエスト {counts['requests']}件" + (f"（許可 {counts['accepted']}件）" if not dry else "（下書きモードなので許可していません）")) if s.get("dm_accept_requests", True) else "リクエストは自動許可オフ"
+        store.log("info", "dm", f"DMを確認しました：会話 {counts['chats']}件、{req}、{'下書き' if dry else '返信'} {counts['replied']}件"
+                  + (f"、要対応 {counts['handoff']}件" if counts["handoff"] else ""))
+    return counts
+
+
+def _dm_body(s, rs, dry, counts, started, yield_to_post):
     with DMBrowser() as b:
         # 1) メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信
         #    失敗しても、ふつうの会話の確認は続ける
@@ -177,6 +236,7 @@ def run_dms(s, manual=False):
                     counts["requests"] += len(keys)
                     seen = set()
                     for _ in range(0 if dry else min(5, len(keys))):   # 下書きモードでは許可しない（件数だけ知らせる）
+                        _checkpoint(counts, started, yield_to_post)
                         b.dm_open_inbox(requests=True, other=other)
                         cur = [k for k in b.dm_request_keys() if k not in seen]   # 許可すると一覧が変わるので、毎回読み直す
                         if not cur:
@@ -191,7 +251,7 @@ def run_dms(s, manual=False):
                         if rs:
                             _handle(b, s, rs, key, got, dry, counts, who=who)
                         time.sleep(random.uniform(5, 15))
-                except ChatLocked:
+                except (ChatLocked, _Stop):
                     raise
                 except Exception as e:  # noqa: BLE001
                     b.shot("dm-request-fail")
@@ -201,22 +261,62 @@ def run_dms(s, manual=False):
             b.dm_open_inbox()
             keys = b.dm_chat_keys(int(s["dm_scan_limit"]))
             counts["chats"] = len(keys)
+            fails = 0
             for key in keys:
                 if counts["limited"]:
                     store.update_status(note=f"1時間の返信数が上限（{s['max_replies_hour']}件）に達したため、少し待ちます")
                     break
+                _checkpoint(counts, started, yield_to_post)
                 b.dm_open_inbox()
                 try:
                     got = b.dm_open_chat(key)
+                    fails = 0
                 except Exception as e:  # noqa: BLE001
+                    fails += 1
                     store.log("warn", "dm", f"会話を開けませんでした（{type(e).__name__}）")
+                    if fails >= OPEN_FAIL_STOP:
+                        counts["open_fail"] = True
+                        store.log("warn", "dm", f"会話を開けないのが{fails}回続いたので、今回の確認はここまでにしました")
+                        break
                     continue
                 _handle(b, s, rs, key, got, dry, counts)
-    store.update_status(last_dm_check=time.time(), dm_checked=counts["chats"], dm_replied=counts["replied"],
-                        dm_requests=counts["requests"], dm_accepted=counts["accepted"])
-    if manual or counts["replied"] or counts["accepted"]:
-        req = (f"リクエスト {counts['requests']}件" + (f"（許可 {counts['accepted']}件）" if not dry else "（下書きモードなので許可していません）")) if s.get("dm_accept_requests", True) else "リクエストは自動許可オフ"
-        store.log("info", "dm", f"DMを確認しました：会話 {counts['chats']}件、{req}、{'下書き' if dry else '返信'} {counts['replied']}件")
+
+
+def _post_due_now():
+    return due_post() is not None and not store.get_all()["paused"]
+
+
+def _auto_dm(s):
+    """自動のDM確認を1回行い、次に確認する時刻を返す。
+    ・予約投稿の時刻が来たら会話の区切りで切り上げ、投稿のあとすぐ続ける
+    ・失敗が続いたら間隔を倍々にのばす（最大3時間）。DMがだめでも予約投稿は止めない"""
+    st = s.get("status") or {}
+    streak = int(st.get("dm_fail_streak") or 0)
+    failed = False
+    yielded = False
+    try:
+        counts = run_dms(s, yield_to_post=_post_due_now) or {}
+        yielded = bool(counts.get("yielded"))
+        failed = bool(counts.get("open_fail"))
+    except NotLoggedIn as e:
+        failed = True
+        store.update_status(logged_in=False)
+        store.log("error", "login", str(e))
+    except ChatLocked as e:
+        failed = True
+        store.update_status(chat_unlocked=False)
+        store.log("error", "dm", str(e))
+    except Exception as e:  # noqa: BLE001
+        failed = True
+        store.log("error", "dm", f"DMの確認に失敗しました: {e}")
+    streak = streak + 1 if failed else 0
+    store.update_status(dm_fail_streak=streak)
+    if yielded:
+        return time.time() + 5
+    delay = logic.dm_next_delay(s["dm_interval_min"], streak)
+    if failed and streak >= 2:
+        store.log("warn", "dm", f"DMの確認がうまくいかない状態が{streak}回続いています。次は {int(delay // 60)}分後に確認します（予約投稿はそのまま動きます）")
+    return time.time() + delay + random.uniform(0, 60)
 
 
 # ---------------------------------------------------------------------- ログイン画面（Xvfb + x11vnc + noVNC）
@@ -371,17 +471,7 @@ def main():
             if row:
                 run_post(s, row)
             if s["dm_enabled"] and time.time() >= next_dm:
-                next_dm = time.time() + max(2, int(s["dm_interval_min"])) * 60 + random.uniform(0, 60)
-                try:
-                    run_dms(s)
-                except NotLoggedIn as e:
-                    store.update_status(logged_in=False)
-                    store.log("error", "login", str(e))
-                except ChatLocked as e:
-                    store.update_status(chat_unlocked=False)
-                    store.log("error", "dm", str(e))
-                except Exception as e:  # noqa: BLE001
-                    store.log("error", "dm", f"DMの確認に失敗しました: {e}")
+                next_dm = _auto_dm(s)
         except Exception:  # noqa: BLE001
             store.log("error", "loop", traceback.format_exc()[-800:])
         for _ in range(TICK):
