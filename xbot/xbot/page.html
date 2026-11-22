@@ -165,7 +165,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 {% elif tab == 'posts' %}
 <div class="card"><h2>新しい予約投稿</h2>
 <form method="post" action="/post/new" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label for="pt">本文</label><textarea id="pt" name="text" maxlength="1000" placeholder="投稿する文章"></textarea><div class="counter" id="ptc"></div>
+<label for="pt">本文</label><textarea id="pt" name="text" maxlength="25000" placeholder="投稿する文章（長文OK）"></textarea><div class="counter" id="ptc"></div>
 <label for="pi">画像（4枚まで・JPG/PNG/GIF/WEBP）</label><input id="pi" type="file" name="images" accept="image/jpeg,image/png,image/gif,image/webp" multiple>
 <div class="thumbs" id="pprev"></div>
 <label for="pa">投稿する日時（日本時間・定期の場合は初回）</label><input id="pa" type="datetime-local" name="at" value="{{ now_local }}">
