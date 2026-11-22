@@ -18,3 +18,6 @@ sudo -u xbot bash -c "set -a; . $ENVF; set +a; export XBOT_DATA_DIR=$TMP; cd $AP
   | grep -E '^\[lab\]' | sed -E 's/[0-9]{8,}/#/g' | cut -c1-1500
 # 実験中に、本番の常駐が同時に DM を見ていたか（件数だけ。名前は出さない）
 echo "[lab] 実験中の本番の動き：DM確認 $(journalctl -u xbot-worker --since "$START" --no-pager 2>/dev/null | grep -c 'DMを確認しました') 回・投稿 $(journalctl -u xbot-worker --since "$START" --no-pager 2>/dev/null | grep -cE 'post: #')件"
+# 本番の常駐の、最近の DM 確認で見えた会話の件数（名前は出さない）
+echo "[lab] 本番の最近のDM確認：$(journalctl -u xbot-worker --since '-2 days' --no-pager 2>/dev/null | grep 'DMを確認しました' | grep -o '会話 [0-9]*件' | tail -12 | tr '\n' ' ')"
+echo "[lab] 本番の最近の「会話を開けませんでした」：$(journalctl -u xbot-worker --since '-2 days' --no-pager 2>/dev/null | grep -c '会話を開けませんでした') 回"
