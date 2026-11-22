@@ -372,7 +372,66 @@ def mech_webkit(name, fn):
         print(f"[lab] {name}: 中断 {type(e).__name__}（{round(time.time() - t0)}秒）", flush=True)
 
 
-MECH = {"K": t_k, "L": t_l, "M": t_m, "N": t_n, "H": t_h, "I": t_i, "J": t_j, "A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
+def t_o(b):          # 「その他」のあと、サービスワーカーの登録を消してから一覧
+    _requests(b, True)
+    n = b.page.evaluate("async () => { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); return rs.length; }")
+    time.sleep(3)
+    b.goto(CHAT)
+    return {"unregistered": n, "list": _count(b)}
+
+
+def t_q(b):          # 先に一覧を開いておく → 「その他」→ 同じタブで一覧（本番の新しい順番を、同じブラウザでやった場合）
+    b.goto(CHAT)
+    first = _count(b, (5,))
+    _requests(b, True)
+    b.goto(CHAT)
+    return {"first": first, "after_other_same_tab": _count(b)}
+
+
+def t_r(b):          # 先に一覧 → 「その他」→ URL でリクエスト画面（2周目のリクエストが見られるか）
+    b.goto(CHAT)
+    _count(b, (5,))
+    _requests(b, True)
+    b.goto(CHAT + "/requests")
+    time.sleep(8)
+    return {"requests_panel": b.page.locator('[data-testid="dm-container"]').count()}
+
+
+def t_s(b):          # 「その他」のあと：ログイン手続き（flow）と 401 が出ているか・画面に出ている文字の種類
+    log = _watch(b)
+    _requests(b, True)
+    b.goto(CHAT)
+    time.sleep(10)
+    words = [k for k in ("ログイン", "Log in", "Sign in", "問題が発生", "Something went wrong", "再読み込み", "Retry", "やりなおす")
+             if k in (b.page.inner_text("body") or "")]
+    return {"words": words, "url_path": _mask(b.page.url.split("?")[0]), **_summ(log)}
+
+
+class _NoSW:
+    """この中で起動するブラウザは、サービスワーカーを使わない。"""
+
+    def __enter__(self):
+        from playwright.sync_api._generated import BrowserType
+        self.cls = BrowserType
+        self.orig = BrowserType.launch_persistent_context
+        orig = self.orig
+
+        def patched(this, *a, **k):
+            k["service_workers"] = "block"
+            return orig(this, *a, **k)
+        BrowserType.launch_persistent_context = patched
+        return self
+
+    def __exit__(self, *exc):
+        self.cls.launch_persistent_context = self.orig
+
+
+def mech_nosw(name, fn):
+    with _NoSW():
+        mech(name, fn)
+
+
+MECH = {"O": t_o, "Q": t_q, "R": t_r, "S": t_s, "K": t_k, "L": t_l, "M": t_m, "N": t_n, "H": t_h, "I": t_i, "J": t_j, "A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
 
 
 def main():
@@ -381,6 +440,11 @@ def main():
     table = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5}
     print(f"[lab] 開始：会話 {n}件 × 方法 {','.join(methods)}（読むだけ）", flush=True)
     for m in methods:
+        if m.startswith("Z"):          # Z<名前> = サービスワーカーを使わないブラウザで仕組みの調査
+            for r in range(n):
+                mech_nosw(f"SWなし {m[1:]} {r + 1}回目", MECH[m[1:]])
+                time.sleep(3)
+            continue
         if m.startswith("W"):          # W<名前> = WebKit で仕組みの調査
             for r in range(n):
                 mech_webkit(f"WebKit {m[1:]} {r + 1}回目", MECH[m[1:]])
