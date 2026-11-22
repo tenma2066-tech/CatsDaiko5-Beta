@@ -3047,6 +3047,11 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .result{margin-top:12px;border:2px solid var(--ok);background:var(--okbg);border-radius:14px;padding:12px}
 .result h3{margin:0 0 8px;font-size:15px;font-weight:800;color:var(--ok)}
 .code{display:flex;align-items:center;gap:8px;margin-top:8px}
+.flowimg{display:block;width:100%;max-width:560px;height:auto;margin:10px auto 4px;border-radius:14px}
+.flowbox summary{cursor:pointer;list-style:none}
+.flowbox summary::-webkit-details-marker{display:none}
+.flowbox summary::after{content:"（タップで開く）";font-size:12px;color:var(--muted,#888);margin-left:6px}
+.flowbox[open] summary::after{content:"（タップで閉じる）"}
 .code div{flex:1;min-width:0}
 .code small{display:block;font-size:12px;color:var(--muted)}
 .code strong{display:block;font-size:22px;letter-spacing:.04em;word-break:break-all;font-variant-numeric:tabular-nums}
@@ -3240,6 +3245,10 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <h2>未完了の注文があります</h2>
       <div id="resumeList"></div>
     </div>
+    <details class="panel flowbox">
+      <summary><b>📖 はじめての方へ：ご利用の流れ（図解）</b></summary>
+      <a href="/static/flow.jpg?v=1" target="_blank" rel="noopener" class="flowlink"><picture><source srcset="/static/flow.webp?v=1" type="image/webp"><img src="/static/flow.jpg?v=1" alt="にゃんこ代行 ご利用の流れ：1 メニューを選ぶ、2 アカウントを入力、3 内容を確認してPayPayで支払い、4 実行・完了を待つ、5 コードを受け取ってゲームで引き継ぎ" loading="lazy" width="1024" height="1536" class="flowimg"></picture></a><p class="sub" style="text-align:center;margin:0">画像をタップすると大きく表示できます</p>
+    </details>
     <div class="panel">
       <h2>何をしますか？</h2>
       <p class="sub">いずれか1つを選んでください。引継ぎコードは、このあとの「アカウント」で入力します。</p>
@@ -3539,6 +3548,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <div><i>🔒</i><p><b>引継ぎコードは処理にだけ使用</b><span>入力したコードは処理のためだけに使い、完了後に削除します。</span></p></div>
       <div><i>💬</i><p><b>困ったらすぐ相談</b><span><a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a>のDMで受け付けています。</span></p></div>
     </div>
+    <h3>ご利用の流れ（図解）</h3>
+    <a href="/static/flow.jpg?v=1" target="_blank" rel="noopener" class="flowlink"><picture><source srcset="/static/flow.webp?v=1" type="image/webp"><img src="/static/flow.jpg?v=1" alt="にゃんこ代行 ご利用の流れ：1 メニューを選ぶ、2 アカウントを入力、3 内容を確認してPayPayで支払い、4 実行・完了を待つ、5 コードを受け取ってゲームで引き継ぎ" loading="lazy" width="1024" height="1536" class="flowimg"></picture></a><p class="sub" style="text-align:center;margin:0">画像をタップすると大きく表示できます</p>
     <h3>かんたん4ステップ</h3>
     <ol class="steps4">
       <li><b>メニュー</b><span>欲しいものを選ぶ。下のバーに金額が出ます</span></li>
