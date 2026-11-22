@@ -1,4 +1,4 @@
 lab
-3
-M4,M5
-#15
+2
+XA,XB1,XB2,XC,XD,XE,XF,XG
+#16
