@@ -1,4 +1,4 @@
 lab
 2
-XN,XM,XK,XL,WA,WB2
-#18
+XS,XO,XQ,XR,ZA,ZB2,XD
+#19
