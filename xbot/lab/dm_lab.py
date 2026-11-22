@@ -8,6 +8,8 @@
   M1  一覧を1回だけ開く → 項目をクリック → ブラウザの「戻る」（ページを読み直さない）→ 次の項目
   M2  一覧を1回だけ開く → 項目をクリック → そのまま横の一覧の次の項目をクリック（パソコン幅の2列表示）
   M3  会話ごとにブラウザを起動し直す → 一覧 → 項目をクリック
+  M4  本番と同じ順：先にリクエスト画面（と「その他」）を開いてから、同じブラウザで M0 のやり方
+  M5  リクエスト画面を開いたあと、ブラウザを起動し直して M0 のやり方
 
 出力は件数・秒数・成否だけ（相手の名前・本文・IDは出さない）。
 使い方: XBOT_DATA_DIR=<写し> python dm_lab.py [件数=3] [方法=M0,M1,M2,M3]
@@ -93,10 +95,35 @@ def m3(n):
     return len(keys)
 
 
+def _visit_requests(b):
+    b.dm_open_inbox(requests=True)
+    nreq = len(b.dm_request_keys())
+    b.dm_open_inbox(requests=True, other=True)
+    print(f"[lab] リクエスト画面を開きました（リクエスト {nreq}件・許可はしない）", flush=True)
+
+
+def m4(n):
+    with DMBrowser() as b:
+        _visit_requests(b)
+        b.dm_open_inbox()
+        keys = b.dm_chat_keys(n)
+        print(f"[lab] M4 リクエストのあとの一覧：{len(keys)}件", flush=True)
+        for i, k in enumerate(keys):
+            b.dm_open_inbox()
+            _row("M4", i, _check(b, k, b.page.url))
+    return len(keys)
+
+
+def m5(n):
+    with DMBrowser() as b:
+        _visit_requests(b)
+    return m0(n)
+
+
 def main():
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     methods = (sys.argv[2] if len(sys.argv) > 2 else "M0,M1,M2,M3").split(",")
-    table = {"M0": m0, "M1": m1, "M2": m2, "M3": m3}
+    table = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5}
     print(f"[lab] 開始：会話 {n}件 × 方法 {','.join(methods)}（読むだけ）", flush=True)
     for m in methods:
         t0 = time.time()
