@@ -65,6 +65,7 @@ Claude・Codex・Cursor など、このリポジトリを編集する AI は **�
 | `docs/XBOT_NOTES.md` | xbot の引き継ぎメモ（ログイン方式、DM の画面の目印、原因判明した問題） |
 | `docs/XBOT_PLAN.md` | xbot の改善計画と DM の調査結果 |
 | `docs/VPS_DEPLOY.md` | VPS の設置手順 |
+| `docs/AUDIT_PLAN.md` | お店のセキュリティ・不具合の精査結果と補修計画（P0〜P3）。直したら表を更新する |
 
 ---
 
