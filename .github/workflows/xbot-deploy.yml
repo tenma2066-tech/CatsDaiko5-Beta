@@ -64,5 +64,14 @@ jobs:
               $SSH "cat > /tmp/xbot-dmcheck.sh" < xbot/deploy/dmcheck.sh
               $SSH "bash /tmp/xbot-dmcheck.sh < /dev/null; rm -f /tmp/xbot-dmcheck.sh"
               ;;
-            *) echo "step は install / caddy / status / probe"; exit 1;;
+            lab)
+              # DM の開き方の実験（読むだけ・送信しない）。常駐はそのまま、プロフィールの写しで動かして写しは消す
+              # run.txt の2行目 = 件数（既定3）、3行目 = 方法（既定 M0,M1,M2,M3）
+              N=$(sed -n 2p xbot/deploy/run.txt | tr -cd '0-9'); N=${N:-3}; [ "$N" -le 5 ] || N=5
+              M=$(sed -n 3p xbot/deploy/run.txt | tr -cd 'M0-9,'); M=${M:-M0,M1,M2,M3}
+              $SSH "cat > /tmp/xbot-lab.sh" < xbot/lab/lab.sh
+              $SSH "cat > /tmp/dm_lab.py" < xbot/lab/dm_lab.py
+              $SSH "bash /tmp/xbot-lab.sh /tmp/dm_lab.py $N $M < /dev/null; rm -f /tmp/xbot-lab.sh /tmp/dm_lab.py"
+              ;;
+            *) echo "step は install / caddy / status / probe / dmcheck / lab"; exit 1;;
           esac
