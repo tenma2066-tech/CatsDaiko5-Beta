@@ -233,7 +233,41 @@ def t_g(b):          # 基準の画面（比べる用）
     return {"path": path, **info, "list": b.page.locator(ITEM).count()}
 
 
-MECH = {"A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
+def _panel(b):
+    """DM 画面が描かれているか（受信トレイの部品があるか）。"""
+    time.sleep(8)
+    return b.page.locator('[data-testid="dm-container"]').count() > 0
+
+
+def _back_in_app(b):
+    loc = b.page.locator('a[href="/i/chat"]').first
+    loc.click(timeout=8000)
+    time.sleep(3)
+
+
+def t_h(b):          # その他 → URL でリクエスト画面 → 描かれるか・「その他」ボタンは出るか
+    _requests(b, True)
+    b.goto(CHAT + "/requests")
+    ok = _panel(b)
+    return {"requests_panel": ok, "other_btn": b.page.locator('[data-testid="dm-message-requests-other-button"]').count()}
+
+
+def t_i(b):          # その他 → 画面の中のリンクで戻る → そのあと URL で一覧
+    _requests(b, True)
+    _back_in_app(b)
+    b.goto(CHAT)
+    return {"list_after_heal_then_url": _count(b)}
+
+
+def t_j(b):          # その他 → 画面の中のリンクで戻る → URL でリクエスト → その他 → リンクで戻る（2回目も戻れるか）
+    _requests(b, True)
+    _back_in_app(b)
+    _requests(b, True)
+    _back_in_app(b)
+    return {"list_after_two_rounds": _count(b)}
+
+
+MECH = {"H": t_h, "I": t_i, "J": t_j, "A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
 
 
 def main():
