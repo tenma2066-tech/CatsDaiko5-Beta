@@ -17,7 +17,7 @@
 import sys
 import time
 
-from xbot.browser import CHAT, DMBrowser
+from xbot.browser import CHAT, Browser, DMBrowser
 
 ITEM = '[data-testid^="dm-conversation-item-"]'
 COMPOSER = '[data-testid="dm-composer-textarea"]'
@@ -267,7 +267,112 @@ def t_j(b):          # その他 → 画面の中のリンクで戻る → URL �
     return {"list_after_two_rounds": _count(b)}
 
 
-MECH = {"H": t_h, "I": t_i, "J": t_j, "A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
+import re as _re
+
+
+def _mask(t):
+    t = _re.sub(r"https?://[^/\s]+", "", str(t))
+    t = _re.sub(r"[0-9]{3,}", "#", t)
+    t = _re.sub(r"[A-Za-z0-9_-]{20,}", "*", t)
+    return t[:140]
+
+
+def _watch(b):
+    """このページの画面のエラー・失敗した通信・WebSocket を記録しはじめる。"""
+    log = {"console": [], "failed": [], "http_err": [], "ws": []}
+    p = b.page
+    p.on("console", lambda m: log["console"].append(_mask(m.text)) if m.type == "error" else None)
+    p.on("pageerror", lambda e: log["console"].append("pageerror " + _mask(e)))
+    p.on("requestfailed", lambda r: log["failed"].append(_mask(r.url.split("?")[0]) + " " + _mask(r.failure or "")))
+    p.on("response", lambda r: log["http_err"].append(f"{r.status} {_mask(r.url.split('?')[0])}") if r.status >= 400 else None)
+    p.on("websocket", lambda w: log["ws"].append(_mask(w.url.split("?")[0])))
+    return log
+
+
+def _workers(b):
+    out = {"page_workers": len(b.page.workers)}
+    try:
+        out["service_workers"] = [_mask(w.url) for w in b.ctx.service_workers]
+    except Exception as e:  # noqa: BLE001
+        out["service_workers"] = type(e).__name__
+    try:
+        out["sw_registrations"] = b.page.evaluate("async () => navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).length : -1")
+    except Exception:  # noqa: BLE001
+        out["sw_registrations"] = "?"
+    return out
+
+
+def _summ(log):
+    return {k: (v[:6] + [f"…ほか{len(v) - 6}件"] if len(v) > 6 else v) for k, v in log.items()}
+
+
+def t_k(b):          # 「その他」のあと60秒待つと直るか
+    _requests(b, True)
+    time.sleep(60)
+    b.goto(CHAT)
+    return {"list_after_60s": _count(b)}
+
+
+def t_l(b):          # 「その他」のあと、タブを全部閉じてから新しいタブ（ブラウザは起動し直さない）
+    _requests(b, True)
+    newp = b.ctx.new_page()
+    for pg in list(b.ctx.pages):
+        if pg is not newp:
+            pg.close()
+    time.sleep(5)
+    b.page = newp
+    b.goto(CHAT)
+    return {"list_after_close_all_tabs": _count(b)}
+
+
+def t_m(b):          # 中で何が起きているか：正常時と「その他」のあとで、ワーカー・エラー・通信を比べる
+    log0 = _watch(b)
+    b.goto(CHAT)
+    n0 = _count(b, (8,))
+    w0 = _workers(b)
+    normal = {"list": n0, **w0, **_summ(log0)}
+    b.dm_open_inbox(requests=True, other=True)
+    p2 = b.ctx.new_page()
+    old = b.page
+    b.page = p2
+    log1 = _watch(b)
+    b.goto(CHAT)
+    n1 = _count(b, (8,))
+    w1 = _workers(b)
+    after = {"list": n1, **w1, **_summ(log1)}
+    b.page = old
+    return {"normal": normal, "after_other": after}
+
+
+def t_n(b):          # 「その他」の画面そのものは描かれているか（ボタンを押した直後）
+    b.goto(CHAT + "/requests")
+    time.sleep(5)
+    before = b.page.locator('[data-testid="dm-container"]').count()
+    log = _watch(b)
+    btn = b.page.locator('[data-testid="dm-message-requests-other-button"]').first
+    try:
+        btn.wait_for(state="visible", timeout=8000)
+    except Exception:  # noqa: BLE001
+        return {"other_button": "出ていない"}
+    btn.click()
+    time.sleep(8)
+    path, info = _screen(b)
+    return {"before_container": before, "path": path, **info, **_summ(log)}
+
+
+def mech_webkit(name, fn):
+    """iPhone と同じ種類のブラウザ（WebKit・パソコン幅）で同じことを試す。"""
+    t0 = time.time()
+    try:
+        with Browser(engine="mac") as b:
+            res = fn(b)
+            res["pin"] = b.page.locator('[data-testid="pin-code-input-container"]').count()
+        print(f"[lab] {name}: {res}（{round(time.time() - t0)}秒）", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[lab] {name}: 中断 {type(e).__name__}（{round(time.time() - t0)}秒）", flush=True)
+
+
+MECH = {"K": t_k, "L": t_l, "M": t_m, "N": t_n, "H": t_h, "I": t_i, "J": t_j, "A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
 
 
 def main():
@@ -276,6 +381,11 @@ def main():
     table = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5}
     print(f"[lab] 開始：会話 {n}件 × 方法 {','.join(methods)}（読むだけ）", flush=True)
     for m in methods:
+        if m.startswith("W"):          # W<名前> = WebKit で仕組みの調査
+            for r in range(n):
+                mech_webkit(f"WebKit {m[1:]} {r + 1}回目", MECH[m[1:]])
+                time.sleep(3)
+            continue
         if m.startswith("X"):          # X<名前> = 仕組みの調査（n 回くり返す・会話は開かない）
             for r in range(n):
                 mech(f"{m[1:]} {r + 1}回目", MECH[m[1:]])
