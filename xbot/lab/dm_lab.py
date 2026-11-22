@@ -431,7 +431,58 @@ def mech_nosw(name, fn):
         mech(name, fn)
 
 
-MECH = {"O": t_o, "Q": t_q, "R": t_r, "S": t_s, "K": t_k, "L": t_l, "M": t_m, "N": t_n, "H": t_h, "I": t_i, "J": t_j, "A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
+def _cookie_view(b):
+    """Cookie の名前・種類だけ（値は見ない。値が変わったかは、値のハッシュの先頭だけで比べる）。"""
+    import hashlib
+    out = {}
+    for c in b.ctx.cookies():
+        dom = c.get("domain", "")
+        if "x.com" not in dom and "twitter" not in dom:
+            continue
+        k = f"{c['name']}@{dom}{c.get('path', '/')}"
+        out[k] = {"session": c.get("expires", -1) in (-1, None) or c.get("expires", -1) < 0,
+                  "h": hashlib.sha256(str(c.get("value", "")).encode()).hexdigest()[:6]}
+    return out
+
+
+def t_t(b):          # 「その他」の前後で、Cookie の何が増えた・変わったか（名前だけ）
+    b.goto(CHAT + "/requests")
+    time.sleep(5)
+    before = _cookie_view(b)
+    b.dm_open_inbox(requests=True, other=True)
+    time.sleep(3)
+    after = _cookie_view(b)
+    added = [f"{k}{'(session)' if v['session'] else ''}" for k, v in after.items() if k not in before]
+    changed = [f"{k}{'(session)' if v['session'] else ''}" for k, v in after.items() if k in before and before[k]["h"] != v["h"]]
+    removed = [k for k in before if k not in after]
+    st = b.page.evaluate("async () => (await fetch('/i/chat', {credentials: 'include'})).status")
+    return {"added": added, "changed": changed, "removed": removed, "fetch_i_chat_status": st}
+
+
+def t_u(b):          # 「その他」の前の Cookie をそのまま戻すと直るか
+    b.goto(CHAT + "/requests")
+    time.sleep(5)
+    snap = b.ctx.cookies()
+    b.dm_open_inbox(requests=True, other=True)
+    time.sleep(3)
+    b.ctx.clear_cookies()
+    b.ctx.add_cookies(snap)
+    b.goto(CHAT)
+    return {"list_after_restore_cookies": _count(b)}
+
+
+def t_v(b):          # 「その他」のあと、どの URL が拒否されるか（ページの取得だけ。表示はしない）
+    _requests(b, True)
+    res = {}
+    for u in ("/i/chat", "/i/chat/requests", "/home", "/messages", "/settings/account"):
+        try:
+            res[u] = b.page.evaluate("async (u) => (await fetch(u, {credentials: 'include'})).status", u)
+        except Exception as e:  # noqa: BLE001
+            res[u] = type(e).__name__
+    return res
+
+
+MECH = {"T": t_t, "U": t_u, "V": t_v, "O": t_o, "Q": t_q, "R": t_r, "S": t_s, "K": t_k, "L": t_l, "M": t_m, "N": t_n, "H": t_h, "I": t_i, "J": t_j, "A": t_a, "B1": t_b1, "B2": t_b2, "C": t_c, "D": t_d, "E": t_e, "F": t_f, "G": t_g}
 
 
 def main():
