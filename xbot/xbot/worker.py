@@ -224,47 +224,85 @@ def _run_dms(s, manual, yield_to_post, started):
     return counts
 
 
+OTHER_MAX = 3   # 「その他」のリクエストを1回の確認で許可する最大数（1件ごとにブラウザを起動し直すので控えめに）
+
+
 def _dm_body(s, rs, dry, counts, started, yield_to_post):
-    """ふつうの会話 → メッセージリクエスト の順に、それぞれ別のブラウザで確認する。
-    実験（xbot/lab、2026-11-22）で、リクエスト画面を開いたあとは同じブラウザで会話の一覧が0件になると分かったため。"""
+    """ふつうの会話 → リクエスト（メイン）→ リクエスト（その他）の順に、それぞれ別のブラウザで確認する。
+
+    実験（xbot/lab、2026-11-22。各2回くり返して同じ結果）で分かったこと：
+      ・リクエストの「その他」を開いたブラウザは、起動し直すまで URL で開いた DM 画面が描かれない
+        （会話の一覧・リクエスト画面とも。再読み込み・新しいタブでも直らない。画面の中のリンクで戻っても、次に URL を開くとまた壊れる）
+      ・メインのリクエスト画面だけなら、そのあと会話の一覧も普通に出る
+    なので「その他」はブラウザの最後の仕事にし、2件目以降は1件ごとにブラウザを起動し直す。"""
     if rs:
         with DMBrowser() as b:
             _dm_chats(b, s, rs, dry, counts, started, yield_to_post)
-    if s.get("dm_accept_requests", True):
+    if not s.get("dm_accept_requests", True):
+        return
+    _checkpoint(counts, started, yield_to_post)
+    with DMBrowser() as b:
+        _dm_requests_main(b, s, rs, dry, counts, started, yield_to_post)
+    _dm_requests_other(s, rs, dry, counts, started, yield_to_post)
+
+
+def _accept_one(b, s, rs, key, dry, counts, scope):
+    got = b.dm_open_request(key)
+    b.dm_accept()
+    who = b.dm_peer()
+    counts["accepted"] += 1
+    store.log("info", "dm", f"{scope}を許可しました{'：' + who if who else ''}")
+    if rs:
+        _handle(b, s, rs, key, got, dry, counts, who=who)
+
+
+def _dm_requests_main(b, s, rs, dry, counts, started, yield_to_post):
+    """メインのメッセージリクエスト：許可して、ルールに合えば返信。失敗しても止めない。"""
+    scope = "リクエスト"
+    try:
+        b.dm_open_inbox(requests=True)
+        keys = b.dm_request_keys()
+        counts["requests"] += len(keys)
+        seen = set()
+        for _ in range(0 if dry else min(5, len(keys))):   # 下書きモードでは許可しない（件数だけ知らせる）
+            _checkpoint(counts, started, yield_to_post)
+            b.dm_open_inbox(requests=True)
+            cur = [k for k in b.dm_request_keys() if k not in seen]   # 許可すると一覧が変わるので、毎回読み直す
+            if not cur:
+                break
+            seen.add(cur[0])
+            _accept_one(b, s, rs, cur[0], dry, counts, scope)
+            time.sleep(random.uniform(5, 15))
+    except (ChatLocked, _Stop):
+        raise
+    except Exception as e:  # noqa: BLE001
+        b.shot("dm-request-fail")
+        store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）。続きの確認は進めます")
+
+
+def _dm_requests_other(s, rs, dry, counts, started, yield_to_post):
+    """隠れている「その他」のリクエスト：1件ごとに新しいブラウザで開く（開いたあとは、そのブラウザでは何もしない）。"""
+    scope = "リクエスト（その他）"
+    seen = set()
+    for i in range(OTHER_MAX):
         _checkpoint(counts, started, yield_to_post)
-        with DMBrowser() as b:
-            _dm_requests(b, s, rs, dry, counts, started, yield_to_post)
-
-
-def _dm_requests(b, s, rs, dry, counts, started, yield_to_post):
-    """メッセージリクエスト（メインと、隠れている「その他」の両方）：許可して、ルールに合えば返信。失敗しても止めない。"""
-    for scope, other in (("リクエスト", False), ("リクエスト（その他）", True)):
         try:
-            b.dm_open_inbox(requests=True, other=other)
-            keys = b.dm_request_keys()
-            counts["requests"] += len(keys)
-            seen = set()
-            for _ in range(0 if dry else min(5, len(keys))):   # 下書きモードでは許可しない（件数だけ知らせる）
-                _checkpoint(counts, started, yield_to_post)
-                b.dm_open_inbox(requests=True, other=other)
-                cur = [k for k in b.dm_request_keys() if k not in seen]   # 許可すると一覧が変わるので、毎回読み直す
-                if not cur:
-                    break
-                key = cur[0]
-                seen.add(key)
-                got = b.dm_open_request(key)
-                b.dm_accept()
-                who = b.dm_peer()
-                counts["accepted"] += 1
-                store.log("info", "dm", f"{scope}を許可しました{'：' + who if who else ''}")
-                if rs:
-                    _handle(b, s, rs, key, got, dry, counts, who=who)
-                time.sleep(random.uniform(5, 15))
+            with DMBrowser() as b:
+                b.dm_open_inbox(requests=True, other=True)
+                keys = b.dm_request_keys()
+                if i == 0:
+                    counts["requests"] += len(keys)
+                cur = [k for k in keys if k not in seen]
+                if dry or not cur:
+                    return
+                seen.add(cur[0])
+                _accept_one(b, s, rs, cur[0], dry, counts, scope)
         except (ChatLocked, _Stop):
             raise
         except Exception as e:  # noqa: BLE001
-            b.shot("dm-request-fail")
-            store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）。続きの確認は進めます")
+            store.log("warn", "dm", f"{scope}の処理でつまずきました（{type(e).__name__}）")
+            return
+        time.sleep(random.uniform(5, 15))
 
 
 def _dm_chats(b, s, rs, dry, counts, started, yield_to_post):

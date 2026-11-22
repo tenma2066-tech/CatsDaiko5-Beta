@@ -530,6 +530,33 @@ class Worker(unittest.TestCase):
         self.assertEqual(c["chats"], 2)
         self.assertEqual(sorted(x[0] for x in self.sent), ["1:9", "2:9", "5:9"])
 
+    def test_other_requests_each_in_a_fresh_browser(self):
+        """実験の結果：「その他」を開いたブラウザは、そのあと URL で開いた DM 画面がすべて壊れる。"""
+        with store.db() as d:
+            d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('はじめて','first_time','ようこそ',?)", (time.time(),))
+        convs = [{"conv": "1:9"}]
+        FB = self.fake_browser(convs, {"1:9": ("やあ", False, True)},
+                               requests={"5:9": ("はじめまして", False, True), "o1:9": ("こんにちは", False, True),
+                                         "o2:9": ("こんばんは", False, True), "o3:9": ("どうも", False, True)})
+        launches = []
+
+        class LikeX(FB):
+            def __init__(self, *a, **k):
+                self.broken = False
+                launches.append(self)
+            def dm_open_inbox(self, requests=False, other=False):
+                if self.broken:
+                    raise TimeoutError("DM画面が描かれない")
+                super().dm_open_inbox(requests, other)
+                self.broken = other
+        self.w.DMBrowser = LikeX
+        self._quiet()
+        c = self.w.run_dms(dict(store.get_all(), dry_run=False, dm_accept_requests=True))
+        self.assertEqual(sorted(self.accepted), ["5:9", "o1:9", "o2:9", "o3:9"])
+        self.assertEqual(sorted(x[0] for x in self.sent), ["1:9", "5:9", "o1:9", "o2:9", "o3:9"])
+        self.assertEqual(c["accepted"], 4)
+        self.assertEqual(len(launches), 2 + self.w.OTHER_MAX)          # 会話・メイン・その他×3
+
     def test_dm_run_time_limit(self):
         with store.db() as d:
             d.execute("INSERT INTO rules(name, kind, reply, created) VALUES('全部','always','どうも',?)", (time.time(),))
