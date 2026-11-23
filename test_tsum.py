@@ -481,6 +481,38 @@ class Page(unittest.TestCase):
         tsum = client.get("/tsum").get_data(as_text=True)
         self.assertIn('href="/?pick=1"', tsum)
 
+class Images(unittest.TestCase):
+    """画像（大メニュー・ツムツム画面・X のリンクプレビュー・アイコン）がそろっていて、画面から参照されていること。"""
+
+    FILES = ["game-nyanko.webp", "game-nyanko.jpg", "game-tsum.webp", "game-tsum.jpg", "tsum-flow.webp", "tsum-flow.jpg",
+             "ogp-nyanko.jpg", "ogp-tsum.jpg", "favicon.ico", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]
+
+    def test_files_are_served(self):
+        client = A.app.test_client()
+        for name in self.FILES:
+            r = client.get("/static/" + name)
+            self.assertEqual(r.status_code, 200, name)
+            self.assertGreater(len(r.data), 1000, name)
+            r.close()
+        r = client.get("/favicon.ico")
+        self.assertEqual(r.status_code, 200)
+        r.close()
+
+    def test_link_preview_uses_https_behind_caddy(self):
+        client = A.app.test_client()
+        headers = {"X-Forwarded-Proto": "https", "Host": "shop.example"}
+        main = client.get("/", headers=headers).get_data(as_text=True)
+        self.assertIn('content="https://shop.example/static/ogp-nyanko.jpg?v=1"', main)
+        self.assertIn("game-nyanko.webp", main)
+        self.assertIn("game-tsum.webp", main)
+        tsum = client.get("/tsum", headers=headers).get_data(as_text=True)
+        self.assertIn('content="https://shop.example/static/ogp-tsum.jpg?v=1"', tsum)
+        self.assertIn('content="https://shop.example/tsum"', tsum)
+        self.assertIn("tsum-flow.webp", tsum)
+        for page in (main, tsum):
+            self.assertIn('rel="apple-touch-icon"', page)
+            self.assertIn('name="twitter:card" content="summary_large_image"', page)
+
 
 if __name__ == "__main__":
     unittest.main()

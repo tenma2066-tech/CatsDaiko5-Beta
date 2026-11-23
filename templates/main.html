@@ -2,6 +2,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>にゃんこ代行</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<meta name="theme-color" content="#ffd400">
+<meta name="description" content="にゃんこ大戦争・ツムツムの代行（TN SHOP）。PayPayでかんたん、スマホだけで完結します。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="にゃんこ代行｜TN SHOP">
+<meta property="og:description" content="アイテム・キャラ・ステージ・バン保証。PayPayでかんたん・スマホだけ。">
+<meta property="og:url" content="{{ site }}/">
+<meta property="og:image" content="{{ site }}/static/ogp-nyanko.jpg?v=1">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{ site }}/static/ogp-nyanko.jpg?v=1">
 <style>
 :root{
   --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
@@ -341,6 +354,8 @@ label.opt.locked{opacity:.45}.evreq{display:block;font-size:11.5px;color:var(--m
   background:var(--panel);color:inherit;text-decoration:none;font:inherit;cursor:pointer;box-shadow:0 4px 0 var(--line)}
 .gamecard:active{transform:translateY(3px);box-shadow:0 1px 0 var(--line)}
 .gamecard b{display:block;font-size:19px}
+.gamecard picture{display:block;margin:0 0 12px}
+.gamecard img{display:block;width:100%;height:auto;aspect-ratio:2/1;object-fit:cover;border-radius:12px;border:2px solid var(--line);background:var(--soft)}
 .gamecard small{display:block;margin-top:4px;font-size:13px;color:var(--muted);line-height:1.6}
 .gamecard em{font-style:normal;font-weight:800;color:var(--ink)}
 .gameback{display:inline-block;margin:0 0 6px;font-size:13px;color:var(--muted);background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}
@@ -421,8 +436,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
   <div class="gin">
     <h1 id="gpTitle">TN SHOP 代行</h1>
     <p class="gsub">どのゲームの代行をしますか？</p>
-    <button type="button" class="gamecard" id="gpNyanko"><b>🐱 にゃんこ大戦争</b><small>アイテム・キャラ・ステージ・バン保証・初期垢作成など。<em>{{ prices.other }}円</em>〜</small></button>
-    <a class="gamecard" href="/tsum"><b>🧸 LINE：ディズニー ツムツム</b><small>コイン・スコア・ツムレベル・ガチャ完売・ゲストアカウント生成など。<em>{{ prices.tsum_coin }}円</em>〜</small></a>
+    <button type="button" class="gamecard" id="gpNyanko"><picture><source srcset="/static/game-nyanko.webp?v=1" type="image/webp"><img src="/static/game-nyanko.jpg?v=1" alt="にゃんこ大戦争の代行" width="1024" height="512"></picture><b>🐱 にゃんこ大戦争</b><small>アイテム・キャラ・ステージ・バン保証・初期垢作成など。<em>{{ prices.other }}円</em>〜</small></button>
+    <a class="gamecard" href="/tsum"><picture><source srcset="/static/game-tsum.webp?v=1" type="image/webp"><img src="/static/game-tsum.jpg?v=1" alt="ツムツム代行" width="1024" height="512"></picture><b>🧸 LINE：ディズニー ツムツム</b><small>コイン・スコア・ツムレベル・ガチャ完売・ゲストアカウント生成など。<em>{{ prices.tsum_coin }}円</em>〜</small></a>
   </div>
 </div>
 

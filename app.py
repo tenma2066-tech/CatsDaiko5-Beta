@@ -2067,8 +2067,19 @@ def index():
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
-        error_nums=sorted(i + DB_OFFSET for i in engine.ERROR_CAT_IDS),
+        error_nums=sorted(i + DB_OFFSET for i in engine.ERROR_CAT_IDS), site=_site(),
     )
+
+
+def _site() -> str:
+    """X などのリンクプレビュー（og:image）に使う、このサイトの URL（https で出す）。"""
+    scheme = "https" if (request.headers.get("X-Forwarded-Proto") == "https" or request.is_secure) else request.scheme
+    return f"{scheme}://{request.host}"
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return app.send_static_file("favicon.ico")
 
 
 @app.get("/tsum")
@@ -2080,7 +2091,7 @@ def tsum_page():
     return render_template_string(
         TSUM_HTML, menus=menus, modes=tsum_service.MODE_LABELS, solo=list(tsum_service.SOLO_MENUS),
         is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
-        coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=TSUM_TOTAL_STEPS,
+        coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=TSUM_TOTAL_STEPS, site=_site(),
     )
 
 

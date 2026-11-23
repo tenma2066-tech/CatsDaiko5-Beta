@@ -43,7 +43,7 @@ Claude Code で作業する場合は、さらに **`docs/CLAUDE_GUIDE.md`**（Cl
 | `pricing.py` | 料金の計算（`compute_amount` など。サーバー側の正）。画面の見積もりはこれに合わせる |
 | `templates/` | 画面の HTML・CSS・JavaScript（`main.html`＝利用者、`admin.html`＝管理画面）。Jinja のひな形 |
 | `github_runtime_store.py` | 以前の Fly.io 時代の保存の仕組み（VPS では無効。PayPay の台帳を開くときに通る） |
-| `static/` | 画像（ご利用の流れの図解 `flow.webp`／`flow.jpg`）。差し替えたら `templates/main.html` の `?v=` を上げる |
+| `static/` | 画像。にゃんこの図解 `flow`、ツムツムの図解 `tsum-flow`、大メニューのカード `game-nyanko`・`game-tsum`（WebP と JPEG）、X のリンクプレビュー `ogp-nyanko.jpg`・`ogp-tsum.jpg`、アイコン `favicon.ico`・`icon-192/512.png`・`apple-touch-icon.png`。差し替えたら画面（`templates/*.html`）の `?v=` を上げる |
 | `template_save.sav` | 初期アカウント用のひな形セーブ |
 | `selftest.py`・`smoke_bcsfe.py`・`test_*.py` | テスト（§5） |
 | `deploy/vps/` | 本番の `docker-compose.yml`・`Caddyfile`・`remote-setup.sh` |
