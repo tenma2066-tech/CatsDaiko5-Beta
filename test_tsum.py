@@ -454,14 +454,16 @@ class Page(unittest.TestCase):
         for key in T.MENUS:
             self.assertIn(f'data-key="{key}"', body)
 
-    def test_the_two_shops_do_not_link_to_each_other(self):
-        """入口は分けている（にゃんこの画面からツムツムへ、またはその逆の導線を作らない）。"""
+    def test_main_site_asks_which_game_first(self):
+        """トップページは最初に大メニュー（にゃんこ／ツムツム）を出す。ツムツムからは選び直せる。"""
         client = A.app.test_client()
         main = client.get("/").get_data(as_text=True)
-        self.assertNotIn('href="/tsum"', main)
+        self.assertIn('id="gamePick"', main)
+        self.assertIn('id="gpNyanko"', main)
+        self.assertIn('href="/tsum"', main)
+        self.assertLess(main.index('id="gamePick"'), main.index('id="v-start"'))   # にゃんこの画面より前
         tsum = client.get("/tsum").get_data(as_text=True)
-        self.assertNotIn('href="/"', tsum)
-        self.assertNotIn("にゃんこ代行へ", tsum)
+        self.assertIn('href="/"', tsum)
 
 
 if __name__ == "__main__":
