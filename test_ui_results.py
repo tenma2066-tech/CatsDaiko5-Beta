@@ -120,5 +120,75 @@ class ResultCodesNotMixedUp(unittest.TestCase):
         self.assertNotIn("OLD111aaa", s["hist"])
 
 
+@unittest.skipIf(sync_playwright is None, "Playwright がない")
+class ReviewGateSurvivesLeavingThePage(ResultCodesNotMixedUp):
+    """「X でリプライする」を押すと、X のアプリ内ブラウザではページが移動し、iPhone では裏に回ったタブが
+    捨てられることがある。戻ってきてページが読み込み直されても、押したことを覚えていてコードを出す
+    （2026-11 の「リプライを押してもコードが見られない」報告の再発防止）。"""
+
+    def _review_page(self):
+        pg, _ = self._page(live=True)
+        pg.context.route("https://x.com/**", lambda r, *_: r.fulfill(status=200, content_type="text/html", body="<p>x</p>"))
+        pg.context.clock.install()
+        pg.goto(self.url)
+        pg.wait_for_timeout(5000)
+        return pg
+
+    def _locked(self, pg):
+        return pg.evaluate("()=>({panel: !document.querySelector('#donePanel').hidden, "
+                           "locked: document.querySelector('#donePanel').classList.contains('rvlock'), "
+                           "review: !document.querySelector('#reviewPanel').hidden})")
+
+    def test_before_pressing_reply_codes_are_locked(self):
+        pg = self._review_page()
+        self.assertEqual(self._locked(pg), {"panel": True, "locked": True, "review": True})
+
+    def test_reply_then_page_reloaded_unlocks_after_wait(self):
+        pg = self._review_page()
+        with pg.context.expect_page() as popup:
+            pg.click("#reviewLink")
+        popup.value.close()
+        pg.reload()                                   # 戻ってきたら読み込み直されていた
+        pg.clock.fast_forward(25_000)
+        pg.wait_for_timeout(5000)
+        st = self._locked(pg)
+        self.assertFalse(st["locked"], st)
+        self.assertFalse(st["review"], st)
+
+    def test_reply_then_back_in_a_new_tab_unlocks(self):
+        pg = self._review_page()
+        with pg.context.expect_page() as popup:
+            pg.click("#reviewLink")
+        popup.value.close()
+        pg.clock.fast_forward(25_000)
+        pg2 = pg.context.new_page()                   # X のアプリから新しいタブで戻ってきた
+        pg2.route("**/api/orders/mine", lambda r, *_: r.fulfill(status=200, content_type="application/json",
+                                                                 body=json.dumps(_orders(True, int(time.time())))))
+        pg2.route("**/status/J2", lambda r, *_: r.fulfill(status=200, content_type="application/json", body=json.dumps(STATUS2)))
+        pg2.goto(self.url)
+        pg2.wait_for_timeout(5000)
+        st = self._locked(pg2)
+        self.assertFalse(st["locked"], st)
+
+    def test_coming_back_too_early_still_waits(self):
+        pg = self._review_page()
+        with pg.context.expect_page() as popup:
+            pg.click("#reviewLink")
+        popup.value.close()
+        pg.reload()
+        pg.clock.fast_forward(5_000)                  # 5秒で戻ってきた：まだ出さない
+        pg.wait_for_timeout(3000)
+        self.assertTrue(self._locked(pg)["locked"])
+        pg.clock.fast_forward(20_000)                 # 押してから20秒たった：出す（もう一度押さなくてよい）
+        pg.wait_for_timeout(3000)
+        self.assertFalse(self._locked(pg)["locked"])
+
+    # 親クラスのテストはここでは繰り返さない
+    test_new_tab_while_job_alive_shows_new_code = None
+    test_reload_same_tab_never_shows_old_code = None
+    test_after_expiry_shows_newest_once = None
+    test_job_seen_then_expired_does_not_pop_old_or_again = None
+
+
 if __name__ == "__main__":
     unittest.main()
