@@ -52,6 +52,7 @@ def fake_core(**overrides):
         forge_sync=forge_sync,
         Forge=lambda **kw: types.SimpleNamespace(get_public_key=lambda: "pub"),
         describe_login_failure=lambda raw: "ログインできませんでした",
+        _dbg=lambda *a, **k: None,
         tsum_login=types.SimpleNamespace(headless_session_direct=headless_session_direct),
         tsum_guest=types.SimpleNamespace(guest_takeover=guest_takeover, guest_create=guest_create,
                                          guest_issue_transfer=guest_issue_transfer,
@@ -230,6 +231,41 @@ class RunOrder(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertEqual(len(tries), 3)
         self.assertIn("接続が不安定", out["error"])
+
+    def test_captcha_block_without_ip_rotation_is_not_retried(self):
+        # 回線（送信元IP）を変えられない構成では、画像認証で弾かれても叩き直さない。
+        # 同じ固定IPで繰り返しても結果は変わらず、認証の繰り返しでアカウントに負荷をかけるだけ。
+        tries = []
+
+        def login(login_id, password, **kw):
+            tries.append(1)
+            kw["error_box"]["error"] = "CAPTCHAが正しくないか、LINE側がもう一度画像CAPTCHAを要求しました。"
+            return None
+
+        self.core.tsum_login.headless_session_direct = login   # 既定の _unique_game_proxy は None（固定IP）
+        out = T.run_order("line", "a@example.com", "pw", ["tsum_coin"], {"tsum_coin": 1})
+        self.assertFalse(out["ok"])
+        self.assertEqual(len(tries), 1)
+        # 利用者に実行できない・根拠のない案内を出さない
+        self.assertNotIn("VPN", out["error"])
+        self.assertNotIn("20〜30分", out["error"])
+        self.assertNotIn("一時的に制限", out["error"])
+        self.assertIn("お問い合わせ", out["error"])
+
+    def test_captcha_block_with_ip_rotation_is_retried_on_fresh_circuit(self):
+        # SOCKS プロキシ設定時は、画像認証で弾かれたら別IP（別回線）でやり直す。
+        self.core._unique_game_proxy = lambda: "socks5h://ident:ident@127.0.0.1:9050"
+        tries = []
+
+        def login(login_id, password, **kw):
+            tries.append(1)
+            kw["error_box"]["error"] = "CAPTCHAが正しくないか、LINE側がもう一度画像CAPTCHAを要求しました。"
+            return None
+
+        self.core.tsum_login.headless_session_direct = login
+        out = T.run_order("line", "a@example.com", "pw", ["tsum_coin"], {"tsum_coin": 1})
+        self.assertFalse(out["ok"])
+        self.assertEqual(len(tries), 3)
 
     def test_captcha_answer_is_passed_to_the_engine(self):
         seen = {}

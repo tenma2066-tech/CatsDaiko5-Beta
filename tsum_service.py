@@ -256,10 +256,44 @@ def _run_menus(c, sess, forge, menus, qty, progress, log):
     return done, lines, ""
 
 
+def _is_ip_flag_failure(raw: str) -> bool:
+    """この失敗が「このIPが弾かれている」サインか。
+    画像認証の再要求・reCAPTCHA への切替は、送信元IPが怪しまれているときに出る。
+    別IPに変えれば消えることが多い（＝回線を変えてやり直す価値がある）。
+
+    次は IP のサインではないので除く：
+    - 利用者が画像認証の文字を入力しなかった／中止した（"入力されませんでした"・"キャンセル"）
+    - 画像そのものの取得に失敗した通信エラー（"画像の取得に失敗"。こちらは通信リトライ側で扱う）"""
+    s = str(raw or "")
+    low = s.lower()
+    if "入力されませんでした" in s or "キャンセル" in s or "画像の取得に失敗" in s:
+        return False
+    return "recaptcha" in low or "captcha" in low or "画像認証" in s
+
+
+def _login_failure_message(c, raw: str, can_rotate_ip: bool) -> str:
+    """利用者に見せるログイン失敗の文言。
+    画像認証・reCAPTCHA で詰まったとき、IP を変えられない構成（回線固定）では
+    「VPN を変えて」「20〜30分待って」のような、利用者には実行できない・根拠のない
+    案内を出さない。サーバー側のアクセス状況が原因であることだけを正直に伝える。"""
+    if _is_ip_flag_failure(raw) and not can_rotate_ip:
+        return ("LINEの画像認証が繰り返し出てログインを完了できませんでした"
+                "（サーバー側のアクセス状況が原因の可能性があります）。"
+                "お手数ですが時間をおいてもう一度お試しいただき、"
+                "繰り返す場合はお問い合わせください。")
+    return c.describe_login_failure(raw)
+
+
 def _login_line(c, login_id, password, progress, log, captcha, pin_notice):
     """メールアドレスでログインして、ゲームのセッションを作る。
     戻り値は (sess, forge, エラー文)。"""
     proxy = c._unique_game_proxy()
+    # 回線（送信元IP）を毎回変えられるのは SOCKS プロキシ（Tor など）を設定したときだけ。
+    # 未設定ならサーバーの固定IPのままなので、やり直しても同じIPで同じ結果になる。
+    can_rotate_ip = proxy is not None
+    if not can_rotate_ip:
+        c._dbg("[tsum login] 送信元IPの切り替えは無効（TSUM_SOCKS_URL 未設定）。"
+               "固定IPで LINE ログインします。")
     login_error: dict = {}
 
     def _captcha_relay(img_bytes):
@@ -294,13 +328,17 @@ def _login_line(c, login_id, password, progress, log, captcha, pin_notice):
         if sess:
             break
         raw = str(login_error.get("error") or "")
-        retryable = ("errorcode=446" in raw.lower() or "errorcode=401" in raw.lower()
-                     or "中断されました" in raw or "通信エラー" in raw or "プロキシ接続エラー" in raw)
+        low = raw.lower()
+        net_retryable = ("errorcode=446" in low or "errorcode=401" in low
+                         or "中断されました" in raw or "通信エラー" in raw or "プロキシ接続エラー" in raw)
+        # 画像認証の再要求・reCAPTCHA への切替は、別IPに変えられるときだけやり直す。
+        # 同じ固定IPで叩き直しても結果は変わらず、認証の繰り返しでアカウントに負荷をかけるだけ。
+        retryable = net_retryable or (_is_ip_flag_failure(raw) and can_rotate_ip)
         if retryable and attempt < 2:
             continue
-        return None, None, c.describe_login_failure(raw)
+        return None, None, _login_failure_message(c, raw, can_rotate_ip)
     if not sess:
-        return None, None, c.describe_login_failure(login_error.get("error"))
+        return None, None, _login_failure_message(c, str(login_error.get("error") or ""), can_rotate_ip)
     progress.update(2, "ゲームサーバーに接続しています…", force=True)
     forge = c.Forge(userid=sess["userid"], hashv=sess["hash"], checkval=sess["checkval"],
                     proxy=c._game_api_proxy(proxy), user_token=sess.get("userToken"))

@@ -60,6 +60,12 @@ LINE が画像認証を出したら、実行中のプロセスが画像をジョ
 
 ログイン失敗の文言は `tsum_core.describe_login_failure(reason)` が、実際の失敗理由（`line_password_login.py` が返す生の文字列）から決める。画像認証まわりは「画像の取得に失敗」「文字が入力されなかった」「文字が違う／再要求された」「reCAPTCHA 要求」を別々に出す。確認できない「LINE 側の一時制限」「20〜30分」などの推測は書かない（2026-11-23 修正）。テストは `test_tsum.py` の `LoginFailureMessages`。
 
+#### 画像認証が「繰り返し出る」ときの根本原因と対処（2026-11-23）
+LINE はデータセンター／VPS／クラウドの固定IP（Fly・さくら等）からのログインを怪しみ、**画像認証を毎回出す／送信後に reCAPTCHA（Google・打鍵不可）へ切り替える**ことがある。送信元IPが固定だと、利用者が正しく入力しても LINE が再要求し続け、ログインが完了しない。これが代行利用者側の「画像認証が繰り返し出てできない」の正体。
+
+- `tsum_service._login_line` は、画像認証の再要求・reCAPTCHA を**別IPに変えられるときだけ**（SOCKS プロキシ設定時）別回線でやり直す。固定IPのときは叩き直さず（同じIPで繰り返してもアカウントに負荷をかけるだけ）、利用者には「サーバー側のアクセス状況が原因の可能性」を正直に伝える（`_login_failure_message`）。「VPN を変えて」「20〜30分待って」のような、利用者に実行できない・根拠のない案内は出さない。テストは `test_tsum.py` の `test_captcha_block_without_ip_rotation_is_not_retried` ／ `test_captcha_block_with_ip_rotation_is_retried_on_fresh_circuit`。
+- **恒久対処（運用側）**：LINE ログインを住宅用／モバイル回線の**ローテーション型プロキシ**（または出口を変えられる Tor）に通す（`TSUM_SOCKS_URL`）。固定のデータセンターIPのままでは、コード側で何をしても画像認証・reCAPTCHA は減らない。プロキシを設定すると `_unique_game_proxy()` がやり直しごとに別の出口（別IP）を割り当て、上の自動リトライが効くようになる。
+
 ## 4. 設定（環境変数）
 
 | 変数 | 既定 | 何か |
