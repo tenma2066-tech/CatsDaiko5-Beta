@@ -170,6 +170,10 @@ def describe_login_failure(reason):
     low = reason.lower()
     if "PIN" in reason.upper() or "pincode" in low or "端末認証" in reason:
         return "LINEの本人確認（PIN）が完了しませんでした。LINEアプリで番号を入力してから、もう一度お試しください"
+    # LINE 認証は通ったが、ゲーム（ツムツム）側のログインで失敗したケース。
+    # LINE には「ログインしました」が届いているので、資格情報エラーと誤表示しない。実際のコードを見せる。
+    if "ゲーム（ツムツム）側のログイン" in reason or "ツムツムログインに失敗" in reason:
+        return reason if "コード" in reason else "ゲーム（ツムツム）側のログインに失敗しました。時間をおいてもう一度お試しください。繰り返す場合はお問い合わせください。"
     # 画像認証（CAPTCHA）まわりは、実際に確認できた失敗だけを伝える。
     # 「LINE側の一時制限」「20〜30分」などの推測は根拠がないので書かない。
     if "recaptcha" in low:

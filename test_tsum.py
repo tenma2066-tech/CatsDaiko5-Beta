@@ -322,6 +322,15 @@ class LoginFailureMessages(unittest.TestCase):
             # 診断用の内部文字列（例外名など）を画面に出さない
             self.assertNotIn("ConnectionError", msg)
 
+    def test_game_side_failure_is_not_shown_as_wrong_password(self):
+        # LINE 認証は成功したがゲーム(ツムツム)側のログインで失敗したケース。
+        # LINE に「ログインしました」が届いているので、資格情報エラーと誤表示しない。
+        describe = self._describe()
+        m = describe("ゲーム（ツムツム）側のログインに失敗しました（コード 201）。")
+        self.assertNotIn("メールアドレスかパスワード", m)
+        self.assertIn("ゲーム", m)
+        self.assertIn("201", m)   # 実際のコードを見せて切り分けできるようにする
+
     def test_recaptcha_and_other_reasons_unchanged(self):
         describe = self._describe()
         self.assertIn("reCAPTCHA", describe("CAPTCHA送信後にreCAPTCHAへ切り替わりました。別IPに変えてください。"))

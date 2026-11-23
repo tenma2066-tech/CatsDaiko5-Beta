@@ -615,8 +615,27 @@ def headless_session_direct(login_id, password, proxy=None, captcha_solver=None,
         note_fn("game_login", "ゲームにログインしています...")
     j = game_login(res["userToken"], proxies=game_proxies)
     if not isinstance(j, dict) or j.get("retcode") != 0:
-        if verbose: print(f"[headless] login.nhn 失敗 retcode={j.get('retcode') if isinstance(j,dict) else j}")
-        return fail("ツムツムログインに失敗しました。")
+        # バージョン不一致(retcode 201)なら、最新の appver と resver 候補でやり直す。
+        # （Forge 側には版回復があるが、初回の login.nhn には無かった。ツムツム更新後にここで詰まる。）
+        if isinstance(j, dict) and j.get("retcode") == 201:
+            try:
+                resolve_appver(force=True)
+            except Exception as _e:
+                print(f"[headless] resolve_appver 失敗: {_e}")
+            for rv in resver_candidates():
+                apply_versions(resver=rv, cache=False)
+                print(f"[headless] 版やり直し appver={APPVER} resver={RESVER} mstver={MSTVER}")
+                j = game_login(res["userToken"], proxies=game_proxies)
+                if isinstance(j, dict) and j.get("retcode") == 0:
+                    apply_versions(resver=rv, cache=True)
+                    mark_versions_good()
+                    break
+    if not isinstance(j, dict) or j.get("retcode") != 0:
+        rc = j.get("retcode") if isinstance(j, dict) else None
+        rmsg = str((j.get("retmsg") or j.get("message") or j.get("errmsg") or "")) [:80] if isinstance(j, dict) else ""
+        if verbose: print(f"[headless] login.nhn 失敗 retcode={rc} msg={rmsg!r}")
+        # LINEログイン自体は成功している（アクセストークン取得済み）。資格情報エラーと誤表示しない。
+        return fail(f"ゲーム（ツムツム）側のログインに失敗しました（コード {rc if rc is not None else '不明'}）。" + (rmsg if rmsg else ""))
 
     ui = j.get("userinfo") or {}
     sess = {
