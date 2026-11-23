@@ -167,7 +167,7 @@ class AppTests(unittest.TestCase):
     def test_new_options_are_listed(self):
         self.assertIn("プラチナのかけら", self.app.ITEMS)
         self.assertNotIn("1億DL記念チケット", self.app.ITEMS)   # メニューから外した（古い注文のため engine には残す）
-        self.assertNotIn('data-item="1億DL記念チケット"', self.client.get("/").get_data(as_text=True))
+        self.assertNotIn('data-item="1億DL記念チケット"', self.client.get("/nyanko").get_data(as_text=True))
         for name in ("ユーザーランク報酬全受け取り", "チュートリアルクリア",
                      "ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正"):
             self.assertIn(name, self.app.OTHERS)
@@ -175,7 +175,7 @@ class AppTests(unittest.TestCase):
         self.assertFalse(hasattr(self.app, "_combo_progress_debug"))
 
     def test_page_renders_orb_grid_and_presets(self):
-        html = self.client.get("/").get_data(as_text=True)
+        html = self.client.get("/nyanko").get_data(as_text=True)
         self.assertIn('data-item="本能玉#310"', html)
         self.assertIn('data-label="虹獣石"', html)
         self.assertIn('id="presetSave"', html)

@@ -82,7 +82,7 @@ class ResultCodesNotMixedUp(unittest.TestCase):
     def test_new_tab_while_job_alive_shows_new_code(self):
         """リプライで X に移り、新しいタブで戻ってきた（今回のジョブはまだサーバーにある）。"""
         pg, _ = self._page(live=True)
-        pg.goto(self.url)
+        pg.goto(self.url + "nyanko")
         s = self._shown(pg)
         self.assertEqual(s["done"], ["NEW222bbb", "2222"])
         self.assertNotIn("OLD111aaa", s["hist"])
@@ -90,7 +90,7 @@ class ResultCodesNotMixedUp(unittest.TestCase):
     def test_reload_same_tab_never_shows_old_code(self):
         """同じタブを再読み込みして戻ってきた。"""
         pg, _ = self._page(live=True)
-        pg.goto(self.url)
+        pg.goto(self.url + "nyanko")
         pg.evaluate("()=>{sessionStorage.setItem('job','J2'); sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(['J2']));}")
         pg.reload()
         s = self._shown(pg)
@@ -100,7 +100,7 @@ class ResultCodesNotMixedUp(unittest.TestCase):
     def test_after_expiry_shows_newest_once(self):
         """30分以上たち、今回のジョブもサーバーから消えた：いちばん新しい注文を1回だけ出す。"""
         pg, _ = self._page(live=False)
-        pg.goto(self.url)
+        pg.goto(self.url + "nyanko")
         s = self._shown(pg)
         self.assertEqual(s["done"], ["NEW222bbb", "2222"])
         pg.reload()                                   # もう一度開いても、同じコードを何度も自動で出さない・前のコードも出さない
@@ -111,7 +111,7 @@ class ResultCodesNotMixedUp(unittest.TestCase):
     def test_job_seen_then_expired_does_not_pop_old_or_again(self):
         """今回の結果を画面で見たあと、時間がたってから開いた：前のコードも今回のコードも、勝手に出さない。"""
         pg, state = self._page(live=True)
-        pg.goto(self.url)
+        pg.goto(self.url + "nyanko")
         self.assertEqual(self._shown(pg)["done"], ["NEW222bbb", "2222"])
         state["live"] = False
         pg.reload()
@@ -130,7 +130,7 @@ class ReviewGateSurvivesLeavingThePage(ResultCodesNotMixedUp):
         pg, _ = self._page(live=True)
         pg.context.route("https://x.com/**", lambda r, *_: r.fulfill(status=200, content_type="text/html", body="<p>x</p>"))
         pg.context.clock.install()
-        pg.goto(self.url)
+        pg.goto(self.url + "nyanko")
         pg.wait_for_timeout(5000)
         return pg
 
@@ -165,7 +165,7 @@ class ReviewGateSurvivesLeavingThePage(ResultCodesNotMixedUp):
         pg2.route("**/api/orders/mine", lambda r, *_: r.fulfill(status=200, content_type="application/json",
                                                                  body=json.dumps(_orders(True, int(time.time())))))
         pg2.route("**/status/J2", lambda r, *_: r.fulfill(status=200, content_type="application/json", body=json.dumps(STATUS2)))
-        pg2.goto(self.url)
+        pg2.goto(self.url + "nyanko")
         pg2.wait_for_timeout(5000)
         st = self._locked(pg2)
         self.assertFalse(st["locked"], st)
@@ -184,6 +184,69 @@ class ReviewGateSurvivesLeavingThePage(ResultCodesNotMixedUp):
         self.assertFalse(self._locked(pg)["locked"])
 
     # 親クラスのテストはここでは繰り返さない
+    test_new_tab_while_job_alive_shows_new_code = None
+    test_reload_same_tab_never_shows_old_code = None
+    test_after_expiry_shows_newest_once = None
+    test_job_seen_then_expired_does_not_pop_old_or_again = None
+
+
+@unittest.skipIf(sync_playwright is None, "Playwright がない")
+class BackButtonBetweenGames(ResultCodesNotMixedUp):
+    """トップ（大メニュー）→ にゃんこ／ツムツム → 戻る で、素直に大メニューへ戻れること（2026-11 の報告の再発防止）。"""
+
+    def _where(self, pg):
+        pg.wait_for_timeout(800)
+        path = pg.evaluate("location.pathname")
+        return path
+
+    def test_back_returns_to_the_big_menu(self):
+        pg, _ = self._page(live=False)
+        pg.goto(self.url)
+        self.assertEqual(self._where(pg), "/")
+        pg.click("a.gamecard[href='/nyanko']")
+        self.assertEqual(self._where(pg), "/nyanko")
+        pg.go_back()
+        self.assertEqual(self._where(pg), "/")
+        self.assertTrue(pg.is_visible("a.gamecard[href='/tsum']"))
+        pg.click("a.gamecard[href='/tsum']")
+        self.assertEqual(self._where(pg), "/tsum")
+        pg.go_back()
+        self.assertEqual(self._where(pg), "/")
+        pg.go_forward()
+        self.assertEqual(self._where(pg), "/tsum")
+
+    def test_reselect_links_go_to_the_big_menu(self):
+        pg, _ = self._page(live=False)
+        # 注文が無い人として開く（完了した注文があると、コードのお知らせが画面を覆うのが正しい動き）
+        pg.route("**/api/orders/mine", lambda r, *_: r.fulfill(status=200, content_type="application/json",
+                                                                body=json.dumps({"orders": [], "maint": {"on": False}})))
+        pg.goto(self.url + "tsum")
+        pg.click("text=← ゲームを選び直す")
+        self.assertEqual(self._where(pg), "/")
+        pg.goto(self.url + "nyanko")
+        pg.wait_for_timeout(800)
+        if pg.is_visible("#helpClose"):
+            pg.click("#helpClose")
+        pg.click("text=← ゲームを選び直す")
+        self.assertEqual(self._where(pg), "/")
+        pg.go_back()
+        self.assertEqual(self._where(pg), "/nyanko")
+
+    def test_old_entries_land_on_nyanko_without_a_back_loop(self):
+        pg, _ = self._page(live=False)
+        pg.goto(self.url + "?game=nyanko")
+        self.assertEqual(self._where(pg), "/nyanko")
+        pg.goto(self.url + "#nyanko")
+        self.assertEqual(self._where(pg), "/nyanko")
+
+    def test_home_points_to_unfinished_orders(self):
+        """以前は / がにゃんこの画面だった。リプライのあと / を開き直した人が、コードの画面へ行けること。"""
+        pg, _ = self._page(live=False)
+        pg.goto(self.url)
+        pg.wait_for_timeout(1500)
+        self.assertTrue(pg.is_visible("#mineNyanko"))
+        self.assertFalse(pg.is_visible("#mineTsum"))
+
     test_new_tab_while_job_alive_shows_new_code = None
     test_reload_same_tab_never_shows_old_code = None
     test_after_expiry_shows_newest_once = None

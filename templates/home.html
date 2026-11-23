@@ -1,0 +1,99 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>TN SHOP 代行</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<meta name="theme-color" content="#ffd400">
+<meta name="description" content="にゃんこ大戦争・ツムツムの代行（TN SHOP）。PayPayでかんたん、スマホだけで完結します。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="TN SHOP 代行｜にゃんこ大戦争・ツムツム">
+<meta property="og:description" content="にゃんこ大戦争とツムツムの代行。PayPayでかんたん・スマホだけ。">
+<meta property="og:url" content="{{ site }}/">
+<meta property="og:image" content="{{ site }}/static/ogp-home.jpg?v=1">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{ site }}/static/ogp-home.jpg?v=1">
+<script>
+/* 以前の入口（/#nyanko）で来た人は、にゃんこの画面へ（履歴に残さない＝戻るで行き来しない） */
+if(location.hash==='#nyanko') location.replace('/nyanko');
+</script>
+<style>
+:root{
+  --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
+  --accent:#ffc42e;--ok:#12a05c;--bad:#d93636;--okbg:#e6f6ee;--badbg:#fdebeb;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;
+  --okbg:#14291f;--badbg:#321a1a;
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.5;
+  font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:calc(24px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px))}
+a:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+h1{margin:0 0 4px;font-size:24px;font-weight:800}
+.sub{margin:0 0 18px;font-size:14px;color:var(--muted)}
+.maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
+.mine{margin:0 0 14px;padding:12px 14px;border:2px solid var(--line);border-radius:14px;background:var(--okbg);font-size:14px}
+[hidden]{display:none!important}
+.mine b{display:block;margin-bottom:6px}
+.mine a{display:block;margin-top:6px;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--accent);
+  color:#17181c;font-weight:800;text-decoration:none}
+.gamecard{display:block;padding:18px;margin:0 0 14px;border:2px solid var(--line);border-radius:18px;
+  background:var(--panel);color:inherit;text-decoration:none;box-shadow:0 4px 0 var(--line)}
+.gamecard:active{transform:translateY(3px);box-shadow:0 1px 0 var(--line)}
+.gamecard picture{display:block;margin:0 0 12px}
+.gamecard img{display:block;width:100%;height:auto;aspect-ratio:2/1;object-fit:cover;border-radius:12px;border:2px solid var(--line);background:var(--soft)}
+.gamecard b{display:block;font-size:19px}
+.gamecard small{display:block;margin-top:4px;font-size:13px;color:var(--muted);line-height:1.6}
+.gamecard em{font-style:normal;font-weight:800;color:var(--ink)}
+.gamecard .go{display:inline-block;margin-top:10px;font-size:14px;font-weight:800}
+.foot{margin:24px 0 0;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}
+.foot p{margin:0}
+</style></head><body>
+<main class="wrap">
+  <h1>TN SHOP 代行</h1>
+  <p class="sub">どのゲームの代行をしますか？</p>
+  {% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}{% if maint.url %}<br><a href="{{ maint.url }}">お知らせ</a>{% endif %}</div>{% endif %}
+
+  <div class="mine" id="mine" hidden>
+    <b>このブラウザの注文があります</b>
+    <a href="/nyanko" id="mineNyanko" hidden>🐱 にゃんこ代行の注文・コードを見る →</a>
+    <a href="/tsum" id="mineTsum" hidden>🧸 ツムツム代行の注文・引き継ぎ情報を見る →</a>
+  </div>
+
+  <a class="gamecard" href="/nyanko">
+    <picture><source srcset="/static/game-nyanko.webp?v=1" type="image/webp"><img src="/static/game-nyanko.jpg?v=1" alt="にゃんこ大戦争の代行" width="1024" height="512"></picture>
+    <b>🐱 にゃんこ大戦争</b>
+    <small>アイテム・キャラ・ステージ・バン保証・初期垢作成など。<em>{{ prices.other }}円</em>〜</small>
+    <span class="go">にゃんこ代行へ →</span>
+  </a>
+  <a class="gamecard" href="/tsum">
+    <picture><source srcset="/static/game-tsum.webp?v=1" type="image/webp"><img src="/static/game-tsum.jpg?v=1" alt="ツムツム代行" width="1024" height="512"></picture>
+    <b>🧸 LINE：ディズニー ツムツム</b>
+    <small>コイン・スコア・ツムレベル・ガチャ完売・ゲストアカウント生成など。<em>{{ prices.tsum_coin }}円</em>〜</small>
+    <span class="go">ツムツム代行へ →</span>
+  </a>
+
+  <div class="foot"><p>TN SHOP ／ お問い合わせ：X <b>@paysms1212</b></p><p>v{{ version }}</p></div>
+</main>
+<script>
+"use strict";
+/* 支払い待ち・実行中・完了（コードを見られる）の注文があれば、その画面への入口を出す。
+   以前は / がにゃんこの画面だったので、リプライのあと / を開き直した人がコードにたどり着けるように。 */
+(async()=>{
+  try{
+    const r=await fetch('/api/orders/mine',{cache:'no-store'}); if(!r.ok) return;
+    const list=(await r.json()).orders||[];
+    const live=o=>['unpaid','hold','paid','started'].includes(o.state)||(o.state==='done'&&o.result)||o.state==='dead';
+    const n=list.some(o=>!o.tsum&&live(o)), t=list.some(o=>o.tsum&&live(o));
+    document.getElementById('mineNyanko').hidden=!n;
+    document.getElementById('mineTsum').hidden=!t;
+    document.getElementById('mine').hidden=!(n||t);
+  }catch(e){}
+})();
+</script>
+</body></html>

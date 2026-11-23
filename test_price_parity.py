@@ -103,7 +103,7 @@ class PriceParity(unittest.TestCase):
         ctx = self.browser.new_context(viewport={"width": 390, "height": 844})
         self.addCleanup(ctx.close)
         pg = ctx.new_page()
-        pg.goto(self.url)
+        pg.goto(self.url + "nyanko")
         pg.wait_for_timeout(800)
         checked, skipped = 0, []
         modes = ["normal"] * 6 + ["restart", "integrity", "clone"]
