@@ -475,7 +475,7 @@ class OrderFlow(unittest.TestCase):
             self.assertIn("料金を変更しました", page)
             self.assertEqual(self.c.post("/run", json={"items": ["XP"]}).get_json()["amount"], 30)     # 新しい注文は新料金
             self.assertEqual(A._orders[old["order"]]["amount"], 25)                                      # 作成済みは変わらない
-            self.assertIn("30円", self.c.get("/").get_data(as_text=True))                                 # 利用者の画面にも反映
+            self.assertIn("30円", self.c.get("/nyanko").get_data(as_text=True))                                 # 利用者の画面にも反映
             bad = admin.post("/admin", follow_redirects=True, data=dict(form, other="0")).get_data(as_text=True)
             self.assertIn("1〜100,000 円", bad)
             bad = admin.post("/admin", follow_redirects=True, data=dict(form, other="abc")).get_data(as_text=True)
@@ -625,7 +625,7 @@ class MaintenanceMode(unittest.TestCase):
             self.assertEqual(self.c.post(f"/api/orders/{paid}/pay", json={}).get_json()["job"], "JM")  # 支払い済みは進められる
         m = self.c.get("/api/orders/mine").get_json()["maint"]
         self.assertEqual((m["on"], m["url"]), (True, "https://example.com/new"))
-        self.assertIn("メンテナンス中", self.c.get("/").get_data(as_text=True))
+        self.assertIn("メンテナンス中", self.c.get("/nyanko").get_data(as_text=True))
         A._set_maint(False, "", "")
         self.assertEqual(self.c.post("/run", json={"items": ["XP"]}).status_code, 200)
 

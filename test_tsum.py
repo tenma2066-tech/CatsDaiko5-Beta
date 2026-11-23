@@ -470,22 +470,34 @@ class Page(unittest.TestCase):
         for key in T.MENUS:
             self.assertIn(f'data-key="{key}"', body)
 
-    def test_main_site_asks_which_game_first(self):
-        """トップページは最初に大メニュー（にゃんこ／ツムツム）を出す。ツムツムからは選び直せる。"""
+    def test_home_is_the_big_menu_and_each_game_is_its_own_page(self):
+        """トップ（/）が大メニュー。にゃんこ（/nyanko）とツムツム（/tsum）は別のページなので、
+        ブラウザの戻るボタンで素直に行き来できる（重ねて出す方式は戻るでおかしくなった）。"""
         client = A.app.test_client()
-        main = client.get("/").get_data(as_text=True)
-        self.assertIn('id="gamePick"', main)
-        self.assertIn('id="gpNyanko"', main)
-        self.assertIn('href="/tsum"', main)
-        self.assertLess(main.index('id="gamePick"'), main.index('id="v-start"'))   # にゃんこの画面より前
+        home = client.get("/").get_data(as_text=True)
+        self.assertIn('href="/nyanko"', home)
+        self.assertIn('href="/tsum"', home)
+        self.assertNotIn('id="v-start"', home)              # にゃんこの画面そのものは入っていない
+        nyanko = client.get("/nyanko").get_data(as_text=True)
+        self.assertIn('id="v-start"', nyanko)
+        self.assertNotIn('id="gamePick"', nyanko)            # 重ねて出す大メニューはもう無い
+        self.assertIn('href="/"', nyanko)
         tsum = client.get("/tsum").get_data(as_text=True)
-        self.assertIn('href="/?pick=1"', tsum)
+        self.assertIn('href="/"', tsum)
+
+    def test_old_entry_redirects_to_nyanko(self):
+        client = A.app.test_client()
+        r = client.get("/?game=nyanko")
+        self.assertEqual(r.status_code, 301)
+        self.assertTrue(r.headers["Location"].endswith("/nyanko"))
+        self.assertIn("location.replace('/nyanko')", client.get("/").get_data(as_text=True))   # /#nyanko
+
 
 class Images(unittest.TestCase):
     """画像（大メニュー・ツムツム画面・X のリンクプレビュー・アイコン）がそろっていて、画面から参照されていること。"""
 
     FILES = ["game-nyanko.webp", "game-nyanko.jpg", "game-tsum.webp", "game-tsum.jpg", "tsum-flow.webp", "tsum-flow.jpg",
-             "ogp-nyanko.jpg", "ogp-tsum.jpg", "favicon.ico", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]
+             "ogp-nyanko.jpg", "ogp-tsum.jpg", "ogp-home.jpg", "favicon.ico", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]
 
     def test_files_are_served(self):
         client = A.app.test_client()
@@ -501,15 +513,18 @@ class Images(unittest.TestCase):
     def test_link_preview_uses_https_behind_caddy(self):
         client = A.app.test_client()
         headers = {"X-Forwarded-Proto": "https", "Host": "shop.example"}
-        main = client.get("/", headers=headers).get_data(as_text=True)
+        home = client.get("/", headers=headers).get_data(as_text=True)
+        self.assertIn('content="https://shop.example/static/ogp-home.jpg?v=1"', home)
+        self.assertIn("game-nyanko.webp", home)
+        self.assertIn("game-tsum.webp", home)
+        main = client.get("/nyanko", headers=headers).get_data(as_text=True)
         self.assertIn('content="https://shop.example/static/ogp-nyanko.jpg?v=1"', main)
-        self.assertIn("game-nyanko.webp", main)
-        self.assertIn("game-tsum.webp", main)
+        self.assertIn('content="https://shop.example/nyanko"', main)
         tsum = client.get("/tsum", headers=headers).get_data(as_text=True)
         self.assertIn('content="https://shop.example/static/ogp-tsum.jpg?v=1"', tsum)
         self.assertIn('content="https://shop.example/tsum"', tsum)
         self.assertIn("tsum-flow.webp", tsum)
-        for page in (main, tsum):
+        for page in (home, main, tsum):
             self.assertIn('rel="apple-touch-icon"', page)
             self.assertIn('name="twitter:card" content="summary_large_image"', page)
 

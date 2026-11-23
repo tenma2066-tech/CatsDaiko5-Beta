@@ -180,8 +180,9 @@ def run(body, wait=6.0):
 
 print("\n[1] ログインと画面")
 check("ログインなしで / が開く", c.get("/").status_code == 200)
+check("ログインなしで /nyanko が開く", c.get("/nyanko").status_code == 200)
 check("ログイン画面は廃止", c.get("/login").status_code == 404)
-html = c.get("/").get_data(as_text=True)
+html = c.get("/nyanko").get_data(as_text=True)
 check("4段階の手順+メニュー5種が出る", html.count('class="step tab"') == 4 and html.count('role="tab"') == 5, (html.count('class="step tab"'), html.count('role="tab"')))
 for needle in ('id="safe"', 'id="dry"', 'id="clone"', 'id="integrity"', 'id="checks"', 'id="cs"', 'id="chars"', 'id="rep"', 'window.confirm'):
     check("画面に " + needle, needle in html)

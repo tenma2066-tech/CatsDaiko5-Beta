@@ -2052,6 +2052,15 @@ if _is_server_process():
 
 
 @app.get("/")
+def home():
+    """トップ：大メニュー（にゃんこ／ツムツム）。それぞれの代行は別のページ（/nyanko・/tsum）なので、
+    ブラウザの戻るボタンで素直に行き来できる。"""
+    if request.args.get("game") == "nyanko":        # 以前の入口（/?game=nyanko）
+        return redirect("/nyanko", code=301)
+    return render_template_string(HOME_HTML, prices=PRICES, maint=_maint(), version=APP_VERSION, site=_site())
+
+
+@app.get("/nyanko")
 def index():
     p = PRICES
     groups = [
@@ -2931,6 +2940,9 @@ MAIN_HTML = _template("main.html")     # 利用者の画面（HTML・CSS・JavaS
 
 
 TSUM_HTML = _template("tsum.html")     # ツムツム代行の画面
+
+
+HOME_HTML = _template("home.html")     # トップ（大メニュー）
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))

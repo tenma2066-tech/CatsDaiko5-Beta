@@ -142,7 +142,7 @@ class NewFeatures(unittest.TestCase):
         st.assert_called_once()
         o = next(iter(A._orders.values()))
         self.assertEqual((o["amount"], o["admin_free"]), (0, True))
-        self.assertIn("無料", c.get("/").get_data(as_text=True))
+        self.assertIn("無料", c.get("/nyanko").get_data(as_text=True))
         # 一般の利用者は今まで通り有料
         self.assertEqual(self.run_({"items": ["XP"]}).get_json()["amount"], 25)
 
