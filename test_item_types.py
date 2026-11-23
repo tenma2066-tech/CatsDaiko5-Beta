@@ -1,5 +1,4 @@
 """種類ごとの数量指定・本能玉・施設全強化・本能解放・第4形態の回帰テスト（ネットワーク不要）。"""
-import os
 import types
 import unittest
 from unittest import mock

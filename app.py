@@ -1275,6 +1275,33 @@ def _note_fail(key: str) -> None:
     _fail.setdefault(key, []).append(time.time())
 
 
+_hits: dict[str, list[float]] = {}
+_hits_lock = threading.Lock()
+
+
+def _rate_ok(key: str, limit: int, window: float) -> bool:
+    """短い時間の連打を止める。window 秒のあいだに limit 回まで。超えたら False（数えない）。"""
+    now = time.time()
+    with _hits_lock:
+        recent = [t for t in _hits.get(key, []) if now - t < window]
+        if len(recent) >= limit:
+            _hits[key] = recent
+            return False
+        recent.append(now)
+        _hits[key] = recent
+        if len(_hits) > 5000:
+            for k in [k for k, v in _hits.items() if not v or now - v[-1] > 3600]:
+                _hits.pop(k, None)
+    return True
+
+
+def _too_fast():
+    return jsonify(error="操作が続いています。少し待ってからもう一度お試しください。", code="too_fast"), 429
+
+
+MAX_UNPAID_PER_OWNER = 5   # 1人が同時に持てる未払いの注文（超えたら、入金リンクのない古いものから閉じる）
+
+
 def _from_proxy(addr: str) -> bool:
     import ipaddress
     try:
@@ -2084,6 +2111,8 @@ def api_state():
 @app.post("/api/warmup")
 def api_warmup():
     """ゲームデータを先に準備しておく（実行ボタンを押す前に待ち時間を済ませる）。"""
+    if not _rate_ok("warmup:" + _client_ip(), 10, 600):
+        return _too_fast()
     if _warm_cache_lock.acquire(blocking=False):
         _warm_cache.update(status="loading", prepared=0, error=None)
         threading.Thread(target=_warmup_thread, daemon=True).start()
@@ -2100,6 +2129,8 @@ def api_cats():
 
 @app.post("/api/cats/latest")
 def api_cats_latest():
+    if not _rate_ok("latest:" + _client_ip(), 2, 600) or not _rate_ok("latest:*", 6, 3600):   # 外の配布元へ取りに行くので控えめに
+        return _too_fast()
     if not _run_lock.acquire(blocking=False):
         return jsonify(error="データを準備中です。完了してからもう一度押してください。"), 409
     _catalog_update.update(status="loading", error=None)
@@ -2114,6 +2145,8 @@ def api_cats_latest():
 
 @app.post("/api/cats/refresh")
 def api_cats_refresh():
+    if not _rate_ok("refresh:" + _client_ip(), 3, 600):
+        return _too_fast()
     if _names["state"] in ("ready", "error", "none"):
         _names.update(state="none", items=[], method=None, error=None)
         _start_names()
@@ -2347,6 +2380,7 @@ def run():
             breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount})
     summary = _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))
     me = _owner()
+    trimmed_coupons = []
     with _orders_lock:
         # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）
         credit = next((k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
@@ -2358,11 +2392,23 @@ def run():
             o.update(job=job, arguments=arguments, transfer_key=transfer_key, breakdown=breakdown, skipped=skipped, summary=summary)
             paid_amount = o["amount"]
         else:
+            # 1人の未払いの注文が多すぎたら、入金リンクのない古いものから閉じる（メモリ・保存ファイルが増え続けないように）
+            mine = sorted(((k, o) for k, o in _orders.items() if o["owner"] == me and o["state"] == "unpaid" and not o.get("link_code")),
+                          key=lambda kv: kv[1]["created"])
+            for k, o in mine[:max(0, len(mine) - (MAX_UNPAID_PER_OWNER - 1))]:
+                _orders.pop(k, None)
+                if o.get("coupon") and not o.get("coupon_used"):
+                    trimmed_coupons.append((o["coupon"], k))
             order_id = secrets.token_urlsafe(16)
             _orders[order_id] = {"owner": me, "uid": _uid(me), "state": "unpaid", "amount": amount, "created": time.time(),
                                  "job": job, "arguments": arguments, "transfer_key": transfer_key,
                                  "breakdown": breakdown, "skipped": skipped, "summary": summary,
                                  "coupon": coupon or None, "base_amount": base_amount}
+    for c, k in trimmed_coupons:          # 閉じた古い注文が押さえていたクーポンは、使えるように戻す
+        try:
+            paypay_gateway.coupon_release(c, k)
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("coupon release failed")
     if coupon and not credit:
         if not paypay_gateway.coupon_reserve(coupon, order_id):   # 同時に2つの注文で使われないよう押さえる
             with _orders_lock:

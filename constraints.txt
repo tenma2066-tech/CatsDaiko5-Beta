@@ -1,0 +1,28 @@
+# 使うライブラリの版の固定（2026-11-23 時点の版）。bcsfe は requirements.txt で固定している。
+# 更新するときは、テストを通してからこのファイルを書き換える（docs/AUDIT_PLAN.md S8）。
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aiosignal==1.4.0
+attrs==26.1.0
+blinker==1.9.0
+certifi==2026.11.20
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.1
+cryptography==50.0.2
+Flask==3.1.3
+frozenlist==1.8.0
+gunicorn==27.0.1
+idna==3.20
+itsdangerous==2.2.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+multidict==7.2.1
+propcache==0.5.4
+pycparser==3.12
+PyJWT==2.15.1
+PyYAML==6.0.4
+requests==2.34.2
+urllib3==2.8.0
+Werkzeug==3.1.9
+yarl==1.25.1

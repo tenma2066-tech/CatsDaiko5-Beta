@@ -247,7 +247,6 @@ class NewFeatures(unittest.TestCase):
         self.assertFalse(G.coupon_check(code)[0])
         self.assertFalse(G.coupon_revoke(G.coupon_issue("O7", 30)))      # 10%引きのクーポンは取り消し対象外
         # 種類の列が無い古い台帳でも動く（既存の10%クーポンは10%引きのまま）
-        import sqlite3
         old = Path(self.tmp.name) / "old.sqlite3"
         with patch.object(G, "_LEDGER_FILE", old):
             with G._ledger() as db:

@@ -1,7 +1,6 @@
 """Local tests of password management, reporting and game-data preparation."""
 import os
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
