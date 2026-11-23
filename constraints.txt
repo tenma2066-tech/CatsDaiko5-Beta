@@ -23,6 +23,7 @@ propcache==0.5.4
 pycparser==3.12
 PyJWT==2.15.1
 PyYAML==6.0.4
+PySocks==1.7.1
 requests==2.34.2
 urllib3==2.8.0
 Werkzeug==3.1.9

@@ -4,4 +4,5 @@ bcsfe==3.6.0
 aiohttp>=3.9
 cryptography>=42.0
 requests>=2.32
+PySocks>=1.7
 msgpack>=1.0

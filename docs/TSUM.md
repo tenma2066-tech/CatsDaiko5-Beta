@@ -65,8 +65,9 @@ LINE はデータセンター／VPS／クラウドの固定IP（Fly・さくら�
 
 - `tsum_service._login_line` は、画像認証の再要求・reCAPTCHA を**別IPに変えられるときだけ**（SOCKS プロキシ設定時）別回線でやり直す。固定IPのときは叩き直さず（同じIPで繰り返してもアカウントに負荷をかけるだけ）、利用者には「サーバー側のアクセス状況が原因の可能性」を正直に伝える（`_login_failure_message`）。「VPN を変えて」「20〜30分待って」のような、利用者に実行できない・根拠のない案内は出さない。テストは `test_tsum.py` の `test_captcha_block_without_ip_rotation_is_not_retried` ／ `test_captcha_block_with_ip_rotation_is_retried_on_fresh_circuit`。
 - **恒久対処（運用側）**：LINE ログインを住宅用／モバイル回線の**ローテーション型プロキシ**（または出口を変えられる Tor）に通す（`TSUM_SOCKS_URL`）。固定のデータセンターIPのままでは、コード側で何をしても画像認証・reCAPTCHA は減らない。プロキシを設定すると `_unique_game_proxy()` がやり直しごとに別の出口（別IP）を割り当て、上の自動リトライが効くようになる。
-- **有効化の方法**：`deploy/vps/docker-compose.yml` の `TSUM_SOCKS_URL` に SOCKS プロキシの URL を入れて再デプロイするだけ。アプリがやり直しごとに別の出口IP（別回線）でログインする（`_unique_game_proxy()`）。ゲーム本体の通信は既定どおり直接のまま。
-- **Docker イメージに Tor を同梱する案は、この VPS では不可**：VPS はビルド時に Debian の apt ミラー（`deb.debian.org`）へ繋がらず、`apt-get install tor` が `Connection timed out` で失敗する（Docker Hub と PyPI へは繋がる）。2026-11-23 のデプロイ #55 がこれで失敗。イメージに増やさず、外部の SOCKS プロキシ（`TSUM_SOCKS_URL`）を使うのが本 VPS では唯一確実な方法。無料で試すなら、Docker Hub から取得する Tor の sidecar を `docker-compose.yml` に足して `TSUM_SOCKS_URL=socks5h://tor:9050` を指す手もある（apt を使わないので上の制約を回避できる。LINE が Tor 出口を弾くかは実機で要確認）。
+- **本番(VPS)での実装＝ホスト側 Tor（2026-11-23）**：`deploy/vps/remote-setup.sh` がデプロイのたびに、ホスト(Ubuntu)に `apt-get install tor` で Tor を入れ、`127.0.0.1:9050` と docker のホストゲートウェイ `172.17.0.1:9050` にだけ SOCKS を開く（docker の私設レンジからのみ許可・外部非公開・`docker.service` の後に起動）。app コンテナは `docker-compose.yml` の `extra_hosts: host.docker.internal:host-gateway` と `TSUM_SOCKS_URL=socks5h://host.docker.internal:9050` でそこへ繋ぐ。`IsolateSOCKSAuth` により、`fresh_socks_identity()` が付ける SOCKS の user:pass が違うと別の出口回線（別IP）になる。SOCKS を使うため `requests` の依存に **PySocks** を追加（これが無いと `socks5h://` は `InvalidSchema` で失敗する）。
+- **なぜホスト側か**：ビルド中のコンテナ（`python:3.12-slim`＝Debian）からは `deb.debian.org` へ繋がらず `apt-get install tor` が `Connection timed out` で失敗する（デプロイ #55）。ホスト(Ubuntu)の apt は `archive.ubuntu.com` で動くので、イメージには足さずホストに入れる。デプロイログに `tor: active (...)` と `tor reachable from app: OK` が出れば有効。届かなければアプリは直接接続で動く（サービスは止まらない＝回線の回転だけ無効）。
+- **効き目の注意**：LINE は Tor の出口IPも弾くことがあるので、画像認証/reCAPTCHA が止むかは実機ログインで要確認。弾かれる場合は `docker-compose.yml` の `TSUM_SOCKS_URL` を住宅/モバイルのローテーション型プロキシ（有料・契約が必要）に差し替える（ホスト Tor の節を無効化してよい）。
 
 ## 4. 設定（環境変数）
 
