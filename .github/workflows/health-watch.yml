@@ -1,0 +1,47 @@
+name: お店の見張り（health watch）
+# 30分ごとに、お店が動いているかを確かめる（読むだけ。何も変えない）。
+# 動いていなければこの実行が「失敗」になり、GitHub からメールで知らせが届く。
+# GitHub のサーバー（海外）から 443 番が届かないことがあるので、外からだめなときはサーバーの中から確かめる。
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: health-watch
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SITE: https://nyanko-daiko-tnshop.duckdns.org
+    steps:
+      - name: 外から /health を確かめる
+        id: outside
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$SITE/health" || true)
+            echo "try $i: $code"
+            if [ "$code" = "200" ]; then echo "ok=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+            sleep 20
+          done
+          echo "ok=0" >> "$GITHUB_OUTPUT"
+      - name: サーバーの中から確かめる（外から届かなかったときだけ）
+        if: steps.outside.outputs.ok != '1'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          sudo apt-get install -y sshpass >/dev/null
+          IN=$(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=20 "root@$VPS_HOST" \
+            "cd /opt/catsdaiko && docker compose exec -T app python3 -c \"import urllib.request as u; print(u.urlopen('http://127.0.0.1:8080/health', timeout=5).status)\"" 2>/dev/null || true)
+          echo "inside: ${IN:-?}"
+          if [ "$IN" = "200" ]; then
+            echo "::notice::お店は動いています（GitHub からは 443 番に届きませんでした）"
+            exit 0
+          fi
+          echo "::error::お店が応答していません。管理画面や VPS の状態を確認してください。"
+          exit 1

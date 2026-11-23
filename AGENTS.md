@@ -133,7 +133,7 @@ Claude・Codex・Cursor など、このリポジトリを編集する AI は **�
 pip install -r requirements.txt            # flask, gunicorn, bcsfe, aiohttp, cryptography
 for t in test_new_features test_order_flow test_hold_e2e test_improvements test_item_types \
          test_parallel test_paypay_hold test_paypay_gateway test_cat_customization \
-         test_save_audit test_save_repair test_github_auth_store test_github_runtime_store; do
+         test_save_audit test_save_repair test_github_auth_store test_github_runtime_store test_security; do
   python3 -m unittest $t || break
 done
 python3 selftest.py                         # 最後が「NG 0件」

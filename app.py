@@ -558,6 +558,12 @@ def _ensure_cleanup() -> None:
 def _private_response(response):
     if request.path.startswith("/status/") or request.path in ("/admin",) or request.path.startswith("/api/orders/"):
         response.headers["Cache-Control"] = "no-store"
+    # 基本の守り：ほかのサイトの枠の中に表示させない・種類のなりすましをさせない・行き先に URL の詳細を渡さない
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.headers.get("X-Forwarded-Proto") == "https":   # 本番（Caddy 経由の HTTPS）だけ：以後は必ず HTTPS で来てもらう
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return response
 
 
@@ -1249,13 +1255,64 @@ def _run_job(job: dict, transfer: str, confirm: str, items, subs, others, qty=No
 
 # ---------------------------------------------------------------- 認証
 _fail: dict[str, list[float]] = {}
+ADMIN_SESSION_SEC = 12 * 3600      # 管理者ログインの有効時間（そのあとは入り直し）
 
 
-def _too_many_fails(ip: str) -> bool:
+def _too_many_fails(ip: str, limit: int = 5) -> bool:
     now = time.time()
     recent = [t for t in _fail.get(ip, []) if now - t < 600]
-    _fail[ip] = recent
-    return len(recent) >= 5
+    if recent:
+        _fail[ip] = recent
+    else:
+        _fail.pop(ip, None)
+    if len(_fail) > 5000:          # 古い記録を捨てる（増え続けない）
+        for k in [k for k, v in list(_fail.items()) if not v or now - v[-1] >= 600]:
+            _fail.pop(k, None)
+    return len(recent) >= limit
+
+
+def _note_fail(key: str) -> None:
+    _fail.setdefault(key, []).append(time.time())
+
+
+def _from_proxy(addr: str) -> bool:
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback
+
+
+def _client_ip() -> str:
+    """利用者の本当の IP。本番は Caddy（同じサーバーの中）を通るので、Caddy が付ける X-Forwarded-For を使う。
+    Caddy は外から送られた X-Forwarded-For を信用せず、自分が見た接続元に置き換える。"""
+    ra = request.remote_addr or ""
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff and _from_proxy(ra):
+        return xff.split(",")[-1].strip() or ra
+    return ra
+
+
+def _local_request() -> bool:
+    """サーバーの中（コンテナ内の 127.0.0.1）から直接来たリクエストか。Caddy 経由（外から）は含まない。"""
+    ra = request.remote_addr or ""
+    return ra in ("127.0.0.1", "::1") and not request.headers.get("X-Forwarded-For")
+
+
+def _is_admin() -> bool:
+    """管理者としてログイン中か。ログインから ADMIN_SESSION_SEC を過ぎたら切る。"""
+    if not session.get("admin"):
+        return False
+    at = session.get("admin_at")
+    if not isinstance(at, (int, float)):
+        session["admin_at"] = time.time()      # 以前からのログイン：いまから数える
+        return True
+    if time.time() - at > ADMIN_SESSION_SEC:
+        session.pop("admin", None)
+        session.pop("admin_at", None)
+        return False
+    return True
 
 
 def chara_units(cat_nums, cat_settings) -> int:
@@ -1476,6 +1533,39 @@ ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_log
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
 
+def _backup_response():
+    """管理画面からのバックアップ：注文（暗号化のまま）・台帳・料金や設定のファイルを1つにまとめて渡す。
+    台帳（SQLite）は使用中でも壊れない写し方（backup）で写す。暗号鍵（.env）は入れない。"""
+    import io
+    import sqlite3
+    import tarfile
+    from flask import send_file
+    base = os.environ.get("PAYPAY_DATA_DIR", "instance/paypay")
+    buf = io.BytesIO()
+    with tempfile.TemporaryDirectory() as tmp, tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+            path = os.path.join(base, name)
+            if not os.path.isfile(path) or name.endswith((".tmp", "-journal", "-wal", "-shm")):
+                continue
+            if name.endswith((".sqlite3", ".db")):
+                snap = os.path.join(tmp, name)
+                src = sqlite3.connect(path)
+                dst = sqlite3.connect(snap)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+                    src.close()
+                tf.add(snap, arcname=name)
+            else:
+                tf.add(path, arcname=name)
+    buf.seek(0)
+    resp = send_file(buf, mimetype="application/gzip", as_attachment=True,
+                     download_name=time.strftime("nyanko-backup-%Y%m%d-%H%M.tar.gz"))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 def _admin_post(token):
     """管理画面の操作。結果は次の画面（GET）で表示する＝再読み込みしても同じ操作が二重に送られない。"""
     msg = ""
@@ -1485,17 +1575,19 @@ def _admin_post(token):
             return "不正なリクエストです。", 403
         action = request.form.get("action")
         if action == "unlock":
-            ip = request.remote_addr or ""
-            if _too_many_fails("admin:" + ip):
+            ip = _client_ip()
+            if _too_many_fails("admin:" + ip) or _too_many_fails("admin:*", 30):   # 1つの IP で5回・全体で30回（10分）
                 msg = "失敗が続いたので、10分ほど待ってください。"
             elif ADMIN_PASSWORD and hmac.compare_digest(request.form.get("passcode", "").encode(), ADMIN_PASSWORD.encode()):
                 session["admin"] = True
+                session["admin_at"] = time.time()
                 session["admin_csrf"] = secrets.token_urlsafe(32)
                 return redirect("/admin")
             else:
-                _fail.setdefault("admin:" + ip, []).append(time.time())
+                _note_fail("admin:" + ip)
+                _note_fail("admin:*")
                 msg = "管理者パスコードが違うか、設定されていません。"
-        elif not session.get("admin"):
+        elif not _is_admin():
             return "管理者モードが必要です。", 403
         elif action == "pp_login":
             res, err = _pp(paypay_gateway.begin_login(request.form.get("phone", "").strip(), request.form.get("password", "")))
@@ -1593,8 +1685,11 @@ def _admin_post(token):
                 _log_orders.exception("coupon revoke failed")
                 ok = False
             msg = f"無料クーポン {code} を取り消しました。" if ok else "取り消せませんでした（未使用の無料クーポンだけ取り消せます）。"
+        elif action == "backup_download":
+            return _backup_response()
         elif action == "lock":
             session.pop("admin", None)
+            session.pop("admin_at", None)
             return redirect("/admin")
         elif action == "pp_refresh":
             try:
@@ -1637,7 +1732,7 @@ def _admin_post(token):
                 msg = "料金を変更しました。これからの新しい注文から反映されます（作成済みの注文の金額は変わりません）。"
             except (ValueError, OSError) as exc:
                 msg = str(exc) or "保存できませんでした。"
-    if request.form.get("action") == "unlock" and not session.get("admin"):
+    if request.form.get("action") == "unlock" and not _is_admin():
         session["admin_flash"] = msg
         return redirect("/admin")
     session["admin_flash"] = msg
@@ -1645,7 +1740,7 @@ def _admin_post(token):
 
 
 def _admin_page(msg):
-    unlocked = bool(session.get("admin"))
+    unlocked = _is_admin()
     pp = {}
     if unlocked:
         try:
@@ -1910,7 +2005,7 @@ def index():
     ]
     totals = {k: len(v) for k, _, _, v in groups}
     return render_template_string(
-        MAIN_HTML, ev_names={m["id"]: m["name"] for m in EVENT_MAPS}, legend_levels={k: v[1] for k, v in engine.LEGEND_TIERS.items()}, is_admin=bool(session.get("admin")) and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
+        MAIN_HTML, ev_names={m["id"]: m["name"] for m in EVENT_MAPS}, legend_levels={k: v[1] for k, v in engine.LEGEND_TIERS.items()}, is_admin=_is_admin() and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
@@ -1936,8 +2031,13 @@ def _updating_response():
 def api_drain():
     """デプロイ用: 管理者パスコードで呼ぶと、15分間（再起動まで）新しい実行の開始を待たせる。"""
     global _drain_until
+    if not _local_request():          # サーバーの中（デプロイの手順）からだけ。外からは存在しないのと同じ扱い
+        return jsonify(error="not found"), 404
+    if _too_many_fails("drain"):
+        return jsonify(error="too many"), 429
     token = request.form.get("token", "")
     if not ADMIN_PASSWORD or not hmac.compare_digest(token.encode(), ADMIN_PASSWORD.encode()):
+        _note_fail("drain")
         return jsonify(error="forbidden"), 403
     _drain_until = 0.0 if request.form.get("off") else time.time() + 900
     return jsonify(ok=True, draining=_draining())
@@ -2044,7 +2144,7 @@ def _clean_run_body(data):
 @app.post("/run")
 def run():
     _gc_jobs()
-    admin_free = bool(session.get("admin")) and PAYMENTS_ENABLED   # 管理者でログイン中のブラウザは全メニュー無料
+    admin_free = _is_admin() and PAYMENTS_ENABLED   # 管理者でログイン中のブラウザは全メニュー無料
     if _maint()["on"] and PAYMENTS_ENABLED and not admin_free:
         return _maintenance_response()
     data = _clean_run_body(request.get_json(silent=True))
@@ -2352,7 +2452,7 @@ def my_orders():
 @app.post("/api/orders/<order_id>/claim")
 def claim_order(order_id: str):
     """注文番号で再開（別のブラウザ・Cookie消去後でも）。注文番号は推測できない長さの秘密の値。"""
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    ip = _client_ip()
     if _too_many_fails("claim:" + ip):
         return jsonify(error="失敗が続いたので、10分ほど待ってください。", code="too_many_fails"), 429
     order_id = (order_id or "").strip()
@@ -2804,6 +2904,8 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 {% if c.free and c.note %}<div class="sub" style="font-size:12px">メモ：{{ c.note }}</div>{% endif %}
 {% if c.free and c.state_ja=='未使用' %}<form method="post" style="margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_revoke"><input type="hidden" name="code" value="{{ c.code }}"><button class="btn" style="padding:4px 10px;font-size:12px" onclick="return confirm('このクーポンを取り消します。よろしいですか？')">取り消す</button></form>{% endif %}</div>
 {% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div>
+<div class="card"><h2>バックアップ</h2><p class="sub">注文（暗号化されたまま）・支払いの台帳・料金や設定を、1つのファイルにまとめてダウンロードします。iPhone の「ファイル」や iCloud に保存しておいてください。サーバーでも毎日自動で保存しています（14日分）。暗号の鍵は入りません。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="backup_download"><button class="btn full">⬇️ バックアップをダウンロード</button></form></div>
 <div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button class="btn full">管理者モードを終了</button></form></div>
 </section>
 
