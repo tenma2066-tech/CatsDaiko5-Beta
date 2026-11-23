@@ -2,6 +2,7 @@
 
 Claude・Codex・Cursor など、このリポジトリを編集する AI は **作業の前に必ず全部読むこと**。
 返答・コミットメッセージ・画面の文言は **日本語**。依頼主は iPhone から指示することが多く、専門用語はかみくだいて伝える。
+Claude Code で作業する場合は、さらに **`docs/CLAUDE_GUIDE.md`**（Claude 向けの補足）も読むこと。
 
 ---
 
@@ -67,6 +68,7 @@ Claude・Codex・Cursor など、このリポジトリを編集する AI は **�
 | `docs/XBOT_NOTES.md` | xbot の引き継ぎメモ（ログイン方式、DM の画面の目印、原因判明した問題） |
 | `docs/XBOT_PLAN.md` | xbot の改善計画と DM の調査結果 |
 | `docs/VPS_DEPLOY.md` | VPS の設置手順 |
+| `docs/CLAUDE_GUIDE.md` | Claude Code で作業するときの補足（反映の確かめ方・`main` への入れ方・してはいけないこと） |
 | `docs/AUDIT_PLAN.md` | お店のセキュリティ・不具合の精査結果と補修計画（P0〜P3）。直したら表を更新する |
 
 ---
