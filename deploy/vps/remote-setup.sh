@@ -110,24 +110,35 @@ systemctl enable --now catsdaiko-backup.timer >/dev/null 2>&1 || true
 
 # 4.7) Tor（LINEログインのIPローテーション用）。
 #      ビルド中のコンテナからは Debian のミラー(deb.debian.org)へ繋がらず apt が失敗するため、
-#      apt が通るホスト(Ubuntu)側に入れる。app コンテナからは host.docker.internal(=172.17.0.1)経由で使う。
+#      apt が通るホスト(Ubuntu)側に入れる。app コンテナからは host.docker.internal 経由で使う。
 if ! command -v tor >/dev/null 2>&1; then
   apt-get update -y >/dev/null 2>&1 || true
   apt-get -o DPkg::Lock::Timeout=120 install -y tor >/dev/null 2>&1 || true
 fi
 if command -v tor >/dev/null 2>&1; then
-  # SOCKS を 0.0.0.0:9050 で待ち受ける（docker0 も、compose の独自ブリッジのゲートウェイも、
-  # どのブリッジから来ても届くように）。公開はせず、private レンジからのみ許可する
-  # （外部IPからの利用は tor 自身が拒否する。ホストのファイアウォールは 22/80/443 のみ開放）。
-  # IsolateSOCKSAuth により、SOCKS の user:pass が違うと別の出口回線(別IP)になる（tsum_login.fresh_socks_identity が利用）。
-  NEW_TORRC=$(printf '%s\n' \
+  # SOCKS は localhost と docker のホストゲートウェイ（app コンテナが host.docker.internal で
+  # 解決する先。この環境では docker0=192.168.0.1）だけで待ち受け、公開インターフェースには出さない。
+  # ゲートウェイIPは環境ごとに違うので自動検出する。検出できないときだけ 0.0.0.0 に退避
+  # （特定IPが無くて tor が起動失敗し、回線の回転が黙って消えるのを避けるため）。
+  # さらに SocksPolicy で private レンジのみ許可（二重の防御）。IsolateSOCKSAuth により、
+  # SOCKS の user:pass が違うと別の出口回線(別IP)になる（tsum_login.fresh_socks_identity が利用）。
+  DOCKER_GW="$(ip -4 -o addr show docker0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+  if [ -n "$DOCKER_GW" ]; then
+    SOCKS_LINES=$(printf '%s\n' \
+      'SocksPort 127.0.0.1:9050 IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth' \
+      "SocksPort ${DOCKER_GW}:9050 IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth")
+  else
+    SOCKS_LINES='SocksPort 0.0.0.0:9050 IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth'
+  fi
+  NEW_TORRC=$(printf '%s\n%s\n%s\n' \
     '# managed by catsdaiko (LINEログインのIPローテーション)。編集しても次のデプロイで上書きされる。' \
-    'SocksPort 0.0.0.0:9050 IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth' \
-    'SocksPolicy accept 127.0.0.0/8' \
-    'SocksPolicy accept 10.0.0.0/8' \
-    'SocksPolicy accept 172.16.0.0/12' \
-    'SocksPolicy accept 192.168.0.0/16' \
-    'SocksPolicy reject *')
+    "$SOCKS_LINES" \
+    "$(printf '%s\n' \
+      'SocksPolicy accept 127.0.0.0/8' \
+      'SocksPolicy accept 10.0.0.0/8' \
+      'SocksPolicy accept 172.16.0.0/12' \
+      'SocksPolicy accept 192.168.0.0/16' \
+      'SocksPolicy reject *')")
   TOR_CHANGED=0
   if [ "$(cat /etc/tor/catsdaiko.conf 2>/dev/null || true)" != "$NEW_TORRC" ]; then
     printf '%s\n' "$NEW_TORRC" > /etc/tor/catsdaiko.conf

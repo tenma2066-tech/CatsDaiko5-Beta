@@ -1,2 +1,4 @@
 __pycache__/
 instance/
+tsum_engine/tsum_debug.log
+*.log
