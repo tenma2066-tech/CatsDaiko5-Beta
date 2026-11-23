@@ -11,6 +11,8 @@ on:
       - "scripts/check_game_data.py"
       - "engine.py"
       - "app.py"
+      - "templates/**"
+      - "pricing.py"
       - "requirements.txt"
       - ".github/workflows/game-data-check.yml"
 

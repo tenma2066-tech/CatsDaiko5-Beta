@@ -4,12 +4,13 @@ on:
   pull_request:
     paths:
       - "app.py"
+      - "templates/**"
+      - "pricing.py"
       - "test_parallel.py"
       - "test_improvements.py"
       - "test_save_audit.py"
       - "test_save_repair.py"
       - "save_repair.py"
-      - "test_github_auth_store.py"
       - "engine.py"
       - "requirements.txt"
       - ".github/workflows/parallel-regression.yml"
@@ -51,5 +52,3 @@ jobs:
         run: python -m unittest -v test_parallel.py
       - name: Improvement regression tests
         run: python -m unittest -v test_improvements.py
-      - name: GitHub auth store tests
-        run: python -m unittest -v test_github_auth_store.py

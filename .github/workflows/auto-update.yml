@@ -5,8 +5,8 @@ on:
     branches: [main]
     paths:
       - "app.py"
-      - "auth_store.py"
-      - "github_auth_store.py"
+      - "templates/**"
+      - "pricing.py"
       - "engine.py"
       - "item_catalog.py"
       - "selftest.py"
@@ -17,7 +17,6 @@ on:
       - "test_parallel.py"
       - "test_improvements.py"
       - "test_cat_customization.py"
-      - "test_github_auth_store.py"
       - "smoke_bcsfe.py"
       - "requirements.txt"
       - ".github/workflows/auto-update.yml"
@@ -87,8 +86,6 @@ jobs:
       - name: 種類ごとの数量指定テスト
         run: python -m unittest -v test_item_types.py
 
-      - name: GitHubパスワード保存テスト
-        run: python -m unittest -v test_github_auth_store.py
 
       - name: requirements.txtを更新
         if: steps.check.outputs.upgrade == 'true'

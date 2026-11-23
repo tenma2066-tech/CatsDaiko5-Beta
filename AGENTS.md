@@ -32,14 +32,16 @@ Claude・Codex・Cursor など、このリポジトリを編集する AI は **�
 ### お店
 | ファイル | 中身 |
 |---|---|
-| `app.py`（約4,800行） | Flask 本体。**画面の HTML/CSS/JS もこの中**（`MAIN_HTML`・`ADMIN_HTML`）。料金計算 `compute_amount`、注文 `/run`、支払い `/api/orders/<id>/pay`、管理画面 `/admin`、ジョブの並列実行、クーポン、初期垢作成（リスタートパック）など |
+| `app.py`（約2,800行） | Flask 本体。画面は `templates/`、料金計算は `pricing.py`。注文 `/run`、支払い `/api/orders/<id>/pay`、管理画面 `/admin`、ジョブの並列実行、クーポン、初期垢作成（リスタートパック）など |
 | `engine.py` | bcsfe（セーブ編集ライブラリ）を使った実際の編集。アイテム付与、キャラ解放・レベル・形態・本能、ステージクリア、レジェンド段階 `LEGEND_TIERS`・`clear_legend_crowns`、イベステ `clear_event_map`、施設レベル |
 | `paypay_gateway.py` | PayPay の受け取り（非公式 API）、台帳（SQLite：`links`・`history`・`coupons`）、クーポン（10%引き `NK-`・無料 `FR-`） |
 | `item_catalog.py` | アイテムの種類名（キャッツアイ・マタタビ・本能玉など） |
 | `event_maps.json` | イベントステージ一覧（ゲームデータ 15.7.2 から作成）。`reqs`＝前提、`drops`＝ドロップキャラ `[内部ID, 形態]`、`cat`＝イベント／コラボ（コラボは選べないが、古い注文のため実行用には残す） |
 | `save_audit.py`・`save_repair.py` | バン保証（セーブの検査・修復） |
-| `github_runtime_store.py`・`github_auth_store.py`・`auth_store.py` | 以前の Fly.io 時代の保存の仕組み（今の VPS ではローカル保存） |
-| `static/` | 画像（ご利用の流れの図解 `flow.webp`／`flow.jpg`）。差し替えたら `app.py` の `?v=` を上げる |
+| `pricing.py` | 料金の計算（`compute_amount` など。サーバー側の正）。画面の見積もりはこれに合わせる |
+| `templates/` | 画面の HTML・CSS・JavaScript（`main.html`＝利用者、`admin.html`＝管理画面）。Jinja のひな形 |
+| `github_runtime_store.py` | 以前の Fly.io 時代の保存の仕組み（VPS では無効。PayPay の台帳を開くときに通る） |
+| `static/` | 画像（ご利用の流れの図解 `flow.webp`／`flow.jpg`）。差し替えたら `templates/main.html` の `?v=` を上げる |
 | `template_save.sav` | 初期アカウント用のひな形セーブ |
 | `selftest.py`・`smoke_bcsfe.py`・`test_*.py` | テスト（§5） |
 | `deploy/vps/` | 本番の `docker-compose.yml`・`Caddyfile`・`remote-setup.sh` |
@@ -133,17 +135,19 @@ Claude・Codex・Cursor など、このリポジトリを編集する AI は **�
 pip install -r requirements.txt            # flask, gunicorn, bcsfe, aiohttp, cryptography
 for t in test_new_features test_order_flow test_hold_e2e test_improvements test_item_types \
          test_parallel test_paypay_hold test_paypay_gateway test_cat_customization \
-         test_save_audit test_save_repair test_github_auth_store test_github_runtime_store test_security; do
+         test_save_audit test_save_repair test_github_runtime_store test_security; do
   python3 -m unittest $t || break
 done
 python3 selftest.py                         # 最後が「NG 0件」
 python3 smoke_bcsfe.py                      # bcsfe の機能がそろっているか
 python3 xbot/test_logic.py                  # xbot を触ったとき（X には接続しない）
 python3 -m unittest test_ui_results         # 完了画面のコードの取り違えがないか（ブラウザのテスト。Chromium がなければ飛ばす）
+python3 -m unittest test_price_parity       # 画面の金額とサーバーの金額が一致するか（ブラウザのテスト・60通り）
+ruff check .                                # 書き方の検査（ruff.toml）
 ```
 
 - 料金・注文・支払い・クーポンを変えたら、**先にテストを足す**（`test_new_features.py` などに例が多い）。
-- 画面（`app.py` の中の HTML/JS）を変えたら、ローカルで起動してブラウザで確認し、**画面の金額とサーバーの金額が一致する**ことを確かめる。決済なしで動かすなら `PAYMENTS_ENABLED=0`。
+- 画面（`templates/`）や料金（`pricing.py`）を変えたら、ローカルで起動してブラウザで確認し、**画面の金額とサーバーの金額が一致する**ことを確かめる。決済なしで動かすなら `PAYMENTS_ENABLED=0`。
 - PayPay や X への通信はテストではすべてモック。
 
 ---
@@ -152,7 +156,6 @@ python3 -m unittest test_ui_results         # 完了画面のコードの取り�
 
 1. **利用者がいる**。決済と注文の流れを壊さない。
 2. **公開リポジトリ**。パスワード・トークン・利用者の情報・DM の相手名・X/PayPay の ID・引継ぎコードを、コミットにもログにも出さない。Actions のログで出すときは伏せ字にする（`status` の `sed` を参考に）。
-   - 注意：`auth/passwords.json` は昔のパスワードのハッシュが入ったまま公開されている。新しい秘密情報をこういう形で増やさない。
 3. **料金はコードで変えない**（管理画面の `PRICES`／`prices.json`）。
 4. **古い注文の互換を残す**（§3）。
 5. **本番の X で投稿・DM 送信をしない**（依頼主の確認があれば別）。xbot には下書きモード（`dry_run`）がある。
