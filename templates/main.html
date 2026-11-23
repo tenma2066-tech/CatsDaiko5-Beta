@@ -330,6 +330,13 @@ label.opt.locked{opacity:.45}.evreq{display:block;font-size:11.5px;color:var(--m
 .lp{margin-left:8px;padding:0 7px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;font-weight:700;color:var(--muted);white-space:nowrap}
 .soon{margin-left:6px;padding:0 8px;border-radius:999px;background:var(--soft);font-size:12px;font-style:normal;color:var(--muted)}
 .modecard:disabled{opacity:.55;cursor:not-allowed}
+/* ほかのゲームの代行へ行く入口（ラジオではないので .modecard とは別のクラス） */
+.modelink{display:block;padding:14px 16px;border:2px solid var(--line);border-radius:14px;background:var(--soft);
+  margin-top:8px;text-decoration:none;color:inherit}
+.modelink b{display:block;font-size:16px}
+.modelink small{display:block;margin-top:3px;font-size:12.5px;color:var(--muted);line-height:1.5}
+.modelink em{font-style:normal;font-weight:800;color:var(--ink)}
+.modelink:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
 .couponbox{margin:12px 0;padding:12px;border:2px dashed var(--line);border-radius:14px;background:var(--soft)}
 .couponbox strong{font-size:20px;letter-spacing:.06em}
 details.more{margin-top:12px}
@@ -423,6 +430,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
         {% if payments %}<button type="button" class="modecard" role="radio" data-mode="restart" {{ "" if restart.enabled else "disabled aria-disabled=true" }}><b>初期垢作成（リスタートパック）{% if not restart.enabled %}<em class="soon">準備中</em>{% endif %}</b><small>新しいアカウントを、公式リスタートパックと同じ中身で作ります。<em>{{ prices.restart }}円</em>〜・ほかのメニューも追加できます・引継ぎコード不要</small></button>{% endif %}
         <button type="button" class="modecard" role="radio" data-mode="clone"><b>アカウント複製</b><small>試験提供。元と複製の2アカウントのコードを出します。<em>{{ prices.clone }}円</em>・引継ぎコード必須</small></button>
       </div>
+      <a class="modelink" href="/tsum"><b>ツムツム代行 →</b><small>別のゲーム（LINE：ディズニー ツムツム）の代行です。コイン・スコア・ツムレベル・ガチャ完売などを承ります。<em>{{ prices.tsum_coin }}円</em>〜・専用の画面に移ります</small></a>
       {% if payments %}<input type="checkbox" id="restart" hidden {{ "" if restart.enabled else "disabled" }}>{% if restart.note %}<p class="sub" id="restartNote" hidden>{{ restart.note }}</p>{% endif %}{% endif %}
       <details class="more"><summary>くわしい説明</summary>
       <label class="sw specialsw"><input type="checkbox" id="integrity">
@@ -1944,7 +1952,7 @@ function wasShown(order,seen){ return shownOrders().includes(order)||(seen||[]).
 async function loadResume(quiet){
   try{
     const r=quiet?await fetch('/api/orders/mine',{cache:'no-store'}):await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
-    const j=await r.json(); const list=j.orders||[];
+    const j=await r.json(); const list=(j.orders||[]).filter(o=>!o.tsum);   /* ツムツム代行の注文は /tsum の画面で扱う */
     let seen=[]; try{ seen=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); }catch(e){}
     // いま見ている（見た）実行の注文は「結果を見せた」として記録する
     list.forEach(o=>{ if(o.job&&o.job===curJob&&o.state==='done') markShown(o.order); });

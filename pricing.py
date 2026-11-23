@@ -6,10 +6,18 @@ import os
 
 import engine
 
-PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25, "playtime10": 10, "restart": 50}
+PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25, "playtime10": 10, "restart": 50,
+          # ツムツム代行（別の大メニュー。1メニューごとの料金）
+          "tsum_coin": 100, "tsum_coin_max": 100, "tsum_level_max": 100, "tsum_score": 100, "tsum_score_max": 100,
+          "tsum_tsum_lv": 100, "tsum_medal": 100, "tsum_box": 200, "tsum_premium": 200, "tsum_guest_create": 50}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
                 "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
-                "restart": "初期垢作成（リスタートパック・基本料金）"}
+                "restart": "初期垢作成（リスタートパック・基本料金）",
+                "tsum_coin": "ツム：コイン指定", "tsum_coin_max": "ツム：コインMAX",
+                "tsum_level_max": "ツム：プレイヤーレベルMAX", "tsum_score": "ツム：スコア指定",
+                "tsum_score_max": "ツム：スコアMAX", "tsum_tsum_lv": "ツム：ツムレベルMAX",
+                "tsum_medal": "ツム：メダル指定", "tsum_box": "ツム：セレクトBOX完売",
+                "tsum_premium": "ツム：プレミアム完売", "tsum_guest_create": "ツム：ゲストアカウント生成"}
 PT_KEY = "プレイ時間+分"          # qty に入れる「プレイ時間を増やす（分）」の特別なキー
 PT_MIN_MINUTES = 60
 PT_MAX_MINUTES = 2147483647 // (30 * 60)   # セーブの上限（1/30秒単位の int）を超えない
@@ -91,4 +99,15 @@ def compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, ca
             ("プレイ時間（10分ごと）", pt_min // 10, PRICES["playtime10"]),
             ("その他の項目", other_n, PRICES["other"])]
     rows = [r for r in rows if r[1]]
+    return sum(n * p for _, n, p in rows), rows
+
+
+def compute_tsum_amount(menus, qty=None) -> tuple[int, list]:
+    """ツムツム代行の金額を決める（サーバー側の正）。戻り値は (合計, 内訳)。
+    メニュー1件ごとに料金がかかる。数量（コインの枚数など）では値段は変わらない。"""
+    import tsum_service
+    rows = []
+    for key in tsum_service.sort_menus(menus or []):
+        price = PRICES.get(tsum_service.MENUS[key]["price"], 0)
+        rows.append((f"ツムツム：{tsum_service.menu_label(key)}", 1, price))
     return sum(n * p for _, n, p in rows), rows

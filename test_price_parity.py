@@ -122,3 +122,64 @@ class PriceParity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ツムツム代行の画面（/tsum）。メニューを選び、画面の合計と /run の金額を比べる。
+TSUM_PICK_JS = r"""
+async (o) => {
+  const rnd = (() => { let x = o.seed; return () => (x = (x * 1103515245 + 12345) % 2147483648) / 2147483648; })();
+  const boxes = [...document.querySelectorAll('#menuList input[type=checkbox]')];
+  boxes.forEach(e => { e.checked = false; });
+  const solo = o.solo;
+  if (solo) {
+    const e = boxes.find(b => b.value === 'tsum_guest_create');
+    e.checked = true;
+  } else {
+    let n = 0;
+    for (const e of boxes) {
+      if (e.value === 'tsum_guest_create') continue;
+      if (n >= 4) break;
+      if (rnd() < 0.45) { e.checked = true; n++; }
+    }
+    if (!n) { boxes.find(b => b.value === 'tsum_coin').checked = true; }
+  }
+  boxes.forEach(e => e.dispatchEvent(new Event('change', {bubbles: true})));
+  document.querySelectorAll('#menuList .qty input').forEach(e => {
+    const max = Number(e.dataset.max), min = Number(e.dataset.min);
+    e.value = String(Math.max(min, Math.floor(rnd() * Math.min(max, 1000)) + min));
+  });
+  document.querySelector('#login').value = 'parity@example.com';
+  document.querySelector('#password').value = 'parity-pw';
+  renderCart();
+  const shown = parseInt(document.querySelector('#total').textContent.replace(/[^0-9]/g, ''), 10);
+  const sent = body();
+  const r = await fetch('/run', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(sent)});
+  const j = await r.json();
+  return {shown, status: r.status, amount: j.amount, error: j.error || null, menus: sent.tsum.menus, mode: sent.tsum.mode};
+}
+"""
+
+
+@unittest.skipIf(sync_playwright is None, "Playwright がない")
+class TsumPriceParity(PriceParity):
+    """ツムツム代行の画面でも、画面の合計とサーバーの金額が一致することを確かめる。"""
+
+    def test_screen_total_equals_server_amount(self):
+        ctx = self.browser.new_context(viewport={"width": 390, "height": 844})
+        self.addCleanup(ctx.close)
+        pg = ctx.new_page()
+        self.addCleanup(patch.object(self.A, "_rate_ok", lambda *a, **k: True).stop)
+        patch.object(self.A, "_rate_ok", lambda *a, **k: True).start()   # 連打制限は test_tsum.py で確認する
+        pg.goto(self.url + "tsum")
+        pg.wait_for_timeout(500)
+        rng = random.Random(20261124)
+        checked = 0
+        for i in range(int(os.environ.get("PARITY_CASES_TSUM", "20"))):
+            res = pg.evaluate(TSUM_PICK_JS, {"seed": 2000 + i, "solo": rng.random() < 0.15})
+            self.assertEqual(res["status"], 200, f"case {i}: {res['error']} {res['menus']}")
+            self.assertEqual(res["shown"], res["amount"],
+                             f"case {i}: 画面 {res['shown']}円 ≠ サーバー {res['amount']}円 {res['menus']}")
+            if res["menus"] == ["tsum_guest_create"]:
+                self.assertEqual(res["mode"], "new")
+            checked += 1
+        self.assertGreaterEqual(checked, 10)

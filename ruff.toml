@@ -2,7 +2,8 @@
 # 文法エラー・未定義の名前・同じ名前の重複定義・使っていない読み込み
 target-version = "py312"
 line-length = 200
-extend-exclude = ["exchange", "xbot/lab"]
+# tsum_engine は依頼主の Discord 版から持ってきた素のスクリプト（中身を変えない）ので検査しない
+extend-exclude = ["exchange", "xbot/lab", "tsum_engine"]
 
 [lint]
 select = ["E9", "F63", "F7", "F82", "F811", "F401"]

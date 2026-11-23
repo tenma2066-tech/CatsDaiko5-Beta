@@ -1,0 +1,436 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>ツムツム代行</title>
+<style>
+:root{
+  --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
+  --accent:#ffc42e;--ok:#12a05c;--warn:#e08a00;--bad:#d93636;--okbg:#e6f6ee;--badbg:#fdebeb;
+  --hit:rgba(255,196,46,.24);--idle:#9aa4b2;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;
+  --okbg:#14291f;--badbg:#321a1a;--hit:rgba(255,196,46,.16);--idle:#6c7684;
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.5;
+  font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  padding-bottom:calc(104px + env(safe-area-inset-bottom,0px))}
+.wrap{max-width:640px;margin:0 auto;padding:0 14px}
+button,input,select{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+header{padding:calc(14px + env(safe-area-inset-top,0px)) 0 10px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
+.top a{font-size:13px;color:var(--muted)}
+.brand{display:flex;flex-direction:column;line-height:1.15}
+.brand small{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:14px;margin:0 0 14px}
+.card>h2{margin:0 0 4px;font-size:17px}
+.card>p.note{margin:0 0 10px;font-size:13px;color:var(--muted);line-height:1.7}
+.menu{display:grid;gap:8px}
+.menu label{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:2px solid var(--line);
+  border-radius:14px;background:var(--soft);cursor:pointer}
+.menu label.on{background:var(--hit)}
+.menu input[type=checkbox]{width:22px;height:22px;margin:2px 0 0;flex:none;accent-color:#17181c}
+.menu b{display:block;font-size:15px}
+.menu small{display:block;font-size:12.5px;color:var(--muted);line-height:1.6}
+.menu em{font-style:normal;font-weight:800}
+.qty{display:flex;gap:8px;align-items:center;margin-top:8px}
+.qty input{width:100%;padding:9px 10px;border:2px solid var(--line);border-radius:10px;background:var(--panel)}
+.qty input.bad{border-color:var(--bad);background:var(--badbg)}
+.qty button{padding:9px 12px;border:2px solid var(--line);border-radius:10px;background:var(--accent);font-weight:800}
+.field{display:block;margin:0 0 10px}
+.field span{display:block;font-size:13.5px;font-weight:700;margin-bottom:4px}
+.field input{width:100%;padding:11px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel)}
+.modes{display:grid;gap:8px;margin:0 0 12px}
+.modes label{display:flex;gap:10px;align-items:center;padding:10px 12px;border:2px solid var(--line);border-radius:14px;background:var(--soft)}
+.modes label.on{background:var(--hit)}
+.modes input{width:20px;height:20px;flex:none;accent-color:#17181c}
+.modes b{display:block;font-size:15px}
+.modes small{display:block;font-size:12.5px;color:var(--muted);line-height:1.6}
+.menu small.unit{margin-top:4px}
+.cart{list-style:none;padding:0;margin:0 0 10px;display:grid;gap:6px}
+.cart li{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.total{display:flex;justify-content:space-between;align-items:baseline;font-size:16px;font-weight:800;margin-top:6px}
+.total b{font-size:22px}
+.err{margin:8px 0 0;padding:9px 11px;border-radius:10px;background:var(--badbg);color:var(--bad);font-size:13.5px;font-weight:700}
+.err:empty{display:none}
+.okbox{margin:8px 0 0;padding:9px 11px;border-radius:10px;background:var(--okbg);font-size:13.5px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:2px solid var(--line);
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));z-index:5}
+.bar .in{max-width:640px;margin:0 auto;display:flex;gap:10px;align-items:center}
+.bar .sum{flex:1;font-size:13px;color:var(--muted);line-height:1.4}
+.bar .sum b{display:block;font-size:17px;color:var(--ink)}
+.go{padding:13px 18px;border:2px solid var(--line);border-radius:14px;background:var(--accent);font-weight:800;font-size:16px}
+.go[disabled]{opacity:.5}
+.btn{padding:9px 13px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-weight:700;white-space:nowrap;flex:none}
+.btn.primary{background:var(--accent)}
+.pbar{height:10px;border:2px solid var(--line);border-radius:999px;background:var(--soft);overflow:hidden;margin:10px 0}
+.pbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .5s ease}
+.pbar i[data-s=done]{background:var(--ok)}.pbar i[data-s=error]{background:var(--bad)}
+.nowmsg{margin:4px 0 8px;font-size:15.5px;font-weight:700;line-height:1.6}
+.nowmsg[data-s=error]{color:var(--bad)}.nowmsg[data-s=done]{color:var(--ok)}
+.logbox{margin-top:10px;font-size:13px}
+.logbox summary{cursor:pointer;color:var(--muted);font-weight:700}
+.logbox pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10px;border-radius:10px;font-size:12.5px;line-height:1.6}
+.code{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:2px solid var(--line);
+  border-radius:12px;background:var(--soft);margin:8px 0}
+.code small{display:block;font-size:12px;color:var(--muted)}
+.code strong{font-size:17px;letter-spacing:.04em;word-break:break-all}
+.panel{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:9}
+.panel[hidden]{display:none}
+.panel .inner{background:var(--panel);border:2px solid var(--line);border-radius:18px 18px 0 0;padding:16px;
+  width:100%;max-width:640px;max-height:92vh;overflow:auto;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+.panel h3{margin:0 0 8px;font-size:17px}
+.panel img{display:block;width:100%;max-width:260px;margin:10px auto;border:2px solid var(--line);border-radius:10px;background:#fff}
+.row{display:flex;gap:10px;margin-top:12px}
+.row button{flex:1}
+.lines{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.75;margin:0 0 8px}
+.maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
+.foot{margin:24px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}
+[hidden]{display:none!important}
+</style></head><body>
+<header><div class="wrap top">
+  <div class="brand"><h1>ツムツム代行</h1><small>TN SHOP ／ <b>LINE：ディズニー ツムツム</b></small></div>
+  <a href="/">← にゃんこ代行へ</a>
+</div></header>
+
+<main class="wrap">
+{% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}{% if maint.url %}<br><a href="{{ maint.url }}">お知らせ</a>{% endif %}</div>{% endif %}
+
+<section id="s-menu" class="card">
+  <h2>何をしますか？</h2>
+  <p class="note">メニューは複数まとめて選べます（コイン→ツムレベル→ガチャ→スコア→メダル→レベルの順に実行します）。料金はメニュー1件ごとです。</p>
+  <div class="menu" id="menuList">
+  {% for m in menus %}
+    <label data-key="{{ m.key }}">
+      <input type="checkbox" value="{{ m.key }}">
+      <span>
+        <b>{{ m.label }} <em>{{ m.amount }}円</em></b>
+        <small>{{ m.desc }}</small>
+        {% if m.value %}<span class="qty" hidden>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" placeholder="{{ m.value[0] }}〜{{ m.value[1] }}" data-min="{{ m.value[0] }}" data-max="{{ m.value[1] }}" aria-label="{{ m.label }}の数量">
+          <button type="button" class="qmax">最大</button>
+        </span>
+        <small class="unit">単位：{{ m.unit }}／上限 {{ "{:,}".format(m.value[1]) }}</small>{% endif %}
+      </span>
+    </label>
+  {% endfor %}
+  </div>
+  <p class="err" id="menuErr"></p>
+</section>
+
+<section id="s-acct" class="card">
+  <h2>アカウント</h2>
+  <p class="note">入力されたメールアドレス・パスワード・引き継ぎ番号は、代行の実行にだけ使い、画面やログには出しません。</p>
+  <div class="modes" id="modeList">
+    <label><input type="radio" name="mode" value="line" checked><span><b>メールアドレスでログイン</b><small>LINEアプリの「設定 → アカウント」に登録しているメールアドレス（電話番号では入れません）。LINE側の確認（画像認証・PIN）が出ることがあります。</small></span></label>
+    <label><input type="radio" name="mode" value="guest"><span><b>引き継ぎ番号で引き継ぐ</b><small>ゲーム内「設定 → 引き継ぎ」で発行した番号とパスワード。代行のあと、<b>新しい引き継ぎ番号とパスワード</b>をこの画面で発行します。必ず控えてください。</small></span></label>
+    <label><input type="radio" name="mode" value="new"><span><b>新しいゲストアカウントを作る</b><small>「ゲストアカウント生成」を選んだときはこちらになります。引き継ぎ情報を発行してお渡しします。</small></span></label>
+  </div>
+  <label class="field" id="f-login"><span id="loginLabel">メールアドレス</span><input id="login" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"></label>
+  <label class="field" id="f-pw"><span>パスワード</span><input id="password" type="password" autocomplete="off"></label>
+  {% if payments and not is_admin %}<label class="field"><span>クーポン（任意・{{ coupon_min }}円以上のご注文で10%引き）</span><input id="coupon" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>{% endif %}
+  <p class="err" id="acctErr"></p>
+</section>
+
+<section id="s-cart" class="card">
+  <h2>ご注文</h2>
+  <ul class="cart" id="cart"></ul>
+  <div class="total"><span>合計</span><b id="total">0円</b></div>
+  <p class="err" id="runErr"></p>
+</section>
+
+<section id="s-status" class="card" hidden>
+  <h2>状況</h2>
+  <p class="nowmsg" id="now">準備しています…</p>
+  <div class="pbar"><i id="pbar"></i></div>
+  <p class="lines" id="resultLines"></p>
+  <div id="codes"></div>
+  <p class="okbox" id="coupBox" hidden></p>
+  <details class="logbox"><summary>くわしい記録</summary><pre id="log"></pre></details>
+</section>
+
+<section id="s-resume" class="card" hidden>
+  <h2>進めていない注文</h2>
+  <div id="resumeList"></div>
+</section>
+
+<div class="foot"><p>TN SHOP ／ お問い合わせ：X <b>@paysms1212</b></p><p>v{{ version }} ／ あなたの番号 {{ uid }}</p></div>
+</main>
+
+<div class="bar"><div class="in">
+  <div class="sum"><span id="barWhat">メニュー未選択</span><b id="barYen">0円</b></div>
+  <button class="go" id="go" type="button" disabled>{% if payments and not is_admin %}お支払いへ進む{% else %}実行{% endif %}</button>
+</div></div>
+
+<div class="panel" id="payPanel" hidden><div class="inner">
+  <h3>PayPayでお支払い</h3>
+  <p class="note" id="payInfo">PayPayアプリで <b id="payYen">0円</b> ちょうどの送金リンクを作って、下に貼り付けてください（パスコードなし）。</p>
+  <label class="field"><span>PayPay送金リンク</span><input id="payLink" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://pay.paypay.ne.jp/..."></label>
+  <p class="err" id="payErr"></p>
+  <div class="row"><button class="btn" id="payCancel" type="button">やめる</button><button class="btn primary" id="payGo" type="button">支払って実行する</button></div>
+  <p class="note" id="payOrderNo"></p>
+</div></div>
+
+<div class="panel" id="capPanel" hidden><div class="inner">
+  <h3>画像認証</h3>
+  <p class="note">LINE側で画像認証が出ました。画像に出ている文字を入力してください（入力は4分以内）。</p>
+  <img id="capImg" alt="画像認証">
+  <label class="field"><span>画像の文字</span><input id="capText" type="text" autocapitalize="off" spellcheck="false" autocomplete="off"></label>
+  <p class="err" id="capErr"></p>
+  <div class="row"><button class="btn primary" id="capGo" type="button">送信する</button></div>
+</div></div>
+
+<script>
+"use strict";
+const MENUS={{ menus|tojson }};
+const SOLO={{ solo|tojson }};
+const PAYMENTS={{ 'true' if payments else 'false' }};
+const IS_ADMIN={{ 'true' if is_admin else 'false' }};
+const TOTAL_STEPS={{ total_steps }};
+const COUPON_MIN={{ coupon_min }};
+const BY_KEY={}; MENUS.forEach(m=>{BY_KEY[m.key]=m;});
+const $=s=>document.querySelector(s);
+const $$=s=>Array.from(document.querySelectorAll(s));
+const yen=n=>Number(n).toLocaleString('ja-JP')+'円';
+let curJob=null, payOrder=null, payAmount=0, timer=null, capSent=false;
+
+/* ---------- メニュー ---------- */
+function rows(){
+  const out=[];
+  MENUS.forEach(m=>{ if(picked().includes(m.key)) out.push([m.label,m.amount]); });
+  return out;
+}
+function picked(){
+  const keys=$$('#menuList input[type=checkbox]:checked').map(i=>i.value);
+  return MENUS.map(m=>m.key).filter(k=>keys.includes(k));   /* 実行順に並べる */
+}
+function qtyOf(key){
+  const box=document.querySelector('#menuList label[data-key="'+key+'"] .qty input');
+  return box?box.value.trim():'';
+}
+function qtyMap(){
+  const out={};
+  picked().forEach(k=>{ if(BY_KEY[k].value) out[k]=qtyOf(k); });
+  return out;
+}
+function qtyError(){
+  for(const k of picked()){
+    const m=BY_KEY[k]; if(!m.value) continue;
+    const box=document.querySelector('#menuList label[data-key="'+k+'"] .qty input');
+    const raw=qtyOf(k); const ok=/^[0-9]+$/.test(raw)&&Number(raw)>=m.value[0]&&Number(raw)<=m.value[1];
+    box.classList.toggle('bad',!!raw&&!ok);
+    if(!raw) return '「'+m.label+'」の数量を入力してください。';
+    if(!ok) return '「'+m.label+'」は '+m.value[0].toLocaleString('ja-JP')+'〜'+m.value[1].toLocaleString('ja-JP')+' の範囲で入力してください。';
+  }
+  return '';
+}
+function soloError(){
+  const p=picked(), s=p.filter(k=>SOLO.includes(k));
+  if(s.length&&p.length>1) return '「'+BY_KEY[s[0]].label+'」はほかのメニューと同時に選べません。';
+  return '';
+}
+function mode(){ return ($$('#modeList input[name=mode]:checked')[0]||{}).value||'line'; }
+function setMode(v){ $$('#modeList input[name=mode]').forEach(i=>{ i.checked=i.value===v; }); syncMode(); }
+function syncMode(){
+  const m=mode(), isNew=m==='new';
+  $$('#modeList label').forEach(l=>l.classList.toggle('on',l.querySelector('input').checked));
+  $('#f-login').hidden=isNew; $('#f-pw').hidden=isNew;
+  $('#loginLabel').textContent=m==='guest'?'引き継ぎ番号':'メールアドレス';
+  $('#login').setAttribute('inputmode',m==='guest'?'text':'email');
+}
+function total(){ return rows().reduce((a,r)=>a+r[1],0); }
+function renderCart(){
+  const list=$('#cart'); list.textContent='';
+  rows().forEach(([label,amount])=>{
+    const li=document.createElement('li');
+    const a=document.createElement('span'); a.textContent=label;
+    const b=document.createElement('span'); b.textContent=yen(amount);
+    li.append(a,b); list.append(li);
+  });
+  if(!rows().length){ const li=document.createElement('li'); li.textContent='メニューを選んでください'; list.append(li); }
+  const t=IS_ADMIN&&PAYMENTS?0:total();
+  $('#total').textContent=yen(t);
+  $('#barYen').textContent=yen(t);
+  $('#barWhat').textContent=rows().length?('選択 '+rows().length+'件'):'メニュー未選択';
+  $('#menuErr').textContent=soloError();
+  $('#go').disabled=!rows().length||!!soloError()||!!curJob;
+  $$('#menuList label').forEach(l=>{
+    const on=l.querySelector('input').checked;
+    l.classList.toggle('on',on);
+    const q=l.querySelector('.qty'); if(q) q.hidden=!on;
+    const u=l.querySelector('.unit'); if(u) u.hidden=!on;
+    if(on&&SOLO.includes(l.dataset.key)) setMode('new');
+  });
+}
+$('#menuList').addEventListener('change',renderCart);
+$('#menuList').addEventListener('input',()=>{ $('#runErr').textContent=''; qtyError(); });
+$('#menuList').addEventListener('click',e=>{
+  if(!e.target.classList.contains('qmax')) return;
+  const box=e.target.parentElement.querySelector('input');
+  box.value=box.dataset.max; renderCart();
+});
+$('#modeList').addEventListener('change',syncMode);
+
+/* ---------- 実行 ---------- */
+function body(){
+  return {tsum:{mode:mode(),login:$('#login').value.trim(),password:$('#password').value,
+                menus:picked(),qty:qtyMap()},
+          coupon:($('#coupon')&&!IS_ADMIN)?$('#coupon').value.trim().toUpperCase():''};
+}
+$('#go').addEventListener('click',async()=>{
+  $('#runErr').textContent=''; $('#acctErr').textContent='';
+  const qe=qtyError()||soloError();
+  if(qe){ $('#runErr').textContent=qe; return; }
+  if(mode()!=='new'&&(!$('#login').value.trim()||!$('#password').value)){
+    $('#acctErr').textContent=mode()==='guest'?'引き継ぎ番号とパスワードを入力してください。':'メールアドレスとパスワードを入力してください。';
+    return;
+  }
+  $('#go').disabled=true;
+  try{
+    const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())});
+    const j=await r.json();
+    if(!r.ok){ $('#runErr').textContent=j.error||'注文できませんでした。'; $('#go').disabled=false; return; }
+    if(j.job){ watch(j.job); return; }
+    payOrder=j.order; payAmount=j.amount;
+    if(j.state==='paid'&&j.prepaid){ await payNow(''); return; }
+    openPay();
+  }catch(e){ $('#runErr').textContent='通信できませんでした。電波の良いところでもう一度お試しください。'; $('#go').disabled=false; }
+});
+
+/* ---------- 支払い ---------- */
+function openPay(){
+  $('#payYen').textContent=yen(payAmount);
+  $('#payOrderNo').textContent='注文番号：'+payOrder;
+  $('#payErr').textContent=''; $('#payLink').value='';
+  $('#payPanel').hidden=false; document.body.style.overflow='hidden';
+}
+function closePay(){ $('#payPanel').hidden=true; document.body.style.overflow=''; $('#go').disabled=false; loadResume(); }
+$('#payCancel').addEventListener('click',closePay);
+$('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
+$('#payGo').addEventListener('click',()=>payNow($('#payLink').value));
+async function payNow(link){
+  const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…';
+  try{
+    const r=await fetch('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link})});
+    const j=await r.json();
+    if(!r.ok){
+      $('#payErr').textContent=j.error||'決済を確認できませんでした。';
+      btn.disabled=false;
+      if(j.code==='started'||j.code==='dead'||j.code==='order_missing') btn.disabled=true;
+      return;
+    }
+    $('#payPanel').hidden=true; document.body.style.overflow='';
+    watch(j.job);
+  }catch(e){ $('#payErr').textContent='通信エラーです。もう一度お試しください。'; btn.disabled=false; }
+}
+
+/* ---------- 状況 ---------- */
+function watch(job){
+  curJob=job; capSent=false;
+  $('#s-status').hidden=false; $('#go').disabled=true;
+  $('#s-status').scrollIntoView({behavior:'smooth',block:'start'});
+  if(timer) clearInterval(timer);
+  poll(); timer=setInterval(poll,1500);
+}
+async function poll(){
+  if(!curJob) return;
+  let j;
+  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json(); if(!r.ok) throw new Error(j.error||'not found'); }
+  catch(e){ $('#now').textContent='状況を確認できませんでした（通信）。'; return; }
+  const st=j.status;
+  $('#now').dataset.s=st;
+  $('#now').textContent=st==='queued'?('順番待ちです（'+(j.queue_position||1)+'番目）'):
+    st==='done'?'完了しました':st==='error'?('エラー：'+(j.error||'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
+  const pct=st==='done'?100:Math.round(Math.min(1,(j.step||0)/TOTAL_STEPS)*100);
+  $('#pbar').style.width=pct+'%'; $('#pbar').dataset.s=st;
+  $('#log').textContent=(j.log||[]).join('\n');
+  if(j.tsum&&j.tsum.lines&&j.tsum.lines.length) $('#resultLines').textContent=j.tsum.lines.join('\n');
+  if(j.captcha&&j.captcha.image) openCaptcha(j.captcha.image); else closeCaptcha();
+  if(j.result) showCodes(j.result);
+  if(st==='done'||st==='error'){
+    clearInterval(timer); timer=null; curJob=null; $('#go').disabled=false; closeCaptcha();
+    renderCart(); loadCoupon(); loadResume();
+  }
+}
+function showCodes(result){
+  const box=$('#codes'); if(box.dataset.done==='1') return;
+  box.textContent=''; box.dataset.done='1';
+  const h=document.createElement('h3'); h.textContent='新しい引き継ぎ情報（必ず控えてください）'; box.append(h);
+  [['引き継ぎ番号',result.transfer],['パスワード',result.confirm]].forEach(([name,val])=>{
+    const row=document.createElement('div'); row.className='code';
+    const d=document.createElement('div');
+    const s=document.createElement('small'); s.textContent=name;
+    const v=document.createElement('strong'); v.textContent=val||'未発行';
+    d.append(s,v);
+    const b=document.createElement('button'); b.className='btn'; b.type='button'; b.textContent='コピー';
+    b.addEventListener('click',async()=>{ try{ await navigator.clipboard.writeText(val||''); b.textContent='コピーしました'; }catch(e){ b.textContent='コピーできません'; } });
+    row.append(d,b); box.append(row);
+  });
+  const note=document.createElement('p'); note.className='note';
+  note.textContent='ゲームの「設定 → 引き継ぎ」で、この番号とパスワードを入れて引き継いでください。';
+  box.append(note);
+}
+async function loadCoupon(){
+  if(!PAYMENTS) return;
+  try{
+    const r=await fetch('/api/orders/mine',{cache:'no-store'}); const j=await r.json();
+    const o=(j.orders||[]).filter(x=>x.tsum).find(x=>x.coupon_issued);
+    if(o){ $('#coupBox').hidden=false; $('#coupBox').textContent='🎟 次回使えるクーポン '+o.coupon_issued+'（次回 '+COUPON_MIN+'円以上のご注文で10%引き・1回きり・30日間）'; }
+  }catch(e){}
+}
+
+/* ---------- 画像認証 ---------- */
+function openCaptcha(src){
+  if($('#capPanel').hidden===false) return;
+  $('#capImg').src=src; $('#capText').value=''; $('#capErr').textContent='';
+  $('#capGo').disabled=false; capSent=false;
+  $('#capPanel').hidden=false; document.body.style.overflow='hidden';
+  $('#capText').focus();
+}
+function closeCaptcha(){
+  if($('#capPanel').hidden) return;
+  $('#capPanel').hidden=true; document.body.style.overflow='';
+}
+$('#capText').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#capGo').click(); } });
+$('#capGo').addEventListener('click',async()=>{
+  const text=$('#capText').value.trim();
+  if(!text){ $('#capErr').textContent='画像に出ている文字を入力してください。'; return; }
+  if(!curJob||capSent) return;
+  $('#capGo').disabled=true;
+  try{
+    const r=await fetch('/api/jobs/'+curJob+'/captcha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})});
+    const j=await r.json();
+    if(!r.ok){ $('#capErr').textContent=j.error||'送信できませんでした。'; $('#capGo').disabled=false; return; }
+    capSent=true; closeCaptcha();
+  }catch(e){ $('#capErr').textContent='通信エラーです。もう一度お試しください。'; $('#capGo').disabled=false; }
+});
+
+/* ---------- 進めていない注文 ---------- */
+async function loadResume(){
+  if(!PAYMENTS) return;
+  let list=[];
+  try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); const j=await r.json(); list=j.orders||[]; }catch(e){ return; }
+  const mine=list.filter(o=>o.tsum&&['unpaid','hold','paid'].includes(o.state));
+  const box=$('#resumeList'); box.textContent='';
+  $('#s-resume').hidden=!mine.length;
+  mine.forEach(o=>{
+    const d=document.createElement('div'); d.className='code';
+    const t=document.createElement('div');
+    const s=document.createElement('small');
+    s.textContent={unpaid:'お支払い待ち',hold:'保留中（自動で確認しています）',paid:'お支払い済み・開始待ち'}[o.state];
+    const v=document.createElement('strong'); v.textContent=yen(o.amount)+'（注文 '+o.order+'）';
+    t.append(s,v);
+    const b=document.createElement('button'); b.className='btn primary'; b.type='button';
+    b.textContent=o.state==='paid'?'実行する':'支払う';
+    b.addEventListener('click',()=>{ payOrder=o.order; payAmount=o.amount; if(o.state==='paid'){ payNow(''); } else { openPay(); } });
+    d.append(t,b); box.append(d);
+  });
+}
+
+syncMode(); renderCart(); loadResume();
+</script>
+</body></html>

@@ -10,6 +10,7 @@ services:
       PAYPAY_ENCRYPTION_KEY: ${PAYPAY_ENCRYPTION_KEY}
       PAYPAY_DATA_DIR: /data/paypay
       PAYPAY_LEDGER_PATH: /data/paypay/payments.sqlite3
+      TSUM_DATA_DIR: /data/tsum       # ツムツム代行の作業用（引き継ぎ情報の控え・バージョンのキャッシュ）
       ADMIN_PASSWORD_FILE: /run/admin/admin_password
       SESSION_COOKIE_SECURE: "1"    # ログインの Cookie を HTTPS のときだけ送る（Caddy が HTTPS にしている）
     volumes:
