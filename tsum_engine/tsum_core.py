@@ -170,9 +170,18 @@ def describe_login_failure(reason):
     low = reason.lower()
     if "PIN" in reason.upper() or "pincode" in low or "端末認証" in reason:
         return "LINEの本人確認（PIN）が完了しませんでした。LINEアプリで番号を入力してから、もう一度お試しください"
+    # 画像認証（CAPTCHA）まわりは、実際に確認できた失敗だけを伝える。
+    # 「LINE側の一時制限」「20〜30分」などの推測は根拠がないので書かない。
+    if "recaptcha" in low:
+        return ("LINEが画像ではないreCAPTCHA（Google）を要求したため、自動ではログインできませんでした。"
+                "通信経路（VPN/IP）を変えるか、時間をおいてからお試しください。")
+    if "画像の取得に失敗" in reason:
+        return "画像認証の画像を取得できませんでした（通信の問題）。もう一度お試しください。"
+    if "入力されませんでした" in reason or "キャンセル" in reason:
+        return "画像認証の文字が入力されなかったため、ログインを中止しました。もう一度お試しください。"
     if "captcha" in low or "画像認証" in reason:
-        return ("画像認証が繰り返し出てログインできませんでした。LINE側で一時的に制限がかかっている可能性が高いので、"
-                "20〜30分ほど時間を置いてからお試しください（続けて試すと制限が延びることがあります）。")
+        return ("入力した画像認証の文字が合っていなかったか、LINEがもう一度画像認証を求めたため、"
+                "ログインできませんでした。もう一度お試しください。")
     if "通信エラー" in reason or "接続が不安定" in reason or "プロキシ" in reason:
         return "接続が不安定でログインできませんでした。少し待ってからもう一度お試しください"
     if "アカウント情報が違う" in reason or "errorcode=445" in low:

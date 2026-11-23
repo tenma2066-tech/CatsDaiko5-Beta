@@ -252,6 +252,49 @@ class RunOrder(unittest.TestCase):
         self.assertFalse([s for s in seen if "secret-pw" in s or "a@example.com" in s])
 
 
+class LoginFailureMessages(unittest.TestCase):
+    """ログイン失敗の表示（describe_login_failure）。外部通信はしない。
+
+    画像取得失敗・回答未受信・回答送信後の失敗を、それぞれ別の文言で出す。
+    根拠のない「LINE側の一時制限」「20〜30分」は出さない。
+    """
+    @staticmethod
+    def _describe():
+        import os
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsum_engine"))
+        import tsum_core
+        return tsum_core.describe_login_failure
+
+    def test_three_captcha_cases_are_distinct_and_without_speculation(self):
+        describe = self._describe()
+        # tsum_engine/line_password_login.py が実際に返す生の失敗理由（確認できた事実）
+        image_fetch = describe("CAPTCHA画像の取得に失敗しました（通信エラー: ConnectionError: x）。もう一度お試しください。")
+        no_answer = describe("CAPTCHAが入力されませんでした。")
+        after_submit = describe("CAPTCHAが正しくないか、LINE側がもう一度画像CAPTCHAを要求しました。")
+
+        self.assertIn("画像を取得できませんでした", image_fetch)
+        self.assertIn("入力されなかった", no_answer)
+        self.assertIn("合っていなかった", after_submit)
+        self.assertEqual(len({image_fetch, no_answer, after_submit}), 3)   # 3件とも別の文言
+
+        for msg in (image_fetch, no_answer, after_submit):
+            self.assertNotIn("20〜30分", msg)
+            self.assertNotIn("一時的に制限", msg)
+            self.assertNotIn("制限が延びる", msg)
+            self.assertNotIn("繰り返し出て", msg)
+            # 診断用の内部文字列（例外名など）を画面に出さない
+            self.assertNotIn("ConnectionError", msg)
+
+    def test_recaptcha_and_other_reasons_unchanged(self):
+        describe = self._describe()
+        self.assertIn("reCAPTCHA", describe("CAPTCHA送信後にreCAPTCHAへ切り替わりました。別IPに変えてください。"))
+        # 画像認証以外の分類はこれまで通り
+        self.assertIn("PIN", describe("PIN認証がタイムアウト/未承認でした。"))
+        self.assertIn("メールアドレスかパスワード", describe("アカウント情報が違う（errorCode=445）"))
+        self.assertIn("BAN", describe("アカウントが停止されています（retCode=29）"))
+
+
 class Order(unittest.TestCase):
     """注文（/run）と保存の形。ゲームへの通信はしない。"""
 
