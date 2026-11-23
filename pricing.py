@@ -8,8 +8,8 @@ import engine
 
 PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25, "playtime10": 10, "restart": 50,
           # ツムツム代行（別の大メニュー。1メニューごとの料金）
-          "tsum_coin": 100, "tsum_coin_max": 100, "tsum_level_max": 100, "tsum_score": 100, "tsum_score_max": 100,
-          "tsum_tsum_lv": 100, "tsum_medal": 100, "tsum_box": 200, "tsum_premium": 200, "tsum_guest_create": 50}
+          "tsum_coin": 50, "tsum_coin_max": 50, "tsum_level_max": 50, "tsum_score": 50, "tsum_score_max": 50,
+          "tsum_tsum_lv": 50, "tsum_medal": 50, "tsum_box": 100, "tsum_premium": 100, "tsum_guest_create": 30}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
                 "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
                 "restart": "初期垢作成（リスタートパック・基本料金）",
