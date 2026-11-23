@@ -65,13 +65,15 @@ LINE はデータセンター／VPS／クラウドの固定IP（Fly・さくら�
 
 - `tsum_service._login_line` は、画像認証の再要求・reCAPTCHA を**別IPに変えられるときだけ**（SOCKS プロキシ設定時）別回線でやり直す。固定IPのときは叩き直さず（同じIPで繰り返してもアカウントに負荷をかけるだけ）、利用者には「サーバー側のアクセス状況が原因の可能性」を正直に伝える（`_login_failure_message`）。「VPN を変えて」「20〜30分待って」のような、利用者に実行できない・根拠のない案内は出さない。テストは `test_tsum.py` の `test_captcha_block_without_ip_rotation_is_not_retried` ／ `test_captcha_block_with_ip_rotation_is_retried_on_fresh_circuit`。
 - **恒久対処（運用側）**：LINE ログインを住宅用／モバイル回線の**ローテーション型プロキシ**（または出口を変えられる Tor）に通す（`TSUM_SOCKS_URL`）。固定のデータセンターIPのままでは、コード側で何をしても画像認証・reCAPTCHA は減らない。プロキシを設定すると `_unique_game_proxy()` がやり直しごとに別の出口（別IP）を割り当て、上の自動リトライが効くようになる。
+- **すぐ試せる形（追加費用なし）**：Docker イメージに `tor` を同梱し、`docker-entrypoint.sh` が `TSUM_USE_TOR=1` のときだけ Tor を起動して `TSUM_SOCKS_URL=socks5h://127.0.0.1:9050` を指す。VPS では `deploy/vps/docker-compose.yml` の `TSUM_USE_TOR: "1"` のコメントを外して再デプロイするだけ。Tor が起動しない／ポートが開かないときはアプリが自動で直接接続に戻る（サービスは止めない）。**注意：LINE が Tor の出口IPも弾く場合がある**ので、効くかどうかは実機で要確認。弾かれるなら住宅／モバイルのローテーション型プロキシに切り替える（`TSUM_SOCKS_URL` を差し替えるだけ。ゲーム本体の通信は既定どおり直接のまま）。
 
 ## 4. 設定（環境変数）
 
 | 変数 | 既定 | 何か |
 |---|---|---|
 | `TSUM_DATA_DIR` | `/data/tsum`（無ければ `instance/tsum`） | 作業用のフォルダ |
-| `TSUM_SOCKS_URL` | なし | ログインを通す SOCKS プロキシ（Tor など）。未設定なら直接つなぐ |
+| `TSUM_USE_TOR` | なし | `1` にすると `docker-entrypoint.sh` が同梱の Tor を起動し、`TSUM_SOCKS_URL` 未設定なら `socks5h://127.0.0.1:9050` を指す。LINEログインのIPローテーション用 |
+| `TSUM_SOCKS_URL` | なし | ログインを通す SOCKS プロキシ（Tor・住宅/モバイルのローテーション型プロキシなど）。未設定なら直接つなぐ。設定するとやり直しごとに別の出口IP（別回線）を使う |
 | `TSUM_TOR_GAME_API` | `0` | `1` にするとゲーム本体の通信もプロキシ経由（1件で数百〜数千回叩くので遅くなる） |
 | `TSUM_AUTO_FILL_COINS` | なし | `1` にすると、ガチャ・レベル上げの途中でコインが足りなくなったとき自動で補充する（コインは有料メニューなので既定は補充しない） |
 | `TSUM_SELECT_BOX_ID` / `TSUM_PREMIUM_GACHA_ID` | `12006012` / `12006007` | ガチャIDの予備。通常は開催中のIDをゲームから取り直す |
