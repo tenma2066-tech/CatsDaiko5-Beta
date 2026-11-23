@@ -40,10 +40,11 @@ jobs:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           SITE_DOMAIN: ${{ secrets.SITE_DOMAIN }}
         run: |
+          printf '%s\n' "catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N" > "$HOME/.vps_known_hosts"   # つなぐ相手が本物の VPS か確かめる（deploy/vps/known_hosts と同じ）
           set -eu
           U="${VPS_USER:-root}"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ConnectTimeout=20"
+          OPTS="-o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o ServerAliveInterval=30 -o ConnectTimeout=20"
           if [ -n "$VPS_SSH_KEY" ]; then
             printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/id_vps; chmod 600 ~/.ssh/id_vps
             echo "SSH_CMD=ssh -i $HOME/.ssh/id_vps $OPTS" >> "$GITHUB_ENV"
