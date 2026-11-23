@@ -340,6 +340,61 @@ class LoginFailureMessages(unittest.TestCase):
         self.assertIn("BAN", describe("アカウントが停止されています（retCode=29）"))
 
 
+class GameSync(unittest.TestCase):
+    """ゲーム内アクションのデータ同期ずれ(retcode 22)からの復旧。通信はしない。
+
+    プレイ報酬でコインが変わった直後の上限解放などで、サーバーが
+    「コイン残数が一致しません。データ反映のため一度タイトルに戻ります。」(retcode 22)
+    を返す。これはセッション切れ(retcode 6)と同じく「取り直して再試行せよ」の意なので、
+    post() が再ログイン＋1回やり直す。
+    """
+    @staticmethod
+    def _forge_cls():
+        import os
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsum_engine"))
+        import tsum_forge
+        return tsum_forge.Forge
+
+    def test_retcode22_coin_desync_is_classified_as_resync(self):
+        F = self._forge_cls()
+        self.assertTrue(F._needs_session_resync(
+            {"retcode": 22, "retsubcode": 2, "retmsg": "コイン残数が一致しません。データ反映のため一度タイトルに戻ります。"}))
+        self.assertTrue(F._needs_session_resync({"retcode": 6}))
+        self.assertFalse(F._needs_session_resync({"retcode": 0}))
+        self.assertFalse(F._needs_session_resync({"retcode": 22, "retsubcode": 9, "retmsg": "同期と無関係なエラー"}))
+
+    def test_post_resyncs_and_retries_on_retcode22(self):
+        F = self._forge_cls()
+        fg = F(userid="1", hashv="h" * 8, checkval="cv", proxy=None, user_token="t")
+        calls = []
+        responses = [
+            {"retcode": 22, "retsubcode": 2, "retmsg": "コイン残数が一致しません。データ反映のため一度タイトルに戻ります。"},
+            {"retcode": 0, "ok": True},
+        ]
+        def fake_post_once(path, pairs):
+            calls.append(path)
+            return responses[min(len(calls) - 1, len(responses) - 1)]
+        fg._post_once = fake_post_once
+        fg.refresh_session = lambda: True
+        out = fg.post("releaseTsumLv.nhn", [("tsumid", 1009)])
+        self.assertEqual(out.get("retcode"), 0)
+        self.assertEqual(len(calls), 2)   # 1回目22 → 再ログイン → 2回目で成功
+
+    def test_post_does_not_loop_if_resync_still_fails(self):
+        F = self._forge_cls()
+        fg = F(userid="1", hashv="h" * 8, checkval="cv", proxy=None, user_token="t")
+        calls = []
+        def fake_post_once(path, pairs):
+            calls.append(path)
+            return {"retcode": 22, "retsubcode": 2, "retmsg": "コイン残数が一致しません。"}
+        fg._post_once = fake_post_once
+        fg.refresh_session = lambda: True
+        out = fg.post("releaseTsumLv.nhn", [("tsumid", 1009)])
+        self.assertEqual(out.get("retcode"), 22)   # 2回目も22ならそのまま返す（無限ループしない）
+        self.assertEqual(len(calls), 2)
+
+
 class Order(unittest.TestCase):
     """注文（/run）と保存の形。ゲームへの通信はしない。"""
 

@@ -326,10 +326,27 @@ class Forge:
         self.sid = None
         self.s.headers.update({"User-Agent": "tsumtsum/%s" % _L.APPVER})
 
+    @staticmethod
+    def _needs_session_resync(resp):
+        """サーバーが「一度タイトルに戻ります」（＝状態を取り直して再試行せよ）を返したか。
+        retcode 6（セッション切れ）に加え、retcode 22（コイン残数などデータの同期ずれ。
+        プレイ報酬でコインが変わった直後の上限解放などで出る）も対象にする。"""
+        if not isinstance(resp, dict):
+            return False
+        rc = resp.get("retcode")
+        if rc == 6:
+            return True
+        if rc == 22:
+            msg = " ".join(str(resp.get(k, "")) for k in ("retmsg", "message", "errmsg"))
+            return ("一致しません" in msg) or ("タイトルに戻" in msg) or (resp.get("retsubcode") == 2)
+        return False
+
     def post(self, path, specific_pairs):
         resp = self._post_once(path, specific_pairs)
-        # セッション切れ (retcode 6: 一度タイトルに戻ります) の自動復旧
-        if isinstance(resp, dict) and resp.get("retcode") == 6 and not getattr(self, "_in_session_refresh", False):
+        # セッション切れ(retcode 6)・データ同期ずれ(retcode 22) の自動復旧。
+        # どちらもサーバーが「一度タイトルに戻ります」= 取り直して再試行せよ、を意味する。
+        # 再ログインで hash/checkval とコイン残数をサーバーの現在値に合わせてから1回だけやり直す。
+        if self._needs_session_resync(resp) and not getattr(self, "_in_session_refresh", False):
             self._in_session_refresh = True
             try:
                 if self.refresh_session():
