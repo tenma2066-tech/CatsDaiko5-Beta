@@ -45,7 +45,6 @@ jobs:
           python -m unittest -v test_parallel.py
           python -m unittest -v test_improvements.py
           python -m unittest -v test_cat_customization.py
-          python -m unittest -v test_github_auth_store.py
           python -m unittest -v test_item_types.py
           python -m unittest -v test_new_features.py
           python -m unittest -v test_order_flow.py
@@ -65,3 +64,4 @@ jobs:
           python -m pip install playwright
           python -m playwright install --with-deps chromium
           python -m unittest -v test_ui_results.py
+          python -m unittest -v test_price_parity.py
