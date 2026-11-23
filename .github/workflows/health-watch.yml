@@ -35,8 +35,9 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
+          printf '%s\n' "catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N" > "$HOME/.vps_known_hosts"   # つなぐ相手が本物の VPS か確かめる（deploy/vps/known_hosts と同じ）
           sudo apt-get install -y sshpass >/dev/null
-          IN=$(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=20 "root@$VPS_HOST" \
+          IN=$(sshpass -e ssh -o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=20 "root@$VPS_HOST" \
             "cd /opt/catsdaiko && docker compose exec -T app python3 -c \"import urllib.request as u; print(u.urlopen('http://127.0.0.1:8080/health', timeout=5).status)\"" 2>/dev/null || true)
           echo "inside: ${IN:-?}"
           if [ "$IN" = "200" ]; then

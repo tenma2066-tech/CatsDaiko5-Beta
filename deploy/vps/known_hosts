@@ -1,0 +1,3 @@
+# VPS の SSH ホスト鍵（公開してよい情報）。Actions はこれと照合してからつなぐ（HostKeyAlias=catsdaiko-vps）。
+# 指紋 SHA256:LxNvcqkvpw3SqawSnXR9MHDxQ5gbYfwx1UpzgPZsa/I（XServer のコンソールで ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub と同じか確かめられる）
+catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N

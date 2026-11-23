@@ -15,6 +15,7 @@ jobs:
     steps:
       - name: Read VPS status (no changes)
         run: |
+          printf '%s\n' "catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N" > "$HOME/.vps_known_hosts"   # つなぐ相手が本物の VPS か確かめる（deploy/vps/known_hosts と同じ）
           sudo apt-get install -y sshpass >/dev/null
           cat > /tmp/s.sh <<'SH'
           echo "=== OS ==="; . /etc/os-release; echo "$PRETTY_NAME"; uname -r
@@ -32,4 +33,4 @@ jobs:
           echo "=== /opt ==="; ls /opt
           SH
           sed -i 's/^          //' /tmp/s.sh
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/s.sh
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/s.sh

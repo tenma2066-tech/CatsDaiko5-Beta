@@ -15,6 +15,7 @@ jobs:
     steps:
       - name: Dump sanitized states
         run: |
+          printf '%s\n' "catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N" > "$HOME/.vps_known_hosts"   # つなぐ相手が本物の VPS か確かめる（deploy/vps/known_hosts と同じ）
           sudo apt-get install -y sshpass >/dev/null
           cat > /tmp/d.py <<'PY'
           import sqlite3, time
@@ -25,12 +26,13 @@ jobs:
                     "state=" + str(d["state"]), "amt=" + str(d["amount"]), "diag=" + str(d["diag"]))
           PY
           sed -i 's/^          //' /tmp/d.py
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
             "cd /opt/catsdaiko && docker compose exec -T app python3 -" < /tmp/d.py
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" \
             "cd /opt/catsdaiko && echo '--- app log (tail) ---' && docker compose logs --tail 60 app 2>&1 | cut -c1-220 && echo '--- processes ---' && docker compose top app 2>&1 | cut -c1-200 && echo '--- stats ---' && docker stats --no-stream 2>&1 | cut -c1-160 && echo '--- disk/mem ---' && df -h / | tail -1 && free -m | sed -n 2p" || true
       - name: Network check (MTU and HTTPS to the game upload host)
         run: |
+          printf '%s\n' "catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N" > "$HOME/.vps_known_hosts"   # つなぐ相手が本物の VPS か確かめる（deploy/vps/known_hosts と同じ）
           cat > /tmp/n.sh <<'SH'
           echo "--- host MTU ---"; ip -o link | awk '{print $2, $4, $5}' | grep -v "^lo"
           echo "--- docker network MTU ---"; docker network inspect catsdaiko_default --format '{{json .Options}}'
@@ -50,9 +52,10 @@ jobs:
           PY
           SH
           sed -i 's/^          //' /tmp/n.sh
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/n.sh 2>&1 | head -40 || true
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/n.sh 2>&1 | head -40 || true
       - name: Stack of the running worker (read-only, no local variables)
         run: |
+          printf '%s\n' "catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N" > "$HOME/.vps_known_hosts"   # つなぐ相手が本物の VPS か確かめる（deploy/vps/known_hosts と同じ）
           cat > /tmp/s.sh <<'SH'
           cd /opt/catsdaiko
           docker run --rm --pid=container:catsdaiko-app-1 --cap-add SYS_PTRACE python:3.12-slim sh -c '
@@ -62,5 +65,5 @@ jobs:
             done'
           SH
           sed -i 's/^          //' /tmp/s.sh
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/s.sh 2>&1 | cut -c1-220 | head -80 || true
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "bash -s" < /tmp/s.sh 2>&1 | cut -c1-220 | head -80 || true
 

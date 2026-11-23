@@ -29,6 +29,18 @@ if command -v iptables >/dev/null 2>&1; then
   done
 fi
 
+# 2.5) SSH の総当たり対策（fail2ban：同じ相手が5回まちがえたら、しばらく接続を断る）。入っていなければ入れる
+if ! command -v fail2ban-client >/dev/null 2>&1; then
+  apt-get -o DPkg::Lock::Timeout=120 install -y fail2ban python3-systemd >/dev/null 2>&1 || true
+fi
+if command -v fail2ban-client >/dev/null 2>&1; then
+  mkdir -p /etc/fail2ban/jail.d
+  [ -f /etc/fail2ban/jail.d/catsdaiko-sshd.local ] || printf '[sshd]\nenabled = true\nbackend = systemd\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' > /etc/fail2ban/jail.d/catsdaiko-sshd.local
+  systemctl enable --now fail2ban >/dev/null 2>&1 || true
+  fail2ban-client reload >/dev/null 2>&1 || true
+  echo "fail2ban: $(systemctl is-active fail2ban 2>/dev/null) / $(fail2ban-client status sshd 2>/dev/null | grep -E 'Total banned' | tr -s ' \t' ' ' | sed 's/^[ |`-]*//')"
+fi
+
 # 3) 配置
 mkdir -p "$APP_DIR/data"
 chmod 700 "$APP_DIR" "$APP_DIR/data"

@@ -34,13 +34,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run
         run: |
+          printf '%s\n' "catsdaiko-vps ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMLnUFRvzEm5QonTRI5scQR80MPT9fzYlXKxAmFEb1N" > "$HOME/.vps_known_hosts"   # つなぐ相手が本物の VPS か確かめる（deploy/vps/known_hosts と同じ）
           if [ "${{ github.event_name }}" = "push" ]; then
             STEP=$(sed -n 1p xbot/deploy/run.txt | tr -d '[:space:]')
             XBOT_DOMAIN=$(sed -n 2p xbot/deploy/run.txt | tr -d '[:space:]')
           fi
           echo "step=$STEP domain=$XBOT_DOMAIN"
           sudo apt-get install -y sshpass >/dev/null
-          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no root@$VPS_HOST"
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=yes -o HostKeyAlias=catsdaiko-vps -o UserKnownHostsFile=$HOME/.vps_known_hosts -o PreferredAuthentications=password -o PubkeyAuthentication=no root@$VPS_HOST"
           case "$STEP" in
             install)
               [ -n "$XBOT_ADMIN_PASSWORD" ] || { echo "XBOT_ADMIN_PASSWORD のシークレットがありません"; exit 1; }
