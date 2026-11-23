@@ -180,6 +180,14 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <div id="resumeList"></div>
 </section>
 
+<details id="s-claim" class="card">
+  <summary><b>画面を閉じた・別の端末で続けたい方へ</b></summary>
+  <p class="note">お支払い済みで止まってしまった注文は、<b>再送金なし</b>でもう一度実行できます（画像認証で止まった場合もこちらから）。控えた<b>注文番号</b>を入れて「再開」を押してください。同じブラウザなら、上の「このブラウザの注文」に出ます。</p>
+  <label class="field"><span>注文番号</span><input id="claimNo" type="text" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="注文番号"></label>
+  <p class="err" id="claimErr"></p>
+  <div class="row"><button class="btn primary" id="claimGo" type="button">再開</button></div>
+</details>
+
 <div class="foot"><p>TN SHOP ／ お問い合わせ：X <b>@paysms1212</b></p><p>v{{ version }} ／ あなたの番号 {{ uid }}</p></div>
 </main>
 
@@ -544,6 +552,30 @@ async function loadResume(auto){
     box.append(d);
   });
   if(list.some(o=>['hold','paying','starting'].includes(o.state)||(o.state==='started'&&o.job))) startOrderWatch(); else stopOrderWatch();
+}
+
+/* ---------- 別の端末・画面を閉じた場合：注文番号で再開 ---------- */
+async function claimOrder(){
+  const el=$('#claimNo'); const no=(el.value||'').trim();
+  const err=$('#claimErr'); err.textContent='';
+  if(!no){ err.textContent='注文番号を入れてください。'; return; }
+  const btn=$('#claimGo'); btn.disabled=true;
+  try{
+    const r=await api('/api/orders/'+encodeURIComponent(no)+'/claim',{method:'POST'});
+    let j={}; try{ j=await r.json(); }catch(e){}
+    if(!r.ok){ err.textContent=j.error||'再開できませんでした。番号を確認してください。'; return; }
+    el.value='';
+    await loadResume();
+    $('#s-resume').hidden=false;
+    $('#s-resume').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){ err.textContent='通信に失敗しました。少し待ってからお試しください。'; }
+  finally{ btn.disabled=false; }
+}
+if(PAYMENTS){
+  $('#claimGo').addEventListener('click',claimOrder);
+  $('#claimNo').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); claimOrder(); } });
+}else{
+  const c=$('#s-claim'); if(c) c.hidden=true;
 }
 
 syncMode(); renderCart(); loadResume();

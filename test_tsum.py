@@ -564,6 +564,17 @@ class Page(unittest.TestCase):
         tsum = client.get("/tsum").get_data(as_text=True)
         self.assertIn('href="/"', tsum)
 
+    def test_tsum_page_can_resume_a_paid_order_by_number(self):
+        """ツムツムの画面に「注文番号で再開」の入口がある（別端末・画面を閉じた・画像認証で止まった人向け）。
+        バックエンドの /api/orders/<id>/claim は test_order_flow で担保。ここは画面側の導線が消えないよう固定する。"""
+        tsum = A.app.test_client().get("/tsum").get_data(as_text=True)
+        self.assertIn('id="claimNo"', tsum)
+        self.assertIn('id="claimGo"', tsum)
+        self.assertIn("/api/orders/'+encodeURIComponent(no)+'/claim", tsum)
+        # にゃんこ側にも元からある（両方の画面で再開できる）
+        nyanko = A.app.test_client().get("/nyanko").get_data(as_text=True)
+        self.assertIn('id="claimNo"', nyanko)
+
     def test_old_entry_redirects_to_nyanko(self):
         client = A.app.test_client()
         r = client.get("/?game=nyanko")
