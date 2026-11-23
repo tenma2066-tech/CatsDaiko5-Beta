@@ -446,16 +446,22 @@ class Captcha(unittest.TestCase):
 
 
 class Page(unittest.TestCase):
-    def test_page_opens_and_links_both_ways(self):
+    def test_page_opens_with_every_menu(self):
         client = A.app.test_client()
         tsum = client.get("/tsum")
         self.assertEqual(tsum.status_code, 200)
         body = tsum.get_data(as_text=True)
-        self.assertIn('href="/"', body)
         for key in T.MENUS:
             self.assertIn(f'data-key="{key}"', body)
+
+    def test_the_two_shops_do_not_link_to_each_other(self):
+        """入口は分けている（にゃんこの画面からツムツムへ、またはその逆の導線を作らない）。"""
+        client = A.app.test_client()
         main = client.get("/").get_data(as_text=True)
-        self.assertIn('href="/tsum"', main)
+        self.assertNotIn('href="/tsum"', main)
+        tsum = client.get("/tsum").get_data(as_text=True)
+        self.assertNotIn('href="/"', tsum)
+        self.assertNotIn("にゃんこ代行へ", tsum)
 
 
 if __name__ == "__main__":
