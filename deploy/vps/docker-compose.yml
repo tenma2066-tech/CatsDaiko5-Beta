@@ -11,6 +11,7 @@ services:
       PAYPAY_DATA_DIR: /data/paypay
       PAYPAY_LEDGER_PATH: /data/paypay/payments.sqlite3
       ADMIN_PASSWORD_FILE: /run/admin/admin_password
+      SESSION_COOKIE_SECURE: "1"    # ログインの Cookie を HTTPS のときだけ送る（Caddy が HTTPS にしている）
     volumes:
       - ./data:/data
       - ./admin_password:/run/admin/admin_password:ro

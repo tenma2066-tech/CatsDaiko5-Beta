@@ -53,3 +53,4 @@ jobs:
           python -m unittest -v test_paypay_hold.py
           python -m unittest -v test_paypay_gateway.py
           python -m unittest -v test_github_runtime_store.py
+          python -m unittest -v test_security.py

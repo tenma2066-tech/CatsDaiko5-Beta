@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
     # 配布条件や Docker 除外設定だけを更新した時の反映は workflow_dispatch を使う。
-    paths-ignore: [".dockerignore", ".github/workflows/vps-deploy.yml", "**.md", "docs/**", ".github/workflows/vps-diag.yml", ".github/workflows/diag.yml", "exchange/**", ".github/workflows/exchange-deploy.yml", "xbot/**", ".github/workflows/xbot-*.yml"]
+    paths-ignore: [".dockerignore", ".github/workflows/vps-deploy.yml", "**.md", "docs/**", ".github/workflows/vps-diag.yml", ".github/workflows/diag.yml", "exchange/**", ".github/workflows/exchange-deploy.yml", "xbot/**", ".github/workflows/xbot-*.yml", ".github/workflows/health-watch.yml"]
   workflow_dispatch:
     inputs:
       allow_running:

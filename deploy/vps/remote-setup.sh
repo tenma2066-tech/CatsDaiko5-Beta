@@ -52,6 +52,50 @@ fi
 [ -f admin_password ] || (umask 077; : > admin_password)
 chmod 600 admin_password
 
+# 4.5) バックアップ（毎日自動＋入れ替えの前）。注文・台帳・設定・暗号鍵を /opt/catsdaiko/backups に残す（root だけが読める）
+cat > "$APP_DIR/backup.sh" <<'SH'
+#!/bin/sh
+# 使い方: backup.sh [daily|predeploy]   daily は14個、predeploy は10個まで残す
+set -eu
+D=/opt/catsdaiko; B=$D/backups; KIND=${1:-daily}
+umask 077; mkdir -p "$B"; chmod 700 "$B"
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/data"
+cp -a "$D/data/." "$T/data/" 2>/dev/null || true
+# 台帳（SQLite）は使用中でも壊れない写し方で取り直す
+for f in $(find "$D/data" -name '*.sqlite3' 2>/dev/null); do
+  rel=${f#"$D/data/"}
+  python3 -c 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()' "$f" "$T/data/$rel" 2>/dev/null || true
+done
+for f in .env admin_password; do [ -f "$D/$f" ] && cp -a "$D/$f" "$T/"; done
+OUT="$B/$(date +%Y%m%d-%H%M%S)-$KIND.tar.gz"
+tar czf "$OUT" -C "$T" . && chmod 600 "$OUT"
+KEEP=14; [ "$KIND" = predeploy ] && KEEP=10
+ls -1t "$B"/*-"$KIND".tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+echo "backup: $OUT"
+SH
+chmod 700 "$APP_DIR/backup.sh"
+cat > /etc/systemd/system/catsdaiko-backup.service <<'UNIT'
+[Unit]
+Description=にゃんこ代行のバックアップ（注文・台帳・設定）
+[Service]
+Type=oneshot
+ExecStart=/opt/catsdaiko/backup.sh daily
+UNIT
+cat > /etc/systemd/system/catsdaiko-backup.timer <<'UNIT'
+[Unit]
+Description=にゃんこ代行のバックアップを毎日行う
+[Timer]
+OnCalendar=*-*-* 04:20:00
+Persistent=true
+RandomizedDelaySec=600
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now catsdaiko-backup.timer >/dev/null 2>&1 || true
+[ -d "$APP_DIR/data" ] && "$APP_DIR/backup.sh" predeploy || true
+
 # 5) 先にビルド（今のサイトは動いたまま）
 docker compose build
 
