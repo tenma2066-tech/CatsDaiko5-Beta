@@ -1349,8 +1349,24 @@ function rvHash(t){ let h=5381; t=String(t||''); for(let i=0;i<t.length;i++) h=(
 function rvLoad(){ try{ return JSON.parse(localStorage.getItem(RVKEY)||'[]'); }catch(e){ return []; } }
 let rvOk=new Set(rvLoad()), rvWait=[];
 function rvKeys(result){ return resultPairs(result).map(p=>rvHash(p[1].transfer)); }
-function needReview(result){ return !!result&&rvKeys(result).some(k=>!rvOk.has(k)); }
-function rvOpen(result,then){ if(result) rvWait.push(result); if(then) rvThen.push(then); $('#reviewPanel').hidden=false; document.body.style.overflow='hidden'; }
+function rvSave(){ try{ localStorage.setItem(RVKEY,JSON.stringify([...rvOk].slice(-200))); }catch(e){} }
+/* 「X でリプライする」を押した時刻は端末に残す。X のアプリ内ブラウザではページが移動し、iPhone では
+   裏に回ったタブが捨てられることがあるため、戻ってきてページが読み込み直されても覚えておく。 */
+const RV_WAIT=20, RVCLICK='nyanko-review-click', RV_GRANT=30*60*1000;
+function rvClickAt(){ try{ const v=JSON.parse(localStorage.getItem(RVCLICK)||'null'); return v&&typeof v.t==='number'&&Date.now()-v.t<RV_GRANT?v.t:0; }catch(e){ return 0; } }
+function rvGranted(){ const t=rvClickAt(); return !!t&&Date.now()-t>=RV_WAIT*1000; }
+function needReview(result){
+  if(!result) return false;
+  const miss=rvKeys(result).filter(k=>!rvOk.has(k));
+  if(!miss.length) return false;
+  if(rvGranted()){ miss.forEach(k=>rvOk.add(k)); rvSave(); return false; }   /* 押してから20秒たっている */
+  return true;
+}
+function rvOpen(result,then){
+  if(result) rvWait.push(result); if(then) rvThen.push(then);
+  if(rvGranted()){ setTimeout(rvUnlock,0); return; }
+  $('#reviewPanel').hidden=false; document.body.style.overflow='hidden'; rvTick();
+}
 let rvThen=[];
 function rvApply(){
   [['#donePanel',window.__doneResult],['#res',window.__resResult]].forEach(([q,r])=>{ const e=$(q); if(e) e.classList.toggle('rvlock',needReview(r)); });
@@ -1358,24 +1374,32 @@ function rvApply(){
 }
 /* リプライ画面を開いてから、少なくとも RV_WAIT 秒たって、この画面に戻ってきたらコードを表示する。
    本当にリプライしたかは確かめられない（X の API が必要）ので、「書く時間を取ってもらう」ところまで。 */
-const RV_WAIT=20;
-let rvClicked=0, rvTimer=null;
+let rvClicked=rvClickAt(), rvTimer=null;
 function rvTick(){
+  if(!rvClicked) rvClicked=rvClickAt();          /* 別のタブで押した・読み込み直した */
   if(!rvClicked) return;
   const left=Math.ceil(RV_WAIT-(Date.now()-rvClicked)/1000);
   if(left<=0){ clearInterval(rvTimer); rvTimer=null; rvClicked=0; rvUnlock(); return; }
+  if(!rvTimer) rvTimer=setInterval(rvTick,1000);
+  $('#reviewLink').textContent='💬 もう一度リプライ画面を開く';
   if(document.visibilityState==='visible') $('#reviewWait').textContent='リプライが済んだら、そのままお待ちください（あと '+left+' 秒でコードが表示されます）';
 }
-function rvStart(){ if(!rvClicked){ rvClicked=Date.now(); rvTimer=setInterval(rvTick,1000); } $('#reviewLink').textContent='💬 もう一度リプライ画面を開く'; }
+function rvStart(){
+  if(!rvClicked){ rvClicked=Date.now(); try{ localStorage.setItem(RVCLICK,JSON.stringify({t:rvClicked})); }catch(e){} }
+  rvTick();
+}
 $('#reviewLink').addEventListener('click',rvStart);
 $('#reviewPost').addEventListener('click',rvStart);
 document.addEventListener('visibilitychange',rvTick);
+window.addEventListener('pageshow',rvTick);      /* 戻るボタンで戻ってきたとき（ページの保存から復元） */
+window.addEventListener('focus',rvTick);
+if(rvClicked) setTimeout(rvTick,0);              /* 読み込み直したとき：押した時刻から続きを数える */
 function rvUnlock(){
   /* 待っていた結果を見られるようにする（X のアプリに移っても、戻ってきたら表示されている） */
   rvWait.forEach(r=>rvKeys(r).forEach(k=>rvOk.add(k)));
   [window.__doneResult,window.__resResult].forEach(r=>{ if(r) rvKeys(r).forEach(k=>rvOk.add(k)); });
   rvWait=[];
-  try{ localStorage.setItem(RVKEY,JSON.stringify([...rvOk].slice(-200))); }catch(e){}
+  rvSave();
   $('#reviewPanel').hidden=true; if($('#donePanel').hidden&&$('#payPanel').hidden&&$('#helpPanel').hidden) document.body.style.overflow='';
   rvApply();
   const t=rvThen; rvThen=[]; setTimeout(()=>t.forEach(f=>{ try{ f(); }catch(e){} }),0);
