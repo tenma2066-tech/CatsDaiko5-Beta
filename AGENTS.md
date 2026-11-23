@@ -20,7 +20,7 @@ Claude Code で作業する場合は、さらに **`docs/CLAUDE_GUIDE.md`**（Cl
 
 | システム | 何か | 本番 URL | 動かし方 |
 |---|---|---|---|
-| **にゃんこ代行**（お店） | 「にゃんこ大戦争」のセーブデータ編集を代行する Web サービス。PayPay で支払うと自動で処理して引継ぎコードを返す。運営名 **TN SHOP**、連絡先 X `@paysms1212` | https://nyanko-daiko-tnshop.duckdns.org/ （管理画面 `/admin`） | VPS の Docker（`/opt/catsdaiko`、app ＋ Caddy） |
+| **にゃんこ代行**（お店） | 「にゃんこ大戦争」のセーブデータ編集を代行する Web サービス。PayPay で支払うと自動で処理して引継ぎコードを返す。別の大メニューとして**ツムツム代行**（`/tsum`・`docs/TSUM.md`）もある。運営名 **TN SHOP**、連絡先 X `@paysms1212` | https://nyanko-daiko-tnshop.duckdns.org/ （管理画面 `/admin`） | VPS の Docker（`/opt/catsdaiko`、app ＋ Caddy） |
 | **xbot**（オーナー専用） | X（旧Twitter）の予約投稿・定期投稿・DM 自動返信。X の API は使わず、サーバーのブラウザ（Playwright）で操作する | https://tnshop-xbot.duckdns.org/ | VPS の systemd（`xbot-web`・`xbot-worker`、`/opt/xbot`、データ `/var/lib/xbot`） |
 | `exchange/` | オーナーが別に追加したサービス。**この手引きの対象外**。お店・xbot の作業では触らない | — | `exchange-deploy.yml` |
 
@@ -37,6 +37,7 @@ Claude Code で作業する場合は、さらに **`docs/CLAUDE_GUIDE.md`**（Cl
 | `engine.py` | bcsfe（セーブ編集ライブラリ）を使った実際の編集。アイテム付与、キャラ解放・レベル・形態・本能、ステージクリア、レジェンド段階 `LEGEND_TIERS`・`clear_legend_crowns`、イベステ `clear_event_map`、施設レベル |
 | `paypay_gateway.py` | PayPay の受け取り（非公式 API）、台帳（SQLite：`links`・`history`・`coupons`）、クーポン（10%引き `NK-`・無料 `FR-`） |
 | `item_catalog.py` | アイテムの種類名（キャッツアイ・マタタビ・本能玉など） |
+| `tsum_service.py`・`tsum_engine/` | **ツムツム代行**（もう1つの大メニュー。画面は `/tsum`）。`tsum_engine/` は依頼主の Discord 版から持ってきた素のスクリプトで、中身は変えない。くわしくは `docs/TSUM.md` |
 | `event_maps.json` | イベントステージ一覧（ゲームデータ 15.7.2 から作成）。`reqs`＝前提、`drops`＝ドロップキャラ `[内部ID, 形態]`、`cat`＝イベント／コラボ（コラボは選べないが、古い注文のため実行用には残す） |
 | `save_audit.py`・`save_repair.py` | バン保証（セーブの検査・修復） |
 | `pricing.py` | 料金の計算（`compute_amount` など。サーバー側の正）。画面の見積もりはこれに合わせる |
@@ -70,6 +71,7 @@ Claude Code で作業する場合は、さらに **`docs/CLAUDE_GUIDE.md`**（Cl
 | `docs/VPS_DEPLOY.md` | VPS の設置手順 |
 | `docs/CLAUDE_GUIDE.md` | Claude Code で作業するときの補足（反映の確かめ方・`main` への入れ方・してはいけないこと） |
 | `docs/AUDIT_PLAN.md` | お店のセキュリティ・不具合の精査結果と補修計画（P0〜P3）。直したら表を更新する |
+| `docs/TSUM.md` | ツムツム代行の作り（メニュー・料金・アカウントの入れ方・画像認証・設定・更新のしかた） |
 
 ---
 
@@ -97,6 +99,15 @@ Claude Code で作業する場合は、さらに **`docs/CLAUDE_GUIDE.md`**（Cl
 - イベステ：1マップごと `other`。注文の中では `others` に `EV:<マップID>` として入る。前提（`reqs`）を満たさないと選べない
 - クラッシュ解除 `crash`、プレイ時間 10分ごと `playtime10`、バン保証 `ban_guarantee`、複製 `clone`、初期垢作成 `restart`
 - クーポン：200円以上の注文完了で10%引き（`NK-`、30日）。管理者発行の無料（`FR-`、1回だけ0円）
+
+### ツムツム代行（もう1つの大メニュー）
+- 画面は `/tsum`（`templates/tsum.html`）。にゃんこの画面の「何をしますか？」からリンクしている。
+- 注文・支払い・実行枠・クーポンは**にゃんこと共通**（`_place_order`・`/api/orders/<id>/pay`・`_slots`）。実行だけ `tsum_service.py` に分かれる。
+- 料金はメニュー1件ごと（`PRICES` の `tsum_*`。管理画面で変更可）。数量では変わらない。
+- 引き継ぎ番号で受け取ったアカウントは、**失敗しても必ず新しい引き継ぎ情報を発行して返す**（返さないとアカウントに戻れない）。
+- LINE の画像認証は、実行中のプロセス → 画面 → `POST /api/jobs/<id>/captcha` → 実行中のプロセス の順で受け渡す（実行用のパイプは双方向にした）。
+- アカウント情報（メールアドレス・パスワード・引き継ぎ番号）は、画面・ログ・注文の要約・Actions のログに出さない。注文ファイル（`orders.enc`・暗号化）にだけ入る。
+- くわしくは `docs/TSUM.md`。
 
 ### 古い注文のための互換（消さないこと）
 支払い済みの古い注文が残っていることがある。メニュー名やデータの形を変えるときは、**古い名前でも実行できるように残す**（例：`engine.py` の旧レジェンド名、`EVENT_BY_ID` のコラボ分、`ITEMS` から外した「1億DL記念チケット」も engine 側は対応したまま）。
@@ -137,7 +148,7 @@ Claude Code で作業する場合は、さらに **`docs/CLAUDE_GUIDE.md`**（Cl
 pip install -r requirements.txt            # flask, gunicorn, bcsfe, aiohttp, cryptography
 for t in test_new_features test_order_flow test_hold_e2e test_improvements test_item_types \
          test_parallel test_paypay_hold test_paypay_gateway test_cat_customization \
-         test_save_audit test_save_repair test_github_runtime_store test_security; do
+         test_save_audit test_save_repair test_github_runtime_store test_security test_tsum; do
   python3 -m unittest $t || break
 done
 python3 selftest.py                         # 最後が「NG 0件」

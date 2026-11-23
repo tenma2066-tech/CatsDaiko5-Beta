@@ -10,6 +10,7 @@ kill_timeout = "120s"
   PORT = "8080"
   PAYPAY_DATA_DIR = "/data/paypay"
   PAYPAY_LEDGER_PATH = "/data/paypay/payments.sqlite3"
+  TSUM_DATA_DIR = "/data/tsum"
 
 [mounts]
   source = "data"

@@ -1,10 +1,12 @@
 """にゃんこ代行（TN SHOP）のサーバー本体。
 利用者がメニューを選び、PayPay で支払うと、引継ぎコードのセーブデータを編集して新しいコードを返す。
 画面は templates/、料金の計算は pricing.py、セーブ編集は engine.py、PayPay と台帳は paypay_gateway.py。
+ツムツム代行（もう1つの大メニュー）は画面が /tsum、実行が tsum_service.py。注文・支払い・実行枠は共通。
 仕組みとルールは AGENTS.md を読むこと。
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import importlib.metadata
@@ -33,10 +35,11 @@ import logging
 import paypay_gateway
 import save_audit
 import save_repair
+import tsum_service
 from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py からも同じ名前で使えるようにしている
     COUPON_DAYS, COUPON_MIN, CRASH_ITEMS, DB_OFFSET, EV_PREFIX, EVENT_BY_ID, EVENT_MAPS, EVENT_SELECTABLE, PRICE_LABELS, PRICES,
     PT_KEY, PT_MAX_MINUTES, PT_MIN_MINUTES, RESTART_KEY, _ALL_EVENT_MAPS, _event_ids, _legend_kinds, _load_event_maps,
-    _one_legend_tier, chara_units, compute_amount,
+    _one_legend_tier, chara_units, compute_amount, compute_tsum_amount,
 )
 
 APP_VERSION = "1.15"
@@ -445,6 +448,10 @@ _load_learned()                        # 前回までに見かけた最新ゲー
 _load_names_cache()                   # 前回取得したキャラ名があれば読み込む
 JOB_TTL = 30 * 60                     # 結果は30分で消す
 TOTAL_STEPS = 4
+TSUM_TOTAL_STEPS = 6                  # ツムツム代行の段取り（回線→ログイン→接続→取得→実行→発行）
+TSUM_CAPTCHA_WAIT = 240               # 画像認証（CAPTCHA）の入力を待つ秒数
+_job_pipes: dict[str, object] = {}    # 実行中のジョブへ送る口（画像認証の答えを渡すのに使う）
+_job_pipes_lock = threading.Lock()
 
 
 def _parallel_state_locked() -> dict:
@@ -653,6 +660,85 @@ def _publish_job(job: dict) -> None:
         pass
 
 
+def _lock_subject(job: dict, arguments: tuple) -> str:
+    """同じアカウントを同時に処理しないための鍵。にゃんこは引継ぎコード、ツムツムはログインID。"""
+    if job.get("mode") == "tsum":
+        payload = arguments[0] if arguments else {}
+        return "tsum:" + str((payload or {}).get("login") or "")
+    return str(arguments[0] or "") if arguments else ""
+
+
+def _tsum_captcha(job: dict, img_bytes: bytes) -> str:
+    """画像認証（CAPTCHA）を利用者に見せて、入力された文字を受け取る。
+    画像はジョブに持たせて画面へ流し、答えは親プロセスからパイプで届く。"""
+    if _worker_pipe is None:
+        return ""
+    try:
+        image = "data:image/png;base64," + base64.b64encode(img_bytes or b"").decode("ascii")
+    except Exception:  # noqa: BLE001
+        return ""
+    job["captcha"] = {"image": image, "asked": time.time(), "wait": TSUM_CAPTCHA_WAIT}
+    _log(job, "画像認証（CAPTCHA）が出ました。画面に出た文字を入力してください。")
+    text = ""
+    deadline = time.time() + TSUM_CAPTCHA_WAIT
+    try:
+        while time.time() < deadline:
+            if _worker_pipe.poll(1.0):
+                message = _worker_pipe.recv()
+                if isinstance(message, dict) and "captcha" in message:
+                    text = str(message.get("captcha") or "").strip()[:32]
+                    break
+    except (EOFError, OSError):
+        pass
+    job["captcha"] = None
+    if not text:
+        _log(job, "画像認証の入力がありませんでした。")
+    _publish_job(job)
+    return text
+
+
+def _run_tsum_job(job: dict, payload: dict) -> None:
+    """ツムツム代行1件を実行する（ワーカープロセスの中）。アカウント情報はログに出さない。"""
+    def log(text: str) -> None:
+        _log(job, str(text))
+
+    def progress(step: int, text: str) -> None:
+        job["step"] = max(0, min(int(step or 0), TSUM_TOTAL_STEPS))
+        _log(job, str(text))
+
+    def captcha(img_bytes):
+        return _tsum_captcha(job, img_bytes)
+
+    try:
+        out = tsum_service.run_order(
+            payload.get("mode", "line"), payload.get("login", ""), payload.get("password", ""),
+            payload.get("menus") or [], payload.get("qty") or {},
+            progress=progress, log=log, captcha=captcha,
+        )
+    except Exception as exc:  # noqa: BLE001  中身にアカウント情報が入りうるので種類だけ出す
+        job.update(status="error", error=f"ツムツム代行の実行中にエラーが発生しました（{type(exc).__name__}）。"
+                                        "もう一度お試しいただくか、注文番号を管理者にお伝えください。",
+                   finished=time.time())
+        _log(job, "エラー: 実行中に想定外のエラーが発生しました。")
+        _publish_job(job)
+        return
+    job["tsum"] = {"lines": out["lines"], "moved": bool(out["moved"]), "done": int(out["done"]),
+                   "menus": [tsum_service.menu_label(k) for k in (payload.get("menus") or [])]}
+    if out["transfer"]:
+        job["result"] = {"transfer": out["transfer"], "confirm": out["confirm"]}
+    if out["ok"]:
+        job.update(status="done", step=TSUM_TOTAL_STEPS)
+        _log(job, "完了しました。")
+    else:
+        job["status"] = "error"
+        job["error"] = out["error"] or "ツムツム代行を実行できませんでした。"
+        # 引き継ぎでアカウントがこちらに移ったあとの失敗は、新しい引き継ぎ情報が結果欄に出る
+        job["outcome_unknown"] = bool(out["moved"] and not out["transfer"])
+        _log(job, "エラー: " + job["error"])
+    job["finished"] = time.time()
+    _publish_job(job)
+
+
 def _worker_entry(pipe, job, arguments, slot, learned_version, names):
     """Run BCSFE in its own process and its own persistent slot directory."""
     global _worker_pipe, _bcsfe_base, _NAMES_FILE, _VERSION_FILE
@@ -665,8 +751,9 @@ def _worker_entry(pipe, job, arguments, slot, learned_version, names):
         os.makedirs(lock_dir, mode=0o700, exist_ok=True)
         with ExitStack() as locks:
             paths = [os.path.join(lock_dir, f"slot-{slot}")]
-            if arguments[0]:
-                digest = hmac.new(app.secret_key.encode(), arguments[0].encode(), hashlib.sha256).hexdigest()
+            subject = _lock_subject(job, arguments)
+            if subject:
+                digest = hmac.new(app.secret_key.encode(), subject.encode(), hashlib.sha256).hexdigest()
                 paths.append(os.path.join(lock_dir, f"transfer-{digest}"))
             for path in paths:
                 lock_file = locks.enter_context(open(path, "a"))
@@ -674,6 +761,11 @@ def _worker_entry(pipe, job, arguments, slot, learned_version, names):
                     fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError as exc:
                     raise RuntimeError("同じ実行枠または引継ぎコードの処理がまだ実行中です。") from exc
+
+            if job.get("mode") == "tsum":
+                # ツムツム代行は bcsfe（にゃんこのセーブ編集）を使わないので、その準備はしない
+                _run_tsum_job(job, arguments[0])
+                return
 
             original_config = engine.core.Path.get_config_folder().to_str()
             os.environ["XDG_CONFIG_HOME"] = os.path.join(_bcsfe_base, "config-home")
@@ -759,6 +851,8 @@ def _start_queued_jobs_locked() -> None:
 
 
 def _monitor_worker(pipe, process, job_id: str, slot: int, transfer_key: bytes | None) -> None:
+    with _job_pipes_lock:
+        _job_pipes[job_id] = pipe
     try:
         while True:
             message = pipe.recv()
@@ -769,14 +863,18 @@ def _monitor_worker(pipe, process, job_id: str, slot: int, transfer_key: bytes |
     except (EOFError, OSError):
         pass
     finally:
+        with _job_pipes_lock:
+            _job_pipes.pop(job_id, None)
         pipe.close()
         process.join()
         _finish_job(job_id, slot, transfer_key)
 
 
 def _launch_job(job_id: str, job: dict, arguments: tuple, slot: int, transfer_key: bytes | None) -> None:
+    # 双方向にしてあるのは、ツムツム代行の画像認証（CAPTCHA）の答えを実行中のプロセスへ渡すため。
+    # にゃんこ代行の実行では親から何も送らないので、動きは以前と同じ。
     ctx = multiprocessing.get_context("spawn")
-    receiver, sender = ctx.Pipe(duplex=False)
+    receiver, sender = ctx.Pipe(duplex=True)
     with _catalog_lock:
         version, names = _learned["version"], dict(_names)
     process = ctx.Process(target=_worker_entry, args=(sender, job, arguments, slot, version, names))
@@ -1797,12 +1895,18 @@ def _gc_orders() -> None:
             del _orders[k]
 
 
+def _is_tsum_arguments(args) -> bool:
+    """ツムツム代行の注文は、実行用の内容を1つの辞書で持つ（にゃんこは11個の並び）。"""
+    return bool(args) and len(args) == 1 and isinstance(args[0], dict)
+
+
 def _order_to_json(o: dict) -> dict:
     out = {k: v for k, v in o.items() if k not in ("arguments", "transfer_key")}
     args = o.get("arguments")
     if args is not None:
         a = list(args)
-        a[7] = {str(k): v for k, v in a[7].items()}  # cat_settings のキーを文字列に
+        if not _is_tsum_arguments(args):
+            a[7] = {str(k): v for k, v in a[7].items()}  # cat_settings のキーを文字列に
         out["arguments"] = a
     tk = o.get("transfer_key")
     out["transfer_key"] = tk.hex() if tk else None
@@ -1813,7 +1917,8 @@ def _order_from_json(o: dict) -> dict:
     out = dict(o)
     if out.get("arguments") is not None:
         a = list(out["arguments"])
-        a[7] = {int(k): v for k, v in a[7].items()}
+        if not _is_tsum_arguments(a):
+            a[7] = {int(k): v for k, v in a[7].items()}
         out["arguments"] = tuple(a)
     out["transfer_key"] = bytes.fromhex(out["transfer_key"]) if out.get("transfer_key") else None
     if out.get("state") == "paying":  # 決済確認中に再起動した → 同じリンクを再確認できる保留へ
@@ -1960,6 +2065,19 @@ def index():
     )
 
 
+@app.get("/tsum")
+def tsum_page():
+    """ツムツム代行の画面（にゃんこ代行とは別の大メニュー）。"""
+    menus = [dict(key=k, **{kk: vv for kk, vv in v.items() if kk != "price"},
+                  amount=PRICES.get(v["price"], 0))
+             for k, v in sorted(tsum_service.MENUS.items(), key=lambda kv: kv[1]["order"])]
+    return render_template_string(
+        TSUM_HTML, menus=menus, modes=tsum_service.MODE_LABELS, solo=list(tsum_service.SOLO_MENUS),
+        is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
+        coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=TSUM_TOTAL_STEPS,
+    )
+
+
 _drain_until = 0.0
 
 
@@ -2094,6 +2212,161 @@ def _clean_run_body(data):
     return out
 
 
+
+
+def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdown: list, summary: str,
+                 skipped: list, coupon_raw: str):
+    """注文を作る（支払い待ち）。クーポン・未払い注文の整理・支払い済みの充当は、にゃんこ代行と
+    ツムツム代行で共通。金額と内訳と要約は、メニューごとに呼び出し側が計算して渡す。"""
+    _gc_orders()
+    _reconcile_orders()
+    coupon = unicodedata.normalize("NFKC", str(coupon_raw or "")).strip().upper().replace(" ", "")[:20]
+    base_amount = amount
+    free_coupon = False
+    if coupon:
+        # 同じ人が支払う前に注文を作り直したとき：前の（未払いの）注文が押さえているクーポンを、新しい注文へ移す
+        me0 = _owner()
+        with _orders_lock:
+            stale = [k for k, o in _orders.items() if o["owner"] == me0 and o["state"] == "unpaid"
+                     and o.get("coupon") == coupon and not o.get("coupon_used")]
+            for k in stale:
+                _orders[k].update(state="dead", coupon=None, diag="superseded: クーポンを新しい注文へ移しました")
+        for k in stale:
+            try:
+                paypay_gateway.coupon_release(coupon, k)
+            except Exception:  # noqa: BLE001
+                _log_orders.exception("coupon release failed")
+        ok, why = paypay_gateway.coupon_check(coupon)
+        if ok and paypay_gateway.coupon_kind(coupon) == "free":
+            if _draining():
+                return _updating_response()
+            free_coupon = True
+            amount = 0           # 管理者が発行した無料クーポン：金額に関係なく1回だけ0円
+            breakdown.append({"label": f"無料クーポン {coupon}", "count": 1, "unit": -base_amount})
+        else:
+            if base_amount < COUPON_MIN:
+                return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
+            if not ok:
+                return jsonify(error=why, code="coupon_invalid"), 400
+            amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
+            breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount})
+    me = _owner()
+    trimmed_coupons = []
+    with _orders_lock:
+        # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）
+        credit = next((k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
+                       if o["owner"] == me and o["state"] == "paid" and o.get("retry")
+                       and (o["amount"] >= amount or o.get("free_coupon"))), None)
+        if credit:
+            o = _orders[credit]
+            breakdown = [b for b in breakdown if not str(b.get("label", "")).startswith("クーポン")]   # 支払い済みを充てるので、クーポンは使わない
+            o.update(job=job, arguments=arguments, transfer_key=transfer_key, breakdown=breakdown, skipped=skipped, summary=summary)
+            paid_amount = o["amount"]
+        else:
+            # 1人の未払いの注文が多すぎたら、入金リンクのない古いものから閉じる（メモリ・保存ファイルが増え続けないように）
+            mine = sorted(((k, o) for k, o in _orders.items() if o["owner"] == me and o["state"] == "unpaid" and not o.get("link_code")),
+                          key=lambda kv: kv[1]["created"])
+            for k, o in mine[:max(0, len(mine) - (MAX_UNPAID_PER_OWNER - 1))]:
+                _orders.pop(k, None)
+                if o.get("coupon") and not o.get("coupon_used"):
+                    trimmed_coupons.append((o["coupon"], k))
+            order_id = secrets.token_urlsafe(16)
+            _orders[order_id] = {"owner": me, "uid": _uid(me), "state": "unpaid", "amount": amount, "created": time.time(),
+                                 "job": job, "arguments": arguments, "transfer_key": transfer_key,
+                                 "breakdown": breakdown, "skipped": skipped, "summary": summary,
+                                 "coupon": coupon or None, "base_amount": base_amount}
+    for c, k in trimmed_coupons:          # 閉じた古い注文が押さえていたクーポンは、使えるように戻す
+        try:
+            paypay_gateway.coupon_release(c, k)
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("coupon release failed")
+    if coupon and not credit:
+        if not paypay_gateway.coupon_reserve(coupon, order_id):   # 同時に2つの注文で使われないよう押さえる
+            with _orders_lock:
+                _orders.pop(order_id, None)
+            return jsonify(error="このクーポンはすでに使われたか、ほかの注文で使用中です。", code="coupon_invalid"), 400
+    if free_coupon and not credit:
+        # 無料クーポン：支払いは無いので、そのまま「支払い済み」にして開始する（クーポンは開始時に使用済みになる）
+        with _orders_lock:
+            o = _orders[order_id]
+            o.update(state="paid", free_coupon=True, summary="【無料クーポン】" + summary)
+        resp = _start_paid_order(o)
+        _persist_orders()
+        return resp
+    _persist_orders()
+    if credit:
+        return jsonify(order=credit, amount=paid_amount, skipped=skipped, breakdown=breakdown, state="paid", prepaid=True)
+    return jsonify(order=order_id, amount=amount, skipped=skipped, breakdown=breakdown)
+
+
+def _tsum_summary(mode: str, menus: list, qty: dict) -> str:
+    """管理画面に出す注文の要約。アカウント情報（メールアドレス・パスワード）は入れない。"""
+    parts = [tsum_service.MODE_LABELS.get(mode, mode)]
+    for key in menus:
+        value = qty.get(key)
+        parts.append(tsum_service.menu_label(key) + (f"={value:,}" if value is not None else ""))
+    return ("ツムツム代行／" + "／".join(parts))[:400]
+
+
+def _new_tsum_job(mode: str, menus: list) -> dict:
+    return {"status": "running", "step": 0, "log": [], "warn": [], "report": [], "skipped": [],
+            "dry": False, "clone": False, "integrity_only": False, "result": None, "error": None,
+            "created": time.time(), "finished": None, "owner": _owner(),
+            "mode": "tsum", "tsum_mode": mode, "count": len(menus)}
+
+
+def _run_tsum_order(data: dict, admin_free: bool):
+    """ツムツム代行の注文を受け取る（/run のツムツム分）。支払いと実行枠はにゃんこ代行と共通。"""
+    request_body = data.get("tsum") or {}
+    mode = str(request_body.get("mode", "line")).strip()[:8]
+    login = str(request_body.get("login", "")).strip()[:160]
+    password = str(request_body.get("password", ""))[:160]
+    raw_menus = request_body.get("menus") if isinstance(request_body.get("menus"), list) else []
+    raw_qty = request_body.get("qty") if isinstance(request_body.get("qty"), dict) else {}
+    menus, qty, error = tsum_service.validate_order(
+        [str(x) for x in raw_menus if isinstance(x, (str, int)) and not isinstance(x, bool)][:40], raw_qty)
+    if error:
+        return jsonify(error=error), 400
+    if menus == ["tsum_guest_create"]:
+        mode = "new"
+    error = tsum_service.check_account(mode, login, password)
+    if error:
+        return jsonify(error=error), 400
+    if mode == "new":
+        login, password = "", ""
+    if not _rate_ok("tsumrun:" + _client_ip(), 20, 600):   # 1件ごとに LINE へのログインが走るので、連打は止める
+        return _too_fast()
+    payload = {"mode": mode, "login": login, "password": password, "menus": menus, "qty": qty}
+    job = _new_tsum_job(mode, menus)
+    arguments = (payload,)
+    transfer_key = hmac.new(app.secret_key.encode(), ("tsum:" + login).encode(), hashlib.sha256).digest() if login else None
+    if transfer_key is not None:
+        with _jobs_lock:
+            if transfer_key in _active_transfers:
+                return jsonify(error="このアカウントの処理はすでに実行中です。完了までお待ちください。"), 409
+    summary = _tsum_summary(mode, menus, qty)
+    if not PAYMENTS_ENABLED:
+        if _draining():
+            return _updating_response()
+        return _start_job(job, arguments, transfer_key)
+    if admin_free:
+        if _draining():
+            return _updating_response()
+        oid = secrets.token_urlsafe(16)
+        me = _owner()
+        free = {"owner": me, "uid": _uid(me), "state": "paid", "amount": 0, "created": time.time(), "admin_free": True,
+                "job": job, "arguments": arguments, "transfer_key": transfer_key, "breakdown": [], "skipped": [],
+                "summary": "【管理者・無料】" + summary}
+        with _orders_lock:
+            _orders[oid] = free
+        resp = _start_paid_order(free)
+        _persist_orders()
+        return resp
+    amount, rows = compute_tsum_amount(menus, qty)
+    breakdown = [{"label": label, "count": n, "unit": p} for label, n, p in rows]
+    return _place_order(job, arguments, transfer_key, amount, breakdown, summary, [], data.get("coupon", ""))
+
+
 @app.post("/run")
 def run():
     _gc_jobs()
@@ -2103,6 +2376,8 @@ def run():
     data = _clean_run_body(request.get_json(silent=True))
     if data is None:
         return jsonify(error="注文の内容を読み取れませんでした。画面を再読み込みしてから、もう一度お試しください。"), 400
+    if isinstance(data.get("tsum"), dict):
+        return _run_tsum_order(data, admin_free)
     transfer = str(data.get("transfer", "")).strip()[:64]
     confirm = str(data.get("confirm", "")).strip()[:16]
     if bool(transfer) != bool(confirm):
@@ -2264,88 +2539,10 @@ def run():
         resp = _start_paid_order(free)
         _persist_orders()
         return resp
-    _gc_orders()
-    _reconcile_orders()
     amount, rows = compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings)
     breakdown = [{"label": l, "count": n, "unit": p} for l, n, p in rows]
-    coupon = unicodedata.normalize("NFKC", str(data.get("coupon", ""))).strip().upper().replace(" ", "")[:20]
-    base_amount = amount
-    free_coupon = False
-    if coupon:
-        # 同じ人が支払う前に注文を作り直したとき：前の（未払いの）注文が押さえているクーポンを、新しい注文へ移す
-        me0 = _owner()
-        with _orders_lock:
-            stale = [k for k, o in _orders.items() if o["owner"] == me0 and o["state"] == "unpaid"
-                     and o.get("coupon") == coupon and not o.get("coupon_used")]
-            for k in stale:
-                _orders[k].update(state="dead", coupon=None, diag="superseded: クーポンを新しい注文へ移しました")
-        for k in stale:
-            try:
-                paypay_gateway.coupon_release(coupon, k)
-            except Exception:  # noqa: BLE001
-                _log_orders.exception("coupon release failed")
-        ok, why = paypay_gateway.coupon_check(coupon)
-        if ok and paypay_gateway.coupon_kind(coupon) == "free":
-            if _draining():
-                return _updating_response()
-            free_coupon = True
-            amount = 0           # 管理者が発行した無料クーポン：金額に関係なく1回だけ0円
-            breakdown.append({"label": f"無料クーポン {coupon}", "count": 1, "unit": -base_amount})
-        else:
-            if base_amount < COUPON_MIN:
-                return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
-            if not ok:
-                return jsonify(error=why, code="coupon_invalid"), 400
-            amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
-            breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount})
     summary = _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))
-    me = _owner()
-    trimmed_coupons = []
-    with _orders_lock:
-        # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）
-        credit = next((k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
-                       if o["owner"] == me and o["state"] == "paid" and o.get("retry")
-                       and (o["amount"] >= amount or o.get("free_coupon"))), None)
-        if credit:
-            o = _orders[credit]
-            breakdown = [b for b in breakdown if not str(b.get("label", "")).startswith("クーポン")]   # 支払い済みを充てるので、クーポンは使わない
-            o.update(job=job, arguments=arguments, transfer_key=transfer_key, breakdown=breakdown, skipped=skipped, summary=summary)
-            paid_amount = o["amount"]
-        else:
-            # 1人の未払いの注文が多すぎたら、入金リンクのない古いものから閉じる（メモリ・保存ファイルが増え続けないように）
-            mine = sorted(((k, o) for k, o in _orders.items() if o["owner"] == me and o["state"] == "unpaid" and not o.get("link_code")),
-                          key=lambda kv: kv[1]["created"])
-            for k, o in mine[:max(0, len(mine) - (MAX_UNPAID_PER_OWNER - 1))]:
-                _orders.pop(k, None)
-                if o.get("coupon") and not o.get("coupon_used"):
-                    trimmed_coupons.append((o["coupon"], k))
-            order_id = secrets.token_urlsafe(16)
-            _orders[order_id] = {"owner": me, "uid": _uid(me), "state": "unpaid", "amount": amount, "created": time.time(),
-                                 "job": job, "arguments": arguments, "transfer_key": transfer_key,
-                                 "breakdown": breakdown, "skipped": skipped, "summary": summary,
-                                 "coupon": coupon or None, "base_amount": base_amount}
-    for c, k in trimmed_coupons:          # 閉じた古い注文が押さえていたクーポンは、使えるように戻す
-        try:
-            paypay_gateway.coupon_release(c, k)
-        except Exception:  # noqa: BLE001
-            _log_orders.exception("coupon release failed")
-    if coupon and not credit:
-        if not paypay_gateway.coupon_reserve(coupon, order_id):   # 同時に2つの注文で使われないよう押さえる
-            with _orders_lock:
-                _orders.pop(order_id, None)
-            return jsonify(error="このクーポンはすでに使われたか、ほかの注文で使用中です。", code="coupon_invalid"), 400
-    if free_coupon and not credit:
-        # 無料クーポン：支払いは無いので、そのまま「支払い済み」にして開始する（クーポンは開始時に使用済みになる）
-        with _orders_lock:
-            o = _orders[order_id]
-            o.update(state="paid", free_coupon=True, summary="【無料クーポン】" + summary)
-        resp = _start_paid_order(o)
-        _persist_orders()
-        return resp
-    _persist_orders()
-    if credit:
-        return jsonify(order=credit, amount=paid_amount, skipped=skipped, breakdown=breakdown, state="paid", prepaid=True)
-    return jsonify(order=order_id, amount=amount, skipped=skipped, breakdown=breakdown)
+    return _place_order(job, arguments, transfer_key, amount, breakdown, summary, skipped, data.get("coupon", ""))
 
 
 def _start_job(job: dict, arguments: tuple, transfer_key):
@@ -2390,6 +2587,7 @@ VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号�
 
 def _public_order(order_id: str, o: dict) -> dict:
     return {"order": order_id, "amount": o["amount"], "state": o["state"], "created": int(o["created"]), "retry": bool(o.get("retry")),
+            "tsum": (o.get("job") or {}).get("mode") == "tsum",   # ツムツム代行の注文（画面が別なので区別する）
             "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
             "coupon_issued": o.get("coupon_issued"),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
@@ -2654,7 +2852,34 @@ def status(job_id: str):
         result=job["result"], error=job["error"], integrity=job.get("integrity"), integrity_only=job.get("integrity_only", False),
         audit=job.get("audit"),
         repair=job.get("repair"), post_audit=job.get("post_audit"),
+        tsum=job.get("tsum"), captcha=job.get("captcha"),
     )
+
+
+@app.post("/api/jobs/<job_id>/captcha")
+def job_captcha(job_id: str):
+    """ツムツム代行の画像認証（CAPTCHA）の答えを、実行中のプロセスへ渡す。"""
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()[:32]
+    if not text:
+        return jsonify(error="画像に出ている文字を入力してください。"), 400
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        owner = job.get("owner") if job else None
+        waiting = bool(job and job.get("captcha"))
+    if not job or owner != _owner():
+        return jsonify(error="処理が見つかりません。"), 404
+    if not waiting:
+        return jsonify(error="いまは画像認証の入力待ちではありません。"), 409
+    with _job_pipes_lock:
+        pipe = _job_pipes.get(job_id)
+    if pipe is None:
+        return jsonify(error="処理とつながっていません。もう一度実行してください。"), 409
+    try:
+        pipe.send({"captcha": text})
+    except (BrokenPipeError, EOFError, OSError):
+        return jsonify(error="処理とつながっていません。もう一度実行してください。"), 409
+    return jsonify(ok=True)
 
 
 @app.post("/cancel/<job_id>")
@@ -2684,6 +2909,9 @@ ADMIN_HTML = _template("admin.html")   # 管理画面
 
 
 MAIN_HTML = _template("main.html")     # 利用者の画面（HTML・CSS・JavaScript）
+
+
+TSUM_HTML = _template("tsum.html")     # ツムツム代行の画面
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))
