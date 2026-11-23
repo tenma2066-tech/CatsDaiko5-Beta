@@ -1,0 +1,25 @@
+name: VPS host key (read-only)
+# VPS の SSH ホスト鍵（公開してよい情報）を2つの経路で読み、一致するか確かめて表示する。何も変えない。
+# 結果は deploy/vps/known_hosts に置き、ほかのワークフローが「つなぐ相手が本物か」を確かめるのに使う。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/vps-hostkey.yml"]
+permissions:
+  contents: read
+jobs:
+  hostkey:
+    runs-on: ubuntu-24.04
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      SSHPASS: ${{ secrets.VPS_PASSWORD }}
+    steps:
+      - run: |
+          sudo apt-get install -y sshpass >/dev/null
+          A=$(ssh-keyscan -T 15 -t ed25519 "$VPS_HOST" 2>/dev/null | awk '{print $2" "$3}')
+          B=$(sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no "root@$VPS_HOST" "awk '{print \$1\" \"\$2}' /etc/ssh/ssh_host_ed25519_key.pub")
+          echo "scan : catsdaiko-vps $A"
+          echo "inside: catsdaiko-vps $B"
+          [ -n "$A" ] && [ "$A" = "$B" ] && echo "MATCH" || { echo "MISMATCH"; exit 1; }
+          printf '%s\n' "catsdaiko-vps $A" > /tmp/k; ssh-keygen -lf /tmp/k
