@@ -489,14 +489,16 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                 pass
         tid = int(tsum_lv)
         if tid == 0:
-            info = f.get_info()
+            # セット中(setflg)のマイツムを最優先。無ければ所持しているツムから選ぶ。
+            # setflg だけで判定すると、ホーム未設定（前回の「タイトルに戻ります」等で解除）のとき
+            # 所持ツムがあっても「見つかりません」になってしまうため、堅牢な選択器を使う。
+            candidates, info, err = select_play_tsumids(f)
             if not isinstance(info, dict):
                 return None, "接続が不安定なため実行できませんでした。少し待ってからもう一度お試しください。"
-            for t in (info.get("tsuminfo") or []):
-                if t.get("setflg") in (1, "1"):
-                    tid = t.get("tsumid"); break
-            if not tid:
-                return None, "セット中のマイツムが見つかりませんでした。ゲームでマイツムをセットしてから、もう一度お試しください。"
+            if not candidates:
+                return None, (err or "使用できるツムが見つかりませんでした。"
+                              "ゲームでツムを手に入れてから、もう一度お試しください。")
+            tid = candidates[0]
         if progress:
             progress.update(act_stage, "ツムのレベルを上げています...", force=True)
         res = f.max_tsum_level(tid, target=50, min_heart=10, sleep_s=0.3, log=_dbg, auto_fill_coins=auto_fill_coins)

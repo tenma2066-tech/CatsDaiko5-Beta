@@ -340,6 +340,46 @@ class LoginFailureMessages(unittest.TestCase):
         self.assertIn("BAN", describe("アカウントが停止されています（retCode=29）"))
 
 
+class MyTsumSelect(unittest.TestCase):
+    """ツムレベルMAX（セット中マイツム）のツム選択。通信はしない。
+    セット中(setflg)が無くても、所持しているツムから選べること。"""
+    @staticmethod
+    def _core():
+        import os
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsum_engine"))
+        import tsum_core
+        return tsum_core
+
+    def test_prefers_set_mytsum(self):
+        c = self._core()
+        fake = types.SimpleNamespace(get_info=lambda: {
+            "retcode": 0, "userinfo": {},
+            "tsuminfo": [{"tsumid": 5, "lv": 10}, {"tsumid": 1009, "lv": 45, "setflg": 1}]})
+        cands, info, err = c.select_play_tsumids(fake)
+        self.assertIsNone(err)
+        self.assertEqual(cands[0], 1009)   # セット中を先頭に
+
+    def test_falls_back_to_owned_when_none_is_set(self):
+        c = self._core()
+        # どれも setflg なし。所持(lv>0)のツムから選べること（前回の「タイトルに戻ります」で
+        # ホームが解除されていても「マイツム見つかりません」で止まらない）。
+        fake = types.SimpleNamespace(get_info=lambda: {
+            "retcode": 0, "userinfo": {},
+            "tsuminfo": [{"tsumid": 5, "lv": 0}, {"tsumid": 1009, "lv": 45}]})
+        cands, info, err = c.select_play_tsumids(fake)
+        self.assertIsNone(err)
+        self.assertIn(1009, cands)
+
+    def test_errors_only_when_nothing_is_owned(self):
+        c = self._core()
+        fake = types.SimpleNamespace(get_info=lambda: {
+            "retcode": 0, "userinfo": {}, "tsuminfo": [{"tsumid": 5, "lv": 0}]})
+        cands, info, err = c.select_play_tsumids(fake)
+        self.assertFalse(cands)
+        self.assertTrue(err)
+
+
 class GameSync(unittest.TestCase):
     """ゲーム内アクションのデータ同期ずれ(retcode 22)からの復旧。通信はしない。
 
