@@ -116,15 +116,17 @@ if ! command -v tor >/dev/null 2>&1; then
   apt-get -o DPkg::Lock::Timeout=120 install -y tor >/dev/null 2>&1 || true
 fi
 if command -v tor >/dev/null 2>&1; then
-  # localhost と docker のホストゲートウェイ(172.17.0.1)だけに SOCKS を開き、
-  # docker の私設レンジからのみ許可する（外部には公開しない）。
+  # SOCKS を 0.0.0.0:9050 で待ち受ける（docker0 も、compose の独自ブリッジのゲートウェイも、
+  # どのブリッジから来ても届くように）。公開はせず、private レンジからのみ許可する
+  # （外部IPからの利用は tor 自身が拒否する。ホストのファイアウォールは 22/80/443 のみ開放）。
   # IsolateSOCKSAuth により、SOCKS の user:pass が違うと別の出口回線(別IP)になる（tsum_login.fresh_socks_identity が利用）。
   NEW_TORRC=$(printf '%s\n' \
     '# managed by catsdaiko (LINEログインのIPローテーション)。編集しても次のデプロイで上書きされる。' \
-    'SocksPort 127.0.0.1:9050 IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth' \
-    'SocksPort 172.17.0.1:9050 IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth' \
+    'SocksPort 0.0.0.0:9050 IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth' \
     'SocksPolicy accept 127.0.0.0/8' \
+    'SocksPolicy accept 10.0.0.0/8' \
     'SocksPolicy accept 172.16.0.0/12' \
+    'SocksPolicy accept 192.168.0.0/16' \
     'SocksPolicy reject *')
   TOR_CHANGED=0
   if [ "$(cat /etc/tor/catsdaiko.conf 2>/dev/null || true)" != "$NEW_TORRC" ]; then
@@ -133,22 +135,23 @@ if command -v tor >/dev/null 2>&1; then
   fi
   grep -qxF '%include /etc/tor/catsdaiko.conf' /etc/tor/torrc 2>/dev/null \
     || { echo '%include /etc/tor/catsdaiko.conf' >> /etc/tor/torrc; TOR_CHANGED=1; }
-  # docker0(172.17.0.1)が出来てから tor を起動する（起動時にそのIPが無いと bind に失敗するため）
-  mkdir -p /etc/systemd/system/tor@default.service.d
-  DROPIN=$(printf '%s\n' '[Unit]' 'After=docker.service' 'Wants=docker.service' '[Service]' 'Restart=on-failure' 'RestartSec=5')
-  if [ "$(cat /etc/systemd/system/tor@default.service.d/catsdaiko.conf 2>/dev/null || true)" != "$DROPIN" ]; then
-    printf '%s\n' "$DROPIN" > /etc/systemd/system/tor@default.service.d/catsdaiko.conf
-    systemctl daemon-reload >/dev/null 2>&1 || true
-    TOR_CHANGED=1
-  fi
-  systemctl enable tor@default >/dev/null 2>&1 || true
-  if [ "$TOR_CHANGED" = "1" ]; then
-    systemctl restart tor@default >/dev/null 2>&1 || true
-  else
-    systemctl start tor@default >/dev/null 2>&1 || true
-  fi
-  sleep 1
-  echo "tor: $(systemctl is-active tor@default 2>/dev/null || echo inactive) (127.0.0.1/172.17.0.1:9050)"
+  # tor は docker の後に起動させる（systemd のテンプレ単位 tor@default と、まとめ単位 tor の両方に効かせる）
+  for unit in tor@default tor; do
+    mkdir -p "/etc/systemd/system/${unit}.service.d"
+    DROPIN=$(printf '%s\n' '[Unit]' 'After=docker.service' 'Wants=docker.service' '[Service]' 'Restart=on-failure' 'RestartSec=5')
+    if [ "$(cat "/etc/systemd/system/${unit}.service.d/catsdaiko.conf" 2>/dev/null || true)" != "$DROPIN" ]; then
+      printf '%s\n' "$DROPIN" > "/etc/systemd/system/${unit}.service.d/catsdaiko.conf"
+      TOR_CHANGED=1
+    fi
+  done
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable tor@default >/dev/null 2>&1 || systemctl enable tor >/dev/null 2>&1 || true
+  # 設定を反映させる（tor@default を優先。無ければ tor）。確実に効かせるため restart する。
+  systemctl restart tor@default >/dev/null 2>&1 || systemctl restart tor >/dev/null 2>&1 || true
+  sleep 2
+  TOR_ACT="$(systemctl is-active tor@default 2>/dev/null || true)"
+  [ "$TOR_ACT" = active ] || TOR_ACT="$(systemctl is-active tor 2>/dev/null || echo inactive)"
+  echo "tor: ${TOR_ACT}  listen=[$(ss -ltn 2>/dev/null | grep ':9050' | awk '{print $4}' | tr '\n' ' ')]"
 else
   echo "::warning::tor をホストに入れられませんでした。TSUM_SOCKS_URL は無効になり、LINEログインは直接接続のまま動きます。"
 fi
@@ -196,11 +199,28 @@ for i in $(seq 1 30); do
   if docker compose exec -T app python3 -c "$APP_PY" drain 1 >/dev/null 2>&1; then break; fi
   sleep 2
 done
-# app コンテナからホストの Tor(SOCKS 9050)へ届くか確認（届かなければ直接接続で動く＝回転なし）
+# app コンテナからホストの Tor(SOCKS 9050)へ届くか確認し、届かなければ原因切り分け用の情報を出す
+# （届かなくてもアプリは直接接続で動く＝サービスは止まらず、回線の回転だけ無効）
+echo "--- tor 到達診断 ---"
+echo "host docker0: $(ip -4 -o addr show docker0 2>/dev/null | awk '{print $4}')"
+docker compose exec -T app python3 - <<'PY' 2>&1 | sed 's/^/app: /' || true
+import socket, subprocess
+try:
+    gw = subprocess.run(["getent","hosts","host.docker.internal"],capture_output=True,text=True,timeout=5).stdout.strip()
+    print("host.docker.internal ->", gw or "(未解決)")
+except Exception as e:
+    print("getent 失敗", type(e).__name__)
+for host in ("host.docker.internal", "172.17.0.1"):
+    try:
+        socket.create_connection((host, 9050), timeout=4)
+        print(host, "9050 OK")
+    except Exception as e:
+        print(host, "9050 FAIL", type(e).__name__)
+PY
 if docker compose exec -T app python3 -c "import socket; socket.create_connection(('host.docker.internal',9050),timeout=4)" >/dev/null 2>&1; then
-  echo "tor reachable from app: OK (socks5h://host.docker.internal:9050)"
+  echo "tor reachable from app: OK"
 else
-  echo "::warning::app コンテナからホストの Tor(9050)へ届きませんでした。LINEログインは直接接続のまま動きます（回線の回転は無効）。"
+  echo "::warning::app コンテナからホストの Tor(9050)へ届きません。LINEログインは直接接続のまま動きます（回線の回転は無効）。上の診断を参照。"
 fi
 
 docker image prune -f >/dev/null 2>&1 || true
