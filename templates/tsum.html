@@ -2,6 +2,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>ツムツム代行</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<meta name="theme-color" content="#ffd400">
+<meta name="description" content="ツムツムの代行（TN SHOP）。コイン・スコア・ツムレベル・ガチャ完売。PayPayでかんたん、スマホだけで完結します。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ツムツム代行｜TN SHOP">
+<meta property="og:description" content="コイン・スコア・ツムレベル・ガチャ完売。PayPayでかんたん・スマホだけ。">
+<meta property="og:url" content="{{ site }}/tsum">
+<meta property="og:image" content="{{ site }}/static/ogp-tsum.jpg?v=1">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{ site }}/static/ogp-tsum.jpg?v=1">
 <style>
 :root{
   --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
@@ -89,6 +102,9 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .row button{flex:1}
 .lines{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.75;margin:0 0 8px}
 .maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
+.hero{display:block;width:100%;height:auto;aspect-ratio:2/1;object-fit:cover;border:2px solid var(--line);border-radius:16px;margin:0 0 14px;background:var(--soft)}
+.flowbox{padding:12px 14px}.flowbox summary{cursor:pointer;font-size:15px}
+.flowbox img{display:block;width:100%;height:auto;margin-top:10px;border-radius:12px}
 .foot{margin:24px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}
 [hidden]{display:none!important}
 </style></head><body>
@@ -98,6 +114,12 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 </div></header>
 
 <main class="wrap">
+<picture><source srcset="/static/game-tsum.webp?v=1" type="image/webp"><img class="hero" src="/static/game-tsum.jpg?v=1" alt="ツムツム代行" width="1024" height="512"></picture>
+<details class="card flowbox">
+  <summary><b>📖 はじめての方へ：ご利用の流れ（図解）</b></summary>
+  <a href="/static/tsum-flow.jpg?v=1" target="_blank" rel="noopener"><picture><source srcset="/static/tsum-flow.webp?v=1" type="image/webp"><img src="/static/tsum-flow.jpg?v=1" alt="ツムツム代行 ご利用の流れ：1 メニューを選ぶ、2 アカウントを入力、3 内容を確認してPayPayで支払い、4 実行・完了を待つ（画像認証が出たら入力）、5 新しい引き継ぎ番号を控える" loading="lazy" width="1024" height="1536"></picture></a>
+  <p class="note" style="text-align:center;margin:6px 0 0">画像をタップすると大きく表示できます</p>
+</details>
 {% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}{% if maint.url %}<br><a href="{{ maint.url }}">お知らせ</a>{% endif %}</div>{% endif %}
 
 <section id="s-menu" class="card">
