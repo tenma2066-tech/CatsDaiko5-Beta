@@ -2041,13 +2041,20 @@ draftReady=true;
 openHelp(); /* 開くたびに確認と使い方を表示 */
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
-/* 最初の大メニュー（にゃんこ／ツムツム）。?game=nyanko か #nyanko で来たときは出さない */
-function closeGamePick(){ const g=document.getElementById('gamePick'); if(g&&!g.hidden){ g.hidden=true; document.body.style.overflow=''; } }
-function openGamePick(){ const g=document.getElementById('gamePick'); if(!g) return; g.hidden=false; document.body.style.overflow='hidden'; window.scrollTo(0,0); }
+/* 最初の大メニュー（にゃんこ／ツムツム）。?game=nyanko か #nyanko で来たとき、
+   同じタブで一度にゃんこを選んだあとの再読み込みでは出さない（入力の途中で毎回聞かない） */
+const GAME_KEY='tn-game';
+function closeGamePick(){ const g=document.getElementById('gamePick'); if(g&&!g.hidden){ g.hidden=true; document.body.style.overflow=''; }
+  try{ sessionStorage.setItem(GAME_KEY,'nyanko'); }catch(e){} }
+function openGamePick(){ const g=document.getElementById('gamePick'); if(!g) return; g.hidden=false; document.body.style.overflow='hidden'; window.scrollTo(0,0);
+  try{ sessionStorage.removeItem(GAME_KEY); }catch(e){} }
 (function(){
   const q=new URLSearchParams(location.search);
-  if(q.get('game')==='nyanko'||location.hash==='#nyanko') closeGamePick(); else openGamePick();
+  let picked=false; try{ picked=sessionStorage.getItem(GAME_KEY)==='nyanko'; }catch(e){}
+  if(q.get('pick')==='1') openGamePick();   /* ツムツムの「選び直す」から来たとき */
+  else if(q.get('game')==='nyanko'||location.hash==='#nyanko'||picked) closeGamePick(); else openGamePick();
   document.getElementById('gpNyanko').addEventListener('click',closeGamePick);
   document.getElementById('gpBack').addEventListener('click',openGamePick);
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!document.getElementById('gamePick').hidden) closeGamePick(); });
 })();
 </script></body></html>

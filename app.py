@@ -677,7 +677,13 @@ def _tsum_captcha(job: dict, img_bytes: bytes) -> str:
         image = "data:image/png;base64," + base64.b64encode(img_bytes or b"").decode("ascii")
     except Exception:  # noqa: BLE001
         return ""
-    job["captcha"] = {"image": image, "asked": time.time(), "wait": TSUM_CAPTCHA_WAIT}
+    try:   # 前の画像への答えが遅れて届いていたら捨てる（今回の画像の答えと取り違えない）
+        while _worker_pipe.poll(0):
+            _worker_pipe.recv()
+    except (EOFError, OSError):
+        return ""
+    ask_id = secrets.token_hex(6)
+    job["captcha"] = {"id": ask_id, "image": image, "asked": time.time(), "wait": TSUM_CAPTCHA_WAIT}
     _log(job, "画像認証（CAPTCHA）が出ました。画面に出た文字を入力してください。")
     text = ""
     deadline = time.time() + TSUM_CAPTCHA_WAIT
@@ -685,7 +691,7 @@ def _tsum_captcha(job: dict, img_bytes: bytes) -> str:
         while time.time() < deadline:
             if _worker_pipe.poll(1.0):
                 message = _worker_pipe.recv()
-                if isinstance(message, dict) and "captcha" in message:
+                if isinstance(message, dict) and "captcha" in message and message.get("id") == ask_id:
                     text = str(message.get("captcha") or "").strip()[:32]
                     break
     except (EOFError, OSError):
@@ -2866,17 +2872,19 @@ def job_captcha(job_id: str):
     with _jobs_lock:
         job = _jobs.get(job_id)
         owner = job.get("owner") if job else None
-        waiting = bool(job and job.get("captcha"))
+        asked = (job or {}).get("captcha") or {}
     if not job or owner != _owner():
         return jsonify(error="処理が見つかりません。"), 404
-    if not waiting:
+    if not asked:
         return jsonify(error="いまは画像認証の入力待ちではありません。"), 409
+    if data.get("id") and data.get("id") != asked.get("id"):
+        return jsonify(error="画像が新しくなりました。新しい画像の文字を入力してください。", code="captcha_changed"), 409
     with _job_pipes_lock:
         pipe = _job_pipes.get(job_id)
     if pipe is None:
         return jsonify(error="処理とつながっていません。もう一度実行してください。"), 409
     try:
-        pipe.send({"captcha": text})
+        pipe.send({"captcha": text, "id": asked.get("id")})
     except (BrokenPipeError, EOFError, OSError):
         return jsonify(error="処理とつながっていません。もう一度実行してください。"), 409
     return jsonify(ok=True)

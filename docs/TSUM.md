@@ -56,6 +56,7 @@
 LINE が画像認証を出したら、実行中のプロセスが画像をジョブに載せ、画面に出す（`/status/<job>` の `captcha`）。
 利用者が入力した文字は `POST /api/jobs/<job>/captcha` → 親プロセス → パイプ → 実行中のプロセスへ渡る。待ち時間は4分（`TSUM_CAPTCHA_WAIT`）。
 このために実行用のパイプを双方向にした（にゃんこ代行では親から何も送らないので動きは同じ）。
+画像ごとに `id` を付け、答えにも同じ `id` を付けて送る。時間切れのあとに届いた古い答えは、実行プロセスが次の画像を出す前に捨てる（取り違え防止）。
 
 ## 4. 設定（環境変数）
 
@@ -84,3 +85,10 @@ python3 -m unittest test_price_parity      # 画面とサーバーの金額の�
 2. `tsum_service.py` が使っている名前が残っているか確かめる：`forge_sync`・`MAX_PRESETS`・`describe_login_failure`・`tsum_guest.guest_takeover`・`guest_create`・`guest_issue_transfer`・`mark_pending_done`・`Forge`・`_proxies_dict`・`_game_api_proxy`・`_unique_game_proxy`・`_save_guest_transfer`・`_save_orphan_guest`。
 3. `python3 -m unittest test_tsum` を通す（モックの形が合わなければ、そこが変わったところ）。
 4. 本番で1件流して確かめる。
+
+## 7. 画面のふるまい（`templates/tsum.html`）
+- 実行中にタブを閉じても、開き直すと「このブラウザの注文」から状況・**引き継ぎ情報**を見直せる（`/api/orders/mine` の `tsum` の注文）。実行が始まった注文は自動で状況を開く。
+- PayPay が保留のときは同じリンクを送り直させず、20秒ごとに注文の状態を見て、始まったら自動で状況を開く（サーバー側も90秒ごとに確認）。
+- アップデート中（503 `updating`）は5秒おきに自動でやり直す。状況が30秒取れなくなったら止めて、注文一覧から拾い直す。
+- 実行中はページを離れようとすると確認を出す。コピーは clipboard が使えない環境でも動く。
+- トップの大メニューへ戻るリンクは `/?pick=1`（同じタブで一度にゃんこを選んでいても、大メニューを出す）。
