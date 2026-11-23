@@ -12,8 +12,9 @@ services:
       PAYPAY_LEDGER_PATH: /data/paypay/payments.sqlite3
       TSUM_DATA_DIR: /data/tsum       # ツムツム代行の作業用（引き継ぎ情報の控え・バージョンのキャッシュ）
       # LINEログインのIPローテーション。固定IPだと画像認証/reCAPTCHA が繰り返し出てログインできないことがある。
-      # TSUM_USE_TOR: "1"             #   ← コメントを外すと同居の Tor 経由でログインし、やり直しごとに別IPを使う。
-      #                                    Tor出口がLINEに弾かれる場合は、下に住宅/モバイルのローテーション型プロキシを入れる：
+      TSUM_USE_TOR: "1"               #   同居の Tor 経由でログインし、やり直しごとに別IPを使う。
+      #                                  Tor出口がLINEに弾かれる場合は、下に住宅/モバイルのローテーション型プロキシを入れる
+      #                                  （TSUM_SOCKS_URL を入れると TSUM_USE_TOR より優先される）：
       # TSUM_SOCKS_URL: "socks5h://user:pass@proxy-host:port"
       ADMIN_PASSWORD_FILE: /run/admin/admin_password
       SESSION_COOKIE_SECURE: "1"    # ログインの Cookie を HTTPS のときだけ送る（Caddy が HTTPS にしている）
