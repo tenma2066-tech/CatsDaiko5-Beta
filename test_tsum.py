@@ -431,7 +431,23 @@ class Captcha(unittest.TestCase):
             A._job_pipes["j2"] = types.SimpleNamespace(send=sent.append)
             r = self.c.post("/api/jobs/j2/captcha", json={"text": "ab12"})
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(sent, [{"captcha": "ab12"}])
+        self.assertEqual(sent, [{"captcha": "ab12", "id": None}])
+
+    def test_answer_for_an_old_image_is_refused(self):
+        """画像が新しくなったあとに、前の画像への答えが届いても渡さない。"""
+        sent = []
+        with self.c:
+            self.c.get("/tsum")
+            job = A._new_tsum_job("line", ["tsum_coin"])
+            job["captcha"] = {"id": "new", "image": "data:image/png;base64,AA", "asked": 0, "wait": 10}
+            A._jobs["j4"] = job
+            A._job_pipes["j4"] = types.SimpleNamespace(send=sent.append)
+            r = self.c.post("/api/jobs/j4/captcha", json={"text": "ab12", "id": "old"})
+            self.assertEqual(r.status_code, 409)
+            self.assertEqual(r.get_json()["code"], "captcha_changed")
+            ok = self.c.post("/api/jobs/j4/captcha", json={"text": "cd34", "id": "new"})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(sent, [{"captcha": "cd34", "id": "new"}])
 
     def test_status_shows_the_captcha_and_the_result(self):
         with self.c:
@@ -463,7 +479,7 @@ class Page(unittest.TestCase):
         self.assertIn('href="/tsum"', main)
         self.assertLess(main.index('id="gamePick"'), main.index('id="v-start"'))   # にゃんこの画面より前
         tsum = client.get("/tsum").get_data(as_text=True)
-        self.assertIn('href="/"', tsum)
+        self.assertIn('href="/?pick=1"', tsum)
 
 
 if __name__ == "__main__":
@@ -481,3 +497,40 @@ class RateLimit(unittest.TestCase):
             codes = [client.post("/run", json=body).status_code for _ in range(22)]
         self.assertEqual(codes[:20], [200] * 20)
         self.assertEqual(codes[20], 429)
+
+
+class WorkerCaptcha(unittest.TestCase):
+    """実行プロセス側：前の画像への遅れた答えを捨て、今の画像の答えだけを使う。"""
+
+    def test_stale_answer_is_dropped(self):
+        job = {"log": [], "captcha": None}
+
+        class FakePipe:
+            def __init__(self):
+                self.queue = [{"captcha": "OLD1", "id": "previous"}]   # 前回のタイムアウト後に届いた答え
+                self.answered = False
+
+            def poll(self, timeout=0):
+                if self.queue:
+                    return True
+                if not self.answered and job.get("captcha"):
+                    self.queue.append({"captcha": "OLD2", "id": "wrong"})
+                    self.queue.append({"captcha": "NEW", "id": job["captcha"]["id"]})
+                    self.answered = True
+                    return True
+                return False
+
+            def recv(self):
+                return self.queue.pop(0)
+
+        with patch.object(A, "_worker_pipe", FakePipe()), patch.object(A, "_publish_job"):
+            text = A._tsum_captcha(job, b"PNG")
+        self.assertEqual(text, "NEW")
+        self.assertIsNone(job["captcha"])
+
+    def test_no_answer_returns_empty(self):
+        job = {"log": [], "captcha": None}
+        pipe = types.SimpleNamespace(poll=lambda timeout=0: False, recv=lambda: None)
+        with patch.object(A, "_worker_pipe", pipe), patch.object(A, "_publish_job"), \
+             patch.object(A, "TSUM_CAPTCHA_WAIT", 0):
+            self.assertEqual(A._tsum_captcha(job, b"PNG"), "")

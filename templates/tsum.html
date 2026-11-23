@@ -48,7 +48,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .modes label{display:flex;gap:10px;align-items:center;padding:10px 12px;border:2px solid var(--line);border-radius:14px;background:var(--soft)}
 .modes label.on{background:var(--hit)}
 .modes input{width:20px;height:20px;flex:none;accent-color:#17181c}
-.modes b{display:block;font-size:15px}
+.modes label>span>b{display:block;font-size:15px}
 .modes small{display:block;font-size:12.5px;color:var(--muted);line-height:1.6}
 .menu small.unit{margin-top:4px}
 .cart{list-style:none;padding:0;margin:0 0 10px;display:grid;gap:6px}
@@ -94,7 +94,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 </style></head><body>
 <header><div class="wrap top">
   <div class="brand"><h1>ツムツム代行</h1><small>TN SHOP ／ <b>LINE：ディズニー ツムツム</b></small></div>
-  <a href="/">← ゲームを選び直す</a>
+  <a href="/?pick=1">← ゲームを選び直す</a>
 </div></header>
 
 <main class="wrap">
@@ -154,7 +154,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 </section>
 
 <section id="s-resume" class="card" hidden>
-  <h2>進めていない注文</h2>
+  <h2>このブラウザの注文</h2>
   <div id="resumeList"></div>
 </section>
 
@@ -163,7 +163,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 
 <div class="bar"><div class="in">
   <div class="sum"><span id="barWhat">メニュー未選択</span><b id="barYen">0円</b></div>
-  <button class="go" id="go" type="button" disabled>{% if payments and not is_admin %}お支払いへ進む{% else %}実行{% endif %}</button>
+  <button class="go" id="go" type="button" disabled>{% if payments and not is_admin %}お支払いへ進む{% elif is_admin %}無料で実行（管理者）{% else %}実行{% endif %}</button>
 </div></div>
 
 <div class="panel" id="payPanel" hidden><div class="inner">
@@ -192,6 +192,7 @@ const PAYMENTS={{ 'true' if payments else 'false' }};
 const IS_ADMIN={{ 'true' if is_admin else 'false' }};
 const TOTAL_STEPS={{ total_steps }};
 const COUPON_MIN={{ coupon_min }};
+const GO_LABEL={{ ('お支払いへ進む' if payments and not is_admin else ('無料で実行（管理者）' if is_admin else '実行'))|tojson }};
 const BY_KEY={}; MENUS.forEach(m=>{BY_KEY[m.key]=m;});
 const $=s=>document.querySelector(s);
 const $$=s=>Array.from(document.querySelectorAll(s));
@@ -275,6 +276,32 @@ $('#menuList').addEventListener('click',e=>{
 });
 $('#modeList').addEventListener('change',syncMode);
 
+/* ---------- 通信 ---------- */
+/* アップデート中（503 updating）は数秒おきに自動でやり直す。最大 tries 回 */
+async function api(url,opts,tries){
+  tries=tries||40;
+  for(let i=0;;i++){
+    const r=await fetch(url,Object.assign({cache:'no-store'},opts||{}));
+    if(r.status!==503||i>=tries-1) return r;
+    let j={}; try{ j=await r.clone().json(); }catch(e){}
+    if(j.code!=='updating') return r;
+    note(j.error||'ただいまアップデート中です。自動で続きます…');
+    await new Promise(ok=>setTimeout(ok,5000));
+  }
+}
+function note(text){ const n=$('#runErr'); if(n) n.textContent=text; }
+async function copyText(val){
+  try{ await navigator.clipboard.writeText(val); return true; }catch(e){}
+  try{ /* http や一部のアプリ内ブラウザでは clipboard が使えないので、古い方法で */
+    const t=document.createElement('textarea'); t.value=val; t.setAttribute('readonly','');
+    t.style.position='fixed'; t.style.opacity='0'; document.body.append(t); t.select();
+    const ok=document.execCommand('copy'); t.remove(); return ok;
+  }catch(e){ return false; }
+}
+const SEEN_KEY='tsum-seen-jobs';
+function seenJobs(){ try{ const v=JSON.parse(sessionStorage.getItem(SEEN_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function markSeen(job){ try{ const v=seenJobs(); if(!v.includes(job)) sessionStorage.setItem(SEEN_KEY,JSON.stringify(v.concat(job).slice(-20))); }catch(e){} }
+
 /* ---------- 実行 ---------- */
 function body(){
   return {tsum:{mode:mode(),login:$('#login').value.trim(),password:$('#password').value,
@@ -287,79 +314,114 @@ $('#go').addEventListener('click',async()=>{
   if(qe){ $('#runErr').textContent=qe; return; }
   if(mode()!=='new'&&(!$('#login').value.trim()||!$('#password').value)){
     $('#acctErr').textContent=mode()==='guest'?'引き継ぎ番号とパスワードを入力してください。':'メールアドレスとパスワードを入力してください。';
+    $('#login').focus();
     return;
   }
-  $('#go').disabled=true;
+  $('#go').disabled=true; $('#go').textContent='送信中…';
   try{
-    const r=await fetch('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())});
+    const r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())});
     const j=await r.json();
-    if(!r.ok){ $('#runErr').textContent=j.error||'注文できませんでした。'; $('#go').disabled=false; return; }
+    if(!r.ok){ $('#runErr').textContent=j.error||'注文できませんでした。'; return; }
+    $('#runErr').textContent='';
     if(j.job){ watch(j.job); return; }
     payOrder=j.order; payAmount=j.amount;
     if(j.state==='paid'&&j.prepaid){ await payNow(''); return; }
     openPay();
-  }catch(e){ $('#runErr').textContent='通信できませんでした。電波の良いところでもう一度お試しください。'; $('#go').disabled=false; }
+  }catch(e){ $('#runErr').textContent='通信できませんでした。電波の良いところでもう一度お試しください。'; }
+  finally{ $('#go').textContent=GO_LABEL; renderCart(); }
 });
 
 /* ---------- 支払い ---------- */
 function openPay(){
   $('#payYen').textContent=yen(payAmount);
   $('#payOrderNo').textContent='注文番号：'+payOrder;
-  $('#payErr').textContent=''; $('#payLink').value='';
+  $('#payErr').textContent=''; $('#payLink').value=''; $('#payGo').disabled=false;
+  $('#payLink').closest('label').hidden=false; $('#payGo').textContent='支払って実行する';
   $('#payPanel').hidden=false; document.body.style.overflow='hidden';
+  $('#payLink').focus();
 }
-function closePay(){ $('#payPanel').hidden=true; document.body.style.overflow=''; $('#go').disabled=false; loadResume(); }
+function closePay(){ $('#payPanel').hidden=true; document.body.style.overflow=''; renderCart(); loadResume(); }
 $('#payCancel').addEventListener('click',closePay);
 $('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
-$('#payGo').addEventListener('click',()=>payNow($('#payLink').value));
+$('#payGo').addEventListener('click',()=>{
+  const link=$('#payLink').value.trim();
+  if(!$('#payLink').closest('label').hidden&&!/pay\.paypay\.ne\.jp\//i.test(link)){
+    $('#payErr').textContent='PayPayの送金リンク（https://pay.paypay.ne.jp/…）を貼り付けてください。'; return;
+  }
+  payNow(link);
+});
 async function payNow(link){
-  const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…';
+  const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…（画面を閉じずにお待ちください）';
   try{
-    const r=await fetch('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link})});
+    const r=await api('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link})});
     const j=await r.json();
     if(!r.ok){
       $('#payErr').textContent=j.error||'決済を確認できませんでした。';
-      btn.disabled=false;
-      if(j.code==='started'||j.code==='dead'||j.code==='order_missing') btn.disabled=true;
+      if(j.hold){
+        /* PayPay 側の保留：同じリンクを送り直さない。サーバーが90秒ごとに自動で確認し、ここでも見張る */
+        $('#payLink').closest('label').hidden=true; btn.textContent='今すぐ確認する'; btn.disabled=false;
+        $('#payErr').textContent='保留中です。送金した方がPayPayアプリで保留を解除すると、自動で確認して実行します。同じリンクを送り直したり、再送金したりしないでください。この画面は閉じても大丈夫です。';
+        startOrderWatch(); return;
+      }
+      if(j.code==='started'){ closePay(); await loadResume(true); return; }
+      btn.disabled=['dead','order_missing','done'].includes(j.code);
       return;
     }
     $('#payPanel').hidden=true; document.body.style.overflow='';
     watch(j.job);
-  }catch(e){ $('#payErr').textContent='通信エラーです。もう一度お試しください。'; btn.disabled=false; }
+  }catch(e){ $('#payErr').textContent='通信エラーです。もう一度お試しください（同じリンクのままで大丈夫です）。'; btn.disabled=false; }
 }
 
 /* ---------- 状況 ---------- */
+let pollFails=0;
 function watch(job){
-  curJob=job; capSent=false;
-  $('#s-status').hidden=false; $('#go').disabled=true;
+  if(!job) return;
+  curJob=job; capSent=false; pollFails=0; markSeen(job);
+  /* 前の注文の結果を消してから表示する（取り違え防止） */
+  $('#codes').textContent=''; delete $('#codes').dataset.done;
+  $('#resultLines').textContent=''; $('#coupBox').hidden=true; $('#log').textContent='';
+  $('#now').dataset.s='running'; $('#now').textContent='準備しています…'; $('#pbar').style.width='0'; $('#pbar').dataset.s='';
+  $('#s-status').hidden=false; renderCart();
   $('#s-status').scrollIntoView({behavior:'smooth',block:'start'});
   if(timer) clearInterval(timer);
   poll(); timer=setInterval(poll,1500);
 }
+function stopWatch(){ clearInterval(timer); timer=null; curJob=null; closeCaptcha(); renderCart(); }
 async function poll(){
   if(!curJob) return;
   let j;
-  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json(); if(!r.ok) throw new Error(j.error||'not found'); }
-  catch(e){ $('#now').textContent='状況を確認できませんでした（通信）。'; return; }
+  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json(); if(!r.ok) throw new Error(j.error||'not found'); pollFails=0; }
+  catch(e){
+    if(++pollFails>=20){   /* 30秒つながらない（再起動など）→ 注文一覧から結果を拾い直す */
+      stopWatch(); $('#now').dataset.s='error';
+      $('#now').textContent='状況を確認できなくなりました。下の「注文」から結果を確認できます。'; loadResume();
+    } else { $('#now').textContent='状況を確認しています…（通信が不安定です）'; }
+    return;
+  }
   const st=j.status;
   $('#now').dataset.s=st;
-  $('#now').textContent=st==='queued'?('順番待ちです（'+(j.queue_position||1)+'番目）'):
+  $('#now').textContent=st==='queued'?('順番待ちです（'+(j.queue_position||1)+'番目）。そのままお待ちください'):
     st==='done'?'完了しました':st==='error'?('エラー：'+(j.error||'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
   const pct=st==='done'?100:Math.round(Math.min(1,(j.step||0)/TOTAL_STEPS)*100);
   $('#pbar').style.width=pct+'%'; $('#pbar').dataset.s=st;
   $('#log').textContent=(j.log||[]).join('\n');
   if(j.tsum&&j.tsum.lines&&j.tsum.lines.length) $('#resultLines').textContent=j.tsum.lines.join('\n');
-  if(j.captcha&&j.captcha.image) openCaptcha(j.captcha.image); else closeCaptcha();
-  if(j.result) showCodes(j.result);
+  if(j.captcha&&j.captcha.image) openCaptcha(j.captcha); else closeCaptcha();
+  if(j.result) showCodes(j.result, st==='error');
   if(st==='done'||st==='error'){
-    clearInterval(timer); timer=null; curJob=null; $('#go').disabled=false; closeCaptcha();
-    renderCart(); loadCoupon(); loadResume();
+    stopWatch(); loadCoupon(); loadResume();
+    if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }
 }
-function showCodes(result){
+function showCodes(result, failed){
   const box=$('#codes'); if(box.dataset.done==='1') return;
   box.textContent=''; box.dataset.done='1';
   const h=document.createElement('h3'); h.textContent='新しい引き継ぎ情報（必ず控えてください）'; box.append(h);
+  if(failed){
+    const w=document.createElement('p'); w.className='err';
+    w.textContent='代行は途中で止まりましたが、アカウントはこの引き継ぎ情報で戻せます。控えたうえで、注文番号を管理者に伝えてください。';
+    box.append(w);
+  }
   [['引き継ぎ番号',result.transfer],['パスワード',result.confirm]].forEach(([name,val])=>{
     const row=document.createElement('div'); row.className='code';
     const d=document.createElement('div');
@@ -367,12 +429,16 @@ function showCodes(result){
     const v=document.createElement('strong'); v.textContent=val||'未発行';
     d.append(s,v);
     const b=document.createElement('button'); b.className='btn'; b.type='button'; b.textContent='コピー';
-    b.addEventListener('click',async()=>{ try{ await navigator.clipboard.writeText(val||''); b.textContent='コピーしました'; }catch(e){ b.textContent='コピーできません'; } });
+    b.addEventListener('click',async()=>{ b.textContent=(await copyText(val||''))?'コピーしました':'コピーできません'; });
     row.append(d,b); box.append(row);
   });
-  const note=document.createElement('p'); note.className='note';
-  note.textContent='ゲームの「設定 → 引き継ぎ」で、この番号とパスワードを入れて引き継いでください。';
-  box.append(note);
+  const both=document.createElement('button'); both.className='btn primary'; both.type='button'; both.textContent='番号とパスワードをまとめてコピー';
+  both.style.width='100%';
+  both.addEventListener('click',async()=>{ both.textContent=(await copyText('引き継ぎ番号: '+(result.transfer||'')+'\nパスワード: '+(result.confirm||'')))?'コピーしました（メモ帳などに貼って保存してください）':'コピーできません'; });
+  box.append(both);
+  const n=document.createElement('p'); n.className='note';
+  n.textContent='ゲームの「設定 → 引き継ぎ」で、この番号とパスワードを入れて引き継いでください。前の引き継ぎ番号はもう使えません。';
+  box.append(n);
 }
 async function loadCoupon(){
   if(!PAYMENTS) return;
@@ -382,12 +448,16 @@ async function loadCoupon(){
     if(o){ $('#coupBox').hidden=false; $('#coupBox').textContent='🎟 次回使えるクーポン '+o.coupon_issued+'（次回 '+COUPON_MIN+'円以上のご注文で10%引き・1回きり・30日間）'; }
   }catch(e){}
 }
+window.addEventListener('beforeunload',e=>{ if(curJob){ e.preventDefault(); e.returnValue=''; } });
 
 /* ---------- 画像認証 ---------- */
-function openCaptcha(src){
-  if($('#capPanel').hidden===false) return;
-  $('#capImg').src=src; $('#capText').value=''; $('#capErr').textContent='';
-  $('#capGo').disabled=false; capSent=false;
+let capId=null;
+function openCaptcha(c){
+  if(capId===c.id&&!$('#capPanel').hidden) return;
+  if(capId===c.id&&capSent) return;              /* 送った答えを処理中 */
+  capId=c.id; capSent=false;
+  $('#capImg').src=c.image; $('#capText').value=''; $('#capErr').textContent='';
+  $('#capGo').disabled=false;
   $('#capPanel').hidden=false; document.body.style.overflow='hidden';
   $('#capText').focus();
 }
@@ -402,33 +472,56 @@ $('#capGo').addEventListener('click',async()=>{
   if(!curJob||capSent) return;
   $('#capGo').disabled=true;
   try{
-    const r=await fetch('/api/jobs/'+curJob+'/captcha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})});
+    const r=await fetch('/api/jobs/'+curJob+'/captcha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,id:capId})});
     const j=await r.json();
     if(!r.ok){ $('#capErr').textContent=j.error||'送信できませんでした。'; $('#capGo').disabled=false; return; }
     capSent=true; closeCaptcha();
   }catch(e){ $('#capErr').textContent='通信エラーです。もう一度お試しください。'; $('#capGo').disabled=false; }
 });
 
-/* ---------- 進めていない注文 ---------- */
-async function loadResume(){
+/* ---------- 注文（進めていないもの・実行中・結果） ---------- */
+let orderTimer=null;
+function startOrderWatch(){ if(!orderTimer) orderTimer=setInterval(()=>loadResume(true),20000); }
+function stopOrderWatch(){ clearInterval(orderTimer); orderTimer=null; }
+const STATE_JA={unpaid:'お支払い待ち',hold:'保留中（自動で確認しています）',paid:'お支払い済み・開始待ち',
+                started:'実行中',done:'完了',dead:'自動では確認できませんでした'};
+async function loadResume(auto){
   if(!PAYMENTS) return;
   let list=[];
-  try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); const j=await r.json(); list=j.orders||[]; }catch(e){ return; }
-  const mine=list.filter(o=>o.tsum&&['unpaid','hold','paid'].includes(o.state));
+  try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); const j=await r.json(); list=(j.orders||[]).filter(o=>o.tsum); }catch(e){ return; }
+  /* 実行が始まった注文（保留の解除・別タブ・開き直し）→ まだ見ていなければ状況を開く */
+  const live=list.find(o=>o.job&&o.state==='started'&&!seenJobs().includes(o.job));
+  if(live&&!curJob){ if(!$('#payPanel').hidden&&payOrder===live.order) closePay(); watch(live.job); }
   const box=$('#resumeList'); box.textContent='';
-  $('#s-resume').hidden=!mine.length;
-  mine.forEach(o=>{
+  $('#s-resume').hidden=!list.length;
+  list.forEach(o=>{
     const d=document.createElement('div'); d.className='code';
     const t=document.createElement('div');
-    const s=document.createElement('small');
-    s.textContent={unpaid:'お支払い待ち',hold:'保留中（自動で確認しています）',paid:'お支払い済み・開始待ち'}[o.state];
+    const s=document.createElement('small'); s.textContent=STATE_JA[o.state]||o.state;
     const v=document.createElement('strong'); v.textContent=yen(o.amount)+'（注文 '+o.order+'）';
-    t.append(s,v);
+    t.append(s,v); d.append(t);
     const b=document.createElement('button'); b.className='btn primary'; b.type='button';
-    b.textContent=o.state==='paid'?'実行する':'支払う';
-    b.addEventListener('click',()=>{ payOrder=o.order; payAmount=o.amount; if(o.state==='paid'){ payNow(''); } else { openPay(); } });
-    d.append(t,b); box.append(d);
+    if(o.state==='done'&&o.result){
+      b.textContent='引き継ぎ情報を見る';
+      b.addEventListener('click',()=>{ $('#s-status').hidden=false; $('#codes').textContent=''; delete $('#codes').dataset.done;
+        $('#now').dataset.s='done'; $('#now').textContent='完了した注文の引き継ぎ情報です'; $('#pbar').style.width='100%'; $('#pbar').dataset.s='done';
+        showCodes(o.result,false); $('#s-status').scrollIntoView({behavior:'smooth',block:'start'}); });
+      d.append(b);
+    }else if(o.job&&(o.state==='started'||o.state==='done')){
+      b.textContent=o.state==='done'?'結果を見る':'状況を見る';
+      b.addEventListener('click',()=>watch(o.job)); d.append(b);
+    }else if(o.state==='dead'){
+      b.textContent='注文番号をコピー';
+      b.addEventListener('click',async()=>{ b.textContent=(await copyText(o.order))?'コピーしました。管理者に伝えてください':'コピーできません'; });
+      d.append(b);
+    }else if(['unpaid','hold','paid'].includes(o.state)){
+      b.textContent=o.state==='paid'?'実行する':o.state==='hold'?'確認する':'支払う';
+      b.addEventListener('click',()=>{ payOrder=o.order; payAmount=o.amount; if(o.state==='unpaid'){ openPay(); } else { $('#payPanel').hidden=false; document.body.style.overflow='hidden'; $('#payYen').textContent=yen(o.amount); $('#payOrderNo').textContent='注文番号：'+o.order; $('#payLink').closest('label').hidden=true; payNow(''); } });
+      d.append(b);
+    }
+    box.append(d);
   });
+  if(list.some(o=>['hold','paying','starting'].includes(o.state)||(o.state==='started'&&o.job))) startOrderWatch(); else stopOrderWatch();
 }
 
 syncMode(); renderCart(); loadResume();
