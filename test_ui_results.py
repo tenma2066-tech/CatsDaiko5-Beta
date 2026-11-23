@@ -38,7 +38,7 @@ STATUS2 = {"status": "done", "queue_position": None, "slot": None, "active_jobs"
            "result": R2, "error": None, "integrity": None, "integrity_only": False, "audit": None, "repair": None, "post_audit": None}
 
 
-@unittest.skipIf(sync_playwright is None or CHROME is None, "Playwright / Chromium がない")
+@unittest.skipIf(sync_playwright is None, "Playwright がない")
 class ResultCodesNotMixedUp(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -48,7 +48,12 @@ class ResultCodesNotMixedUp(unittest.TestCase):
         cls.url = f"http://127.0.0.1:{cls.srv.server_port}/"
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
         cls.pw = sync_playwright().start()
-        cls.browser = cls.pw.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
+        try:   # CI では playwright install で入れた Chromium、この作業環境では決まった場所の Chromium
+            cls.browser = cls.pw.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
+        except Exception as exc:  # noqa: BLE001
+            cls.pw.stop()
+            cls.srv.shutdown()
+            raise unittest.SkipTest(f"Chromium を起動できない: {type(exc).__name__}")
 
     @classmethod
     def tearDownClass(cls):

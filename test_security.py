@@ -110,6 +110,27 @@ class Security(unittest.TestCase):
         self.assertEqual(sqlite3.connect(snap).execute("SELECT x FROM t").fetchone()[0], 7)
         db.close()
 
+    # ---- 連打の制限（P2）
+    def test_rate_limits_on_heavy_endpoints(self):
+        A._hits.clear()
+        c = A.app.test_client()
+        with patch.object(A, "_start_names"), patch.object(A.threading, "Thread"):
+            codes = [c.post("/api/cats/refresh", environ_base=CADDY, headers={"X-Forwarded-For": "203.0.113.5"}).status_code for _ in range(4)]
+            self.assertEqual(codes[-1], 429)
+            self.assertNotEqual(c.post("/api/cats/refresh", environ_base=CADDY, headers={"X-Forwarded-For": "203.0.113.6"}).status_code, 429)
+        A._hits.clear()
+
+    def test_unpaid_orders_per_person_are_capped(self):
+        c = A.app.test_client()
+        with patch.object(A, "PAYMENTS_ENABLED", True), patch.dict(A._orders, {}, clear=True), patch.object(A, "_persist_orders"):
+            ids = [c.post("/run", json={"items": ["XP"]}).get_json()["order"] for _ in range(8)]
+            mine = [k for k, o in A._orders.items() if o["state"] == "unpaid"]
+            self.assertEqual(len(mine), A.MAX_UNPAID_PER_OWNER)
+            self.assertEqual(sorted(mine), sorted(ids[-A.MAX_UNPAID_PER_OWNER:]))     # 新しいものが残る
+            other = A.app.test_client()
+            other.post("/run", json={"items": ["XP"]})
+            self.assertEqual(sum(1 for o in A._orders.values() if o["state"] == "unpaid"), A.MAX_UNPAID_PER_OWNER + 1)   # ほかの人には影響しない
+
 
 if __name__ == "__main__":
     unittest.main()

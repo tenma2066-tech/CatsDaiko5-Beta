@@ -159,7 +159,6 @@ class RepairTransactionTests(unittest.TestCase):
 
     @staticmethod
     def passing_audit(save, known_error_cat_ids):
-        from types import SimpleNamespace
         from save_audit import AuditReport
         return AuditReport((), len(save.cats.cats))
 

@@ -2,7 +2,6 @@
 import base64
 import io
 import json
-import os
 import unittest
 from urllib.error import HTTPError
 from unittest.mock import patch

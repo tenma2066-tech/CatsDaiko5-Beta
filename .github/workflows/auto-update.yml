@@ -27,7 +27,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write   # 新しい版の確認用ブランチを作る（main には書かない）
+  issues: write     # 「新しい版があります」とお知らせ（Issue）を出す
 
 concurrency:
   group: bcsfe-auto-update
@@ -111,15 +112,28 @@ jobs:
           path.write_text(updated, encoding="utf-8")
           PY
 
-      - name: 変更をコミット
+      - name: 確認用のブランチに置いて、お知らせを出す（main には自動で入れない）
         if: steps.check.outputs.upgrade == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.check.outputs.latest }}
         run: |
           if git diff --quiet -- requirements.txt; then
             echo "requirements.txt に変更はありません"
             exit 0
           fi
+          BR="auto/bcsfe-$VER"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
           git add requirements.txt
-          git commit -m "chore: update bcsfe to ${{ steps.check.outputs.latest }}"
-          git push origin main
+          git commit -m "chore: bcsfe を $VER に更新（テスト通過・確認待ち）"
+          git push -f origin "$BR"
+          TITLE="bcsfe $VER が出ました（テスト通過・本番には未反映）"
+          if ! curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/issues?state=open&per_page=50" | grep -qF "\"title\": \"$TITLE\""; then
+            BODY="セーブ編集ライブラリ bcsfe の新しい版 $VER が出ました。自動テスト（smoke・selftest・単体テスト）は通っています。\n\nブランチ \`$BR\` に用意しました。本番に入れるときは、このブランチの requirements.txt の変更を main に入れてください（入れると本番に反映されます）。\n\n自動で main に入れないのは、人が確認しないまま本番のライブラリが変わるのを防ぐためです（docs/AUDIT_PLAN.md S6）。"
+            python3 -c 'import json,os,sys; print(json.dumps({"title": sys.argv[1], "body": sys.argv[2].replace("\\n", "\n")}))' "$TITLE" "$BODY" > /tmp/issue.json
+            curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/issues" -d @/tmp/issue.json >/dev/null
+          fi
+          echo "::notice::bcsfe $VER をブランチ $BR に用意しました（main には入れていません）"
