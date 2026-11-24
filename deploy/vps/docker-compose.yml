@@ -6,6 +6,7 @@ services:
     environment:
       PORT: "8080"
       TZ: Asia/Tokyo
+      SITE_URL: https://${SITE_HOST}
       SECRET_KEY: ${SECRET_KEY}
       PAYPAY_ENCRYPTION_KEY: ${PAYPAY_ENCRYPTION_KEY}
       PAYPAY_DATA_DIR: /data/paypay

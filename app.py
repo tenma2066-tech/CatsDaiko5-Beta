@@ -26,7 +26,9 @@ from contextlib import ExitStack
 from collections import deque
 from types import SimpleNamespace
 
-from flask import Flask, jsonify, redirect, render_template_string, request, session
+from flask import Flask, Response, jsonify, redirect, render_template_string, request, session
+from urllib.parse import urlsplit
+from xml.sax.saxutils import escape as xml_escape
 
 import engine
 import item_catalog
@@ -521,6 +523,9 @@ def _ensure_cleanup() -> None:
 
 @app.after_request
 def _private_response(response):
+    if (request.path == "/admin" or request.path.startswith(("/api/", "/status/"))
+            or request.path == "/health" or response.status_code >= 400):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
     if request.path.startswith("/status/") or request.path in ("/admin",) or request.path.startswith("/api/orders/"):
         response.headers["Cache-Control"] = "no-store"
     # 基本の守り：ほかのサイトの枠の中に表示させない・種類のなりすましをさせない・行き先に URL の詳細を渡さない
@@ -2081,9 +2086,38 @@ def index():
 
 
 def _site() -> str:
-    """X などのリンクプレビュー（og:image）に使う、このサイトの URL（https で出す）。"""
+    """検索とリンクプレビューで共通の公開 URL。独自ドメインは SITE_URL で固定する。"""
+    configured = os.environ.get("SITE_URL", "").strip().rstrip("/")
+    if configured:
+        parsed = urlsplit(configured)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                or parsed.username or parsed.password or parsed.path
+                or parsed.query or parsed.fragment):
+            raise ValueError("SITE_URL must be an absolute http(s) origin without a path")
+        return configured
     scheme = "https" if (request.headers.get("X-Forwarded-Proto") == "https" or request.is_secure) else request.scheme
     return f"{scheme}://{request.host}"
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    return Response(
+        "User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n"
+        "Disallow: /status/\nDisallow: /health\n"
+        f"Sitemap: {_site()}/sitemap.xml\n",
+        mimetype="text/plain",
+    )
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    urls = "".join(f"<url><loc>{xml_escape(_site() + path)}</loc></url>"
+                   for path in ("/", "/nyanko", "/tsum"))
+    return Response(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + urls + '</urlset>', mimetype="application/xml",
+    )
 
 
 @app.get("/favicon.ico")
