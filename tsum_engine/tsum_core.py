@@ -479,7 +479,12 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
 
 
     if tsum_lv is not None:
-        if auto_fill_coins:
+        # レベルMAXは、各レベルの上限解放にコインを使う（レベルが上がるほど必要枚数が増える）。
+        # ここでのコインは売り物ではなく「レベルを上げるための手段」なので、メニューの価格や
+        # TSUM_AUTO_FILL_COINS 設定に関わらず、足りなければ自動で必要枚数を補充する。
+        # （補充しないと途中の上限解放で retcode 22「コイン残数が一致しません」で止まる。）
+        lv_auto_fill = True
+        if lv_auto_fill:
             try:
                 cur_c = f.resources()["bcoin"]
                 if cur_c < 50_000:
@@ -501,7 +506,7 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
             tid = candidates[0]
         if progress:
             progress.update(act_stage, "ツムのレベルを上げています...", force=True)
-        res = f.max_tsum_level(tid, target=50, min_heart=10, sleep_s=0.3, log=_dbg, auto_fill_coins=auto_fill_coins)
+        res = f.max_tsum_level(tid, target=50, min_heart=10, sleep_s=0.3, log=_dbg, auto_fill_coins=lv_auto_fill)
         st = res.get("status")
         # 失敗系はデバッグログに詳細(サーバー応答含む)を残す
         if st != "done":

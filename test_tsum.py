@@ -380,6 +380,39 @@ class MyTsumSelect(unittest.TestCase):
         self.assertTrue(err)
 
 
+class LevelMaxCoins(unittest.TestCase):
+    """ツムレベルMAX はコインを使う。メニュー価格に関わらず必要枚数を自動補充する。通信はしない。"""
+    @staticmethod
+    def _core():
+        import os
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsum_engine"))
+        import tsum_core
+        return tsum_core
+
+    def test_level_max_forces_coin_autofill_even_when_coins_are_paid(self):
+        c = self._core()
+        c.CONFIG["menu_prices"] = {"coin": 50}   # コインメニューは有料 → is_coin_free()=False
+        try:
+            self.assertFalse(c.is_coin_free())
+            rec = {}
+
+            class FakeForge:
+                def resources(self, info=None):
+                    return {"bcoin": 1_000_000}
+                def max_tsum_level(self, tid, **kw):
+                    rec["auto_fill"] = kw.get("auto_fill_coins")
+                    rec["tid"] = tid
+                    return {"status": "done", "lv": 50}
+
+            res, msg = c.forge_sync(tsum_lv=1024, sess={"userid": "1"}, f=FakeForge())
+            self.assertTrue(rec["auto_fill"])   # 価格が有料でもレベルMAXは強制ON
+            self.assertEqual(rec["tid"], 1024)
+            self.assertIn("レベルMAX", msg)
+        finally:
+            c.CONFIG.pop("menu_prices", None)
+
+
 class GameSync(unittest.TestCase):
     """ゲーム内アクションのデータ同期ずれ(retcode 22)からの復旧。通信はしない。
 
