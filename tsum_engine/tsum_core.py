@@ -366,7 +366,7 @@ def is_coin_free(guild_id=None):
 def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=None, box=None,
                login_id=None, password=None, captcha_solver=None, proxy=None, sess=None, f=None,
                pin_notice=None, gacha_full=None, on_login=None, stage_box=None, progress=None,
-               is_guest=False, auto_fill_coins=None):
+               is_guest=False, auto_fill_coins=None, all_tsum_lv=False):
     if auto_fill_coins is None:
         auto_fill_coins = is_coin_free()
     # stage_box: 失敗がログイン段階か実行段階かを呼び出し元に伝えるための箱
@@ -504,6 +504,15 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                 return None, (err or "使用できるツムが見つかりませんでした。"
                               "ゲームでツムを手に入れてから、もう一度お試しください。")
             tid = candidates[0]
+        else:
+            # 指定ツム：そのツムを所持しているか確認する（所持していないツムは上げられない）。
+            info = f.get_info()
+            if not isinstance(info, dict):
+                return None, "接続が不安定なため実行できませんでした。少し待ってからもう一度お試しください。"
+            owned = owned_tsum_ids(info)
+            if owned and tid not in owned:
+                return None, (f"指定したツム（ID {tid}）を所持していません。"
+                              "所持しているツムのIDを入力してください。")
         if progress:
             progress.update(act_stage, "ツムのレベルを上げています...", force=True)
         res = f.max_tsum_level(tid, target=50, min_heart=10, sleep_s=0.3, log=_dbg, auto_fill_coins=lv_auto_fill)
@@ -533,6 +542,46 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
         if st == "max_iter":
             return None, f"規定回数を試しましたがレベルMAXに届きませんでした（現在lv={res.get('lv')}）。もう一度お試しください。"
         return None, f"ツムのレベルMAXに失敗しました（status={st}）。もう一度お試しください。"
+
+    if all_tsum_lv:
+        # 所持している全ツムをレベル50にする。コインは手段なので必要なだけ自動補充する。
+        # 既にMAXのツムは max_tsum_level 側で即 done になるので、再実行でも速い（途中まで済んだ分は続きから）。
+        info = f.get_info()
+        if not isinstance(info, dict):
+            return None, "接続が不安定なため実行できませんでした。少し待ってからもう一度お試しください。"
+        owned = owned_tsum_ids(info)
+        if not owned:
+            return None, "所持しているツムが見つかりませんでした。ゲームでツムを手に入れてから、もう一度お試しください。"
+        total = len(owned)
+        done_n = 0
+        failed = []
+        for idx, tid in enumerate(owned, 1):
+            if progress:
+                progress.update(act_stage, f"全ツムをレベルMAX中… {idx}/{total}（ツム{tid}）", force=True)
+            try:
+                res = f.max_tsum_level(tid, target=50, min_heart=1, sleep_s=0.2, log=_dbg, auto_fill_coins=True)
+            except Exception as _e:  # noqa: BLE001
+                _dbg(f"[all_lv] tsum{tid} 例外: {type(_e).__name__}: {str(_e)[:120]}")
+                failed.append(tid)
+                continue
+            st = res.get("status") if isinstance(res, dict) else ""
+            if st == "done":
+                done_n += 1
+            elif st in ("insufficient_heart", "heart_ran_out"):
+                # ハート切れ：できた分を返して打ち切る（ハートが戻ってから再実行で続きから）。
+                _dbg(f"[all_lv] ハート切れで中断 ({idx}/{total}, 完了={done_n})")
+                return ({"status": "partial", "done": done_n, "total": total},
+                        f"ハートが切れたため途中で終了しました（{done_n}/{total} 体完了）。"
+                        "ハートが回復してから、もう一度お試しください（続きから実行します）。")
+            else:
+                _dbg(f"[all_lv] tsum{tid} status={st} detail={str(res)[:120]}")
+                failed.append(tid)
+        if done_n == 0 and failed:
+            return None, f"どのツムもレベルMAXにできませんでした（{len(failed)} 体失敗）。もう一度お試しください。"
+        msg = f"全ツムをレベルMAXにしました（{done_n}/{total} 体完了"
+        msg += f"／{len(failed)} 体スキップ）" if failed else "）"
+        msg += "\n完了しました。\nまたのご利用をお待ちしております。"
+        return {"status": "done", "done": done_n, "total": total}, msg
 
     if box is not None:
         need = 30_000_000
@@ -1081,6 +1130,7 @@ MAX_PRESETS = {
     "score_max": ("score", 2_147_483_647),
     "level_max": ("exp", 100_000_000),
     "coin_max":  ("coin", 200_000_000),
+    "medal_max": ("medal", 450_000),   # メダルを安全上限（45万枚）まで
 }
 
 

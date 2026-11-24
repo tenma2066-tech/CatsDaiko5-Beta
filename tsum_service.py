@@ -79,6 +79,11 @@ MENUS = {
                          "desc": "コインを2億枚にします", "order": 11},
     "tsum_tsum_lv":     {"label": "ツムレベルMAX", "price": "tsum_tsum_lv",
                          "desc": "セット中のマイツムをレベル50にします", "order": 20},
+    "tsum_tsum_lv_pick": {"label": "指定ツムをレベルMAX", "price": "tsum_tsum_lv_pick",
+                          "value": (1, 99999), "unit": "ツムID",
+                          "desc": "所持しているツムのIDを入れると、そのツムをレベル50にします（必要コインは自動補充）", "order": 21},
+    "tsum_all_lv":      {"label": "全ツムをレベルMAX", "price": "tsum_all_lv",
+                         "desc": "所持している全ツムをレベル50にします（時間がかかります・必要コインは自動補充）", "order": 22},
     "tsum_box":         {"label": "セレクトBOX完売", "price": "tsum_box",
                          "desc": "開催中のセレクトBOXを完売まで引きます", "order": 30},
     "tsum_premium":     {"label": "プレミアム完売", "price": "tsum_premium",
@@ -89,6 +94,8 @@ MENUS = {
                          "desc": "スコアを上限にします", "order": 41},
     "tsum_medal":       {"label": "メダル指定", "price": "tsum_medal", "value": (1, 450_000),
                          "unit": "枚", "desc": "ストア用メダルを追加します（安全上限45万枚）", "order": 50},
+    "tsum_medal_max":   {"label": "メダルMAX", "price": "tsum_medal_max",
+                         "desc": "メダルを安全上限（45万枚）まで増やします", "order": 51},
     "tsum_level_max":   {"label": "プレイヤーレベルMAX", "price": "tsum_level_max",
                          "desc": "経験値を入れてプレイヤーレベルを上限にします", "order": 60},
     "tsum_guest_create": {"label": "ゲストアカウント生成", "price": "tsum_guest_create",
@@ -176,7 +183,8 @@ def check_account(mode: str, login_id: str, password: str):
 def _forge_kwargs(menu: str, qty: dict) -> dict:
     """1つのメニューを、ゲーム側へ渡す引数に変える。"""
     c = core()
-    presets = {"tsum_score_max": "score_max", "tsum_level_max": "level_max", "tsum_coin_max": "coin_max"}
+    presets = {"tsum_score_max": "score_max", "tsum_level_max": "level_max",
+               "tsum_coin_max": "coin_max", "tsum_medal_max": "medal_max"}
     if menu in presets:
         field, value = c.MAX_PRESETS[presets[menu]]
         return {field: value}
@@ -188,6 +196,10 @@ def _forge_kwargs(menu: str, qty: dict) -> dict:
         return {"medal": int(qty[menu])}
     if menu == "tsum_tsum_lv":
         return {"tsum_lv": MYTSUM_AUTO}
+    if menu == "tsum_tsum_lv_pick":
+        return {"tsum_lv": int(qty[menu])}
+    if menu == "tsum_all_lv":
+        return {"all_tsum_lv": True}
     if menu == "tsum_box":
         return {"box": DEFAULT_SELECT_BOX_ID}
     if menu == "tsum_premium":

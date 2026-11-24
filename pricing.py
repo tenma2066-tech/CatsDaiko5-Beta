@@ -9,14 +9,16 @@ import engine
 PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other": 25, "playtime10": 10, "restart": 50,
           # ツムツム代行（別の大メニュー。1メニューごとの料金）
           "tsum_coin": 50, "tsum_coin_max": 50, "tsum_level_max": 50, "tsum_score": 50, "tsum_score_max": 50,
-          "tsum_tsum_lv": 50, "tsum_medal": 50, "tsum_box": 100, "tsum_premium": 100, "tsum_guest_create": 30}
+          "tsum_tsum_lv": 50, "tsum_tsum_lv_pick": 50, "tsum_all_lv": 300, "tsum_medal": 50, "tsum_medal_max": 50,
+          "tsum_box": 100, "tsum_premium": 100, "tsum_guest_create": 30}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
                 "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
                 "restart": "初期垢作成（リスタートパック・基本料金）",
                 "tsum_coin": "ツム：コイン指定", "tsum_coin_max": "ツム：コインMAX",
                 "tsum_level_max": "ツム：プレイヤーレベルMAX", "tsum_score": "ツム：スコア指定",
                 "tsum_score_max": "ツム：スコアMAX", "tsum_tsum_lv": "ツム：ツムレベルMAX",
-                "tsum_medal": "ツム：メダル指定", "tsum_box": "ツム：セレクトBOX完売",
+                "tsum_tsum_lv_pick": "ツム：指定ツムをレベルMAX", "tsum_all_lv": "ツム：全ツムをレベルMAX",
+                "tsum_medal": "ツム：メダル指定", "tsum_medal_max": "ツム：メダルMAX", "tsum_box": "ツム：セレクトBOX完売",
                 "tsum_premium": "ツム：プレミアム完売", "tsum_guest_create": "ツム：ゲストアカウント生成"}
 PT_KEY = "プレイ時間+分"          # qty に入れる「プレイ時間を増やす（分）」の特別なキー
 PT_MIN_MINUTES = 60

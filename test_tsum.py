@@ -47,7 +47,7 @@ def fake_core(**overrides):
         calls=calls,
         requests=requests,
         MAX_PRESETS={"score_max": ("score", 2_147_483_647), "level_max": ("exp", 100_000_000),
-                     "coin_max": ("coin", 200_000_000)},
+                     "coin_max": ("coin", 200_000_000), "medal_max": ("medal", 450_000)},
         DEBUG_HOOK=None,
         forge_sync=forge_sync,
         Forge=lambda **kw: types.SimpleNamespace(get_public_key=lambda: "pub"),
@@ -400,6 +400,8 @@ class LevelMaxCoins(unittest.TestCase):
             class FakeForge:
                 def resources(self, info=None):
                     return {"bcoin": 1_000_000}
+                def get_info(self):
+                    return {"retcode": 0, "userinfo": {}, "tsuminfo": [{"tsumid": 1024, "lv": 10}]}
                 def max_tsum_level(self, tid, **kw):
                     rec["auto_fill"] = kw.get("auto_fill_coins")
                     rec["tid"] = tid
@@ -411,6 +413,83 @@ class LevelMaxCoins(unittest.TestCase):
             self.assertIn("レベルMAX", msg)
         finally:
             c.CONFIG.pop("menu_prices", None)
+
+
+class NewMenus(unittest.TestCase):
+    """追加メニュー（メダルMAX・指定ツム・全ツム）の配線。通信はしない。"""
+    @staticmethod
+    def _core():
+        import os
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsum_engine"))
+        import tsum_core
+        return tsum_core
+
+    def test_menus_and_prices_present(self):
+        import pricing
+        for key in ("tsum_medal_max", "tsum_tsum_lv_pick", "tsum_all_lv"):
+            self.assertIn(key, T.MENUS)
+            self.assertIn(T.MENUS[key]["price"], pricing.PRICES)
+        # メダルMAX・全ツムは数量なし（プリセット）、指定ツムは数量（ツムID）あり
+        self.assertNotIn("value", T.MENUS["tsum_medal_max"])
+        self.assertNotIn("value", T.MENUS["tsum_all_lv"])
+        self.assertIn("value", T.MENUS["tsum_tsum_lv_pick"])
+
+    def test_forge_kwargs_mapping(self):
+        with patch.object(T, "_core", fake_core()):
+            self.assertEqual(T._forge_kwargs("tsum_medal_max", {}), {"medal": 450_000})
+            self.assertEqual(T._forge_kwargs("tsum_tsum_lv_pick", {"tsum_tsum_lv_pick": "1024"}), {"tsum_lv": 1024})
+            self.assertEqual(T._forge_kwargs("tsum_all_lv", {}), {"all_tsum_lv": True})
+
+    def test_pick_rejects_unowned_tsum(self):
+        c = self._core()
+
+        class FakeForge:
+            def resources(self, info=None):
+                return {"bcoin": 1_000_000}
+            def get_info(self):
+                return {"retcode": 0, "userinfo": {}, "tsuminfo": [{"tsumid": 5, "lv": 10}]}
+            def max_tsum_level(self, tid, **kw):
+                raise AssertionError("所持していないツムで実行してはいけない")
+
+        res, msg = c.forge_sync(tsum_lv=1024, sess={"userid": "1"}, f=FakeForge())
+        self.assertIsNone(res)
+        self.assertIn("所持していません", msg)
+
+    def test_all_tsum_lv_loops_owned_and_forces_autofill(self):
+        c = self._core()
+        calls = []
+
+        class FakeForge:
+            def get_info(self):
+                return {"retcode": 0, "userinfo": {},
+                        "tsuminfo": [{"tsumid": 5, "lv": 10}, {"tsumid": 1024, "lv": 20}]}
+            def max_tsum_level(self, tid, **kw):
+                calls.append((tid, kw.get("auto_fill_coins")))
+                return {"status": "done", "lv": 50}
+
+        res, msg = c.forge_sync(all_tsum_lv=True, sess={"userid": "1"}, f=FakeForge())
+        self.assertEqual(res["status"], "done")
+        self.assertEqual(res["done"], 2)
+        self.assertTrue(all(af is True for _, af in calls))   # 全ツムもコイン自動補充
+        self.assertEqual({tid for tid, _ in calls}, {5, 1024})
+
+    def test_all_tsum_lv_stops_on_heart_out_and_reports_partial(self):
+        c = self._core()
+
+        class FakeForge:
+            def get_info(self):
+                return {"retcode": 0, "userinfo": {},
+                        "tsuminfo": [{"tsumid": 5, "lv": 10}, {"tsumid": 1024, "lv": 20}]}
+            def max_tsum_level(self, tid, **kw):
+                if tid == 5:
+                    return {"status": "done", "lv": 50}
+                return {"status": "heart_ran_out", "lv": 25}
+
+        res, msg = c.forge_sync(all_tsum_lv=True, sess={"userid": "1"}, f=FakeForge())
+        self.assertEqual(res["status"], "partial")
+        self.assertEqual(res["done"], 1)
+        self.assertIn("ハート", msg)
 
 
 class GameSync(unittest.TestCase):
