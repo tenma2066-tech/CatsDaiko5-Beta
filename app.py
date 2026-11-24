@@ -2330,7 +2330,13 @@ def _tsum_summary(mode: str, menus: list, qty: dict) -> str:
     parts = [tsum_service.MODE_LABELS.get(mode, mode)]
     for key in menus:
         value = qty.get(key)
-        parts.append(tsum_service.menu_label(key) + (f"={value:,}" if value is not None else ""))
+        if isinstance(value, int):
+            suffix = f"={value:,}"
+        elif value is not None:
+            suffix = f"={value}"          # 文字入力（ニックネームなど）はそのまま
+        else:
+            suffix = ""
+        parts.append(tsum_service.menu_label(key) + suffix)
     return ("ツムツム代行／" + "／".join(parts))[:400]
 
 

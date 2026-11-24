@@ -366,7 +366,7 @@ def is_coin_free(guild_id=None):
 def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=None, box=None,
                login_id=None, password=None, captcha_solver=None, proxy=None, sess=None, f=None,
                pin_notice=None, gacha_full=None, on_login=None, stage_box=None, progress=None,
-               is_guest=False, auto_fill_coins=None, all_tsum_lv=False):
+               is_guest=False, auto_fill_coins=None, all_tsum_lv=False, nickname=None):
     if auto_fill_coins is None:
         auto_fill_coins = is_coin_free()
     # stage_box: 失敗がログイン段階か実行段階かを呼び出し元に伝えるための箱
@@ -463,6 +463,18 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
     stage_box["stage"] = "action"
     if progress and not is_guest:
         progress.update(3, "ゲームデータを取得しています", force=True)
+
+    if nickname is not None:
+        name = str(nickname).strip()
+        if not name:
+            return None, "ニックネームが空です。名前を入力してからお試しください。"
+        if progress:
+            progress.update(act_stage, "ニックネームを変更しています...", force=True)
+        res = f.set_profile(nickname=name)
+        if isinstance(res, dict) and res.get("retcode") == 0:
+            return res, (f"ニックネームを「{name}」に変更しました\n完了しました。\n"
+                         "またのご利用をお待ちしております。")
+        return None, describe_tsum_api_failure("ニックネーム変更", res if isinstance(res, dict) else None, f)
 
     if coin is not None:
         try:

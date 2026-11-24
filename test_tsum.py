@@ -492,6 +492,53 @@ class NewMenus(unittest.TestCase):
         self.assertIn("ハート", msg)
 
 
+class NicknameMenu(unittest.TestCase):
+    """ニックネーム変更（文字入力メニュー）。通信はしない。"""
+    @staticmethod
+    def _core():
+        import os
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsum_engine"))
+        import tsum_core
+        return tsum_core
+
+    def test_validate_nickname(self):
+        menus, qty, err = T.validate_order(["tsum_nickname"], {"tsum_nickname": "  たろう  "})
+        self.assertEqual(err, "")
+        self.assertEqual(qty["tsum_nickname"], "たろう")   # 前後の空白は落とす
+        self.assertIn("文字を入力", T.validate_order(["tsum_nickname"], {"tsum_nickname": "   "})[2])
+        self.assertIn("文字", T.validate_order(["tsum_nickname"], {"tsum_nickname": "あ" * 17})[2])
+        self.assertIn("使えない", T.validate_order(["tsum_nickname"], {"tsum_nickname": "a\nb"})[2])
+
+    def test_forge_kwargs(self):
+        with patch.object(T, "_core", fake_core()):
+            self.assertEqual(T._forge_kwargs("tsum_nickname", {"tsum_nickname": "ネオ"}), {"nickname": "ネオ"})
+
+    def test_forge_sync_sets_nickname(self):
+        c = self._core()
+        rec = {}
+
+        class FakeForge:
+            def set_profile(self, hometsum=None, trophyid=0, nickname=None):
+                rec["nick"] = nickname
+                return {"retcode": 0}
+
+        res, msg = c.forge_sync(nickname="ネオ", sess={"userid": "1"}, f=FakeForge())
+        self.assertEqual(rec["nick"], "ネオ")
+        self.assertIn("ネオ", msg)
+
+    def test_forge_sync_nickname_failure_is_reported(self):
+        c = self._core()
+
+        class FakeForge:
+            def set_profile(self, hometsum=None, trophyid=0, nickname=None):
+                return {"retcode": 5, "retmsg": "だめ"}
+
+        res, msg = c.forge_sync(nickname="x", sess={"userid": "1"}, f=FakeForge())
+        self.assertIsNone(res)
+        self.assertTrue(msg)
+
+
 class GameSync(unittest.TestCase):
     """ゲーム内アクションのデータ同期ずれ(retcode 22)からの復旧。通信はしない。
 

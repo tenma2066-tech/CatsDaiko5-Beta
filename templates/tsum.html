@@ -136,7 +136,9 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
           <input type="text" inputmode="numeric" pattern="[0-9]*" placeholder="{{ m.value[0] }}〜{{ m.value[1] }}" data-min="{{ m.value[0] }}" data-max="{{ m.value[1] }}" aria-label="{{ m.label }}の数量">
           <button type="button" class="qmax">最大</button>
         </span>
-        <small class="unit">単位：{{ m.unit }}／上限 {{ "{:,}".format(m.value[1]) }}</small>{% endif %}
+        <small class="unit">単位：{{ m.unit }}／上限 {{ "{:,}".format(m.value[1]) }}</small>{% elif m.text %}<span class="qty" hidden>
+          <input type="text" maxlength="{{ m.text[1] }}" placeholder="新しい名前（{{ m.text[0] }}〜{{ m.text[1] }}文字）" data-text="1" autocapitalize="off" spellcheck="false" aria-label="{{ m.label }}">
+        </span>{% endif %}
       </span>
     </label>
   {% endfor %}
@@ -245,13 +247,21 @@ function qtyOf(key){
 }
 function qtyMap(){
   const out={};
-  picked().forEach(k=>{ if(BY_KEY[k].value) out[k]=qtyOf(k); });
+  picked().forEach(k=>{ if(BY_KEY[k].value||BY_KEY[k].text) out[k]=qtyOf(k); });
   return out;
 }
 function qtyError(){
   for(const k of picked()){
-    const m=BY_KEY[k]; if(!m.value) continue;
+    const m=BY_KEY[k];
     const box=document.querySelector('#menuList label[data-key="'+k+'"] .qty input');
+    if(m.text){
+      const raw=qtyOf(k); const ok=raw.length>=m.text[0]&&raw.length<=m.text[1];
+      if(box) box.classList.toggle('bad',!!raw&&!ok);
+      if(!raw) return '「'+m.label+'」の文字を入力してください。';
+      if(!ok) return '「'+m.label+'」は '+m.text[0]+'〜'+m.text[1]+' 文字で入力してください。';
+      continue;
+    }
+    if(!m.value) continue;
     const raw=qtyOf(k); const ok=/^[0-9]+$/.test(raw)&&Number(raw)>=m.value[0]&&Number(raw)<=m.value[1];
     box.classList.toggle('bad',!!raw&&!ok);
     if(!raw) return '「'+m.label+'」の数量を入力してください。';

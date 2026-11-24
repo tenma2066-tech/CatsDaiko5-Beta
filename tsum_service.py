@@ -73,6 +73,8 @@ def core():
 # ---------------------------------------------------------------- メニュー表
 # value: 数量の入力が要るメニュー（min/max は安全上限。超える指定は受け付けない）
 MENUS = {
+    "tsum_nickname":    {"label": "ニックネーム変更", "price": "tsum_nickname", "text": (1, 16),
+                         "desc": "プレイヤー名（ニックネーム）を変更します（最大16文字）", "order": 5},
     "tsum_coin":        {"label": "コイン指定", "price": "tsum_coin", "value": (0, 200_000_000),
                          "unit": "枚", "desc": "0〜2億枚まで指定できます", "order": 10},
     "tsum_coin_max":    {"label": "コインMAX", "price": "tsum_coin_max",
@@ -130,6 +132,11 @@ def value_limits(key: str):
     return MENUS.get(key, {}).get("value")
 
 
+def text_limits(key: str):
+    """文字入力メニュー（ニックネームなど）の (最小文字数, 最大文字数)。無ければ None。"""
+    return MENUS.get(key, {}).get("text")
+
+
 def sort_menus(keys) -> list:
     """コイン→ツムレベル→ガチャ→スコア→メダル→レベルの順に並べる。
     ガチャはコインを使うので、コインより後に実行する。"""
@@ -147,6 +154,18 @@ def validate_order(menus, qty: dict):
         return [], {}, f"「{menu_label(solo[0])}」はほかのメニューと同時に選べません。"
     clean: dict = {}
     for key in picked:
+        tlim = text_limits(key)
+        if tlim:
+            raw = str((qty or {}).get(key, "")).strip()
+            low, high = tlim
+            if raw == "":
+                return [], {}, f"「{menu_label(key)}」の文字を入力してください。"
+            if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in raw):
+                return [], {}, f"「{menu_label(key)}」に使えない文字が含まれています。"
+            if len(raw) < low or len(raw) > high:
+                return [], {}, f"「{menu_label(key)}」は {low}〜{high} 文字で入力してください。"
+            clean[key] = raw
+            continue
         limits = value_limits(key)
         if not limits:
             continue
@@ -200,6 +219,8 @@ def _forge_kwargs(menu: str, qty: dict) -> dict:
         return {"tsum_lv": int(qty[menu])}
     if menu == "tsum_all_lv":
         return {"all_tsum_lv": True}
+    if menu == "tsum_nickname":
+        return {"nickname": str(qty[menu])}
     if menu == "tsum_box":
         return {"box": DEFAULT_SELECT_BOX_ID}
     if menu == "tsum_premium":
