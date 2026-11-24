@@ -1,0 +1,556 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>ぷにぷに代行｜自動周回・久垢作成・回し放題｜TN SHOP</title>
+<link rel="canonical" href="{{ site }}/puni">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<meta name="theme-color" content="#ffd400">
+<meta name="description" content="妖怪ウォッチぷにぷにの代行（TN SHOP）。アカウント作成・自動周回・回し放題・ひとだま補充。PayPayでかんたん、スマホだけで完結します。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ぷにぷに代行｜TN SHOP">
+<meta property="og:description" content="アカウント作成・自動周回・回し放題・ひとだま補充。PayPayでかんたん・スマホだけ。">
+<meta property="og:url" content="{{ site }}/puni">
+<style>
+:root{
+  --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
+  --accent:#ffc42e;--ok:#12a05c;--warn:#e08a00;--bad:#d93636;--okbg:#e6f6ee;--badbg:#fdebeb;
+  --hit:rgba(255,196,46,.24);--idle:#9aa4b2;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;
+  --okbg:#14291f;--badbg:#321a1a;--hit:rgba(255,196,46,.16);--idle:#6c7684;
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.5;
+  font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  padding-bottom:calc(104px + env(safe-area-inset-bottom,0px))}
+.wrap{max-width:640px;margin:0 auto;padding:0 14px}
+button,input,select{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+header{padding:calc(14px + env(safe-area-inset-top,0px)) 0 10px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
+.top a{font-size:13px;color:var(--muted)}
+.brand{display:flex;flex-direction:column;line-height:1.15}
+.brand small{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:14px;margin:0 0 14px}
+.card>h2{margin:0 0 4px;font-size:17px}
+.card>p.note{margin:0 0 10px;font-size:13px;color:var(--muted);line-height:1.7}
+.menu{display:grid;gap:8px}
+.menu label{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:2px solid var(--line);
+  border-radius:14px;background:var(--soft);cursor:pointer}
+.menu label.on{background:var(--hit)}
+.menu input[type=checkbox]{width:22px;height:22px;margin:2px 0 0;flex:none;accent-color:#17181c}
+.menu b{display:block;font-size:15px}
+.menu small{display:block;font-size:12.5px;color:var(--muted);line-height:1.6}
+.menu em{font-style:normal;font-weight:800}
+.qty{display:flex;gap:8px;align-items:center;margin-top:8px}
+.qty input{width:100%;padding:9px 10px;border:2px solid var(--line);border-radius:10px;background:var(--panel)}
+.qty input.bad{border-color:var(--bad);background:var(--badbg)}
+.qty button{padding:9px 12px;border:2px solid var(--line);border-radius:10px;background:var(--accent);font-weight:800}
+.stage{display:grid;gap:4px;margin-top:8px}
+.stage input{width:100%;padding:9px 10px;border:2px solid var(--line);border-radius:10px;background:var(--panel)}
+.stage input.bad{border-color:var(--bad);background:var(--badbg)}
+.stage small{color:var(--muted);font-size:12px}
+.field{display:block;margin:0 0 10px}
+.field span{display:block;font-size:13.5px;font-weight:700;margin-bottom:4px}
+.field input{width:100%;padding:11px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel)}
+.modes{display:grid;gap:8px;margin:0 0 12px}
+.modes label{display:flex;gap:10px;align-items:center;padding:10px 12px;border:2px solid var(--line);border-radius:14px;background:var(--soft)}
+.modes label.on{background:var(--hit)}
+.modes input{width:20px;height:20px;flex:none;accent-color:#17181c}
+.modes label>span>b{display:block;font-size:15px}
+.modes small{display:block;font-size:12.5px;color:var(--muted);line-height:1.6}
+.menu small.unit{margin-top:4px}
+.cart{list-style:none;padding:0;margin:0 0 10px;display:grid;gap:6px}
+.cart li{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.total{display:flex;justify-content:space-between;align-items:baseline;font-size:16px;font-weight:800;margin-top:6px}
+.total b{font-size:22px}
+.err{margin:8px 0 0;padding:9px 11px;border-radius:10px;background:var(--badbg);color:var(--bad);font-size:13.5px;font-weight:700}
+.err:empty{display:none}
+.okbox{margin:8px 0 0;padding:9px 11px;border-radius:10px;background:var(--okbg);font-size:13.5px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:2px solid var(--line);
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));z-index:5}
+.bar .in{max-width:640px;margin:0 auto;display:flex;gap:10px;align-items:center}
+.bar .sum{flex:1;font-size:13px;color:var(--muted);line-height:1.4}
+.bar .sum b{display:block;font-size:17px;color:var(--ink)}
+.go{padding:13px 18px;border:2px solid var(--line);border-radius:14px;background:var(--accent);font-weight:800;font-size:16px}
+.go[disabled]{opacity:.5}
+.btn{padding:9px 13px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-weight:700;white-space:nowrap;flex:none}
+.btn.primary{background:var(--accent)}
+.pbar{height:10px;border:2px solid var(--line);border-radius:999px;background:var(--soft);overflow:hidden;margin:10px 0}
+.pbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .5s ease}
+.pbar i[data-s=done]{background:var(--ok)}.pbar i[data-s=error]{background:var(--bad)}
+.nowmsg{margin:4px 0 8px;font-size:15.5px;font-weight:700;line-height:1.6}
+.nowmsg[data-s=error]{color:var(--bad)}.nowmsg[data-s=done]{color:var(--ok)}
+.logbox{margin-top:10px;font-size:13px}
+.logbox summary{cursor:pointer;color:var(--muted);font-weight:700}
+.logbox pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10px;border-radius:10px;font-size:12.5px;line-height:1.6}
+.code{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:2px solid var(--line);
+  border-radius:12px;background:var(--soft);margin:8px 0}
+.code small{display:block;font-size:12px;color:var(--muted)}
+.code strong{font-size:17px;letter-spacing:.04em;word-break:break-all}
+.panel{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:9}
+.panel[hidden]{display:none}
+.panel .inner{background:var(--panel);border:2px solid var(--line);border-radius:18px 18px 0 0;padding:16px;
+  width:100%;max-width:640px;max-height:92vh;overflow:auto;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+.panel h3{margin:0 0 8px;font-size:17px}
+.row{display:flex;gap:10px;margin-top:12px}
+.row button{flex:1}
+.lines{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.75;margin:0 0 8px}
+.maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
+.foot{margin:24px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}
+[hidden]{display:none!important}
+</style></head><body>
+<header><div class="wrap top">
+  <div class="brand"><h1>ぷにぷに代行</h1><small>TN SHOP ／ <b>妖怪ウォッチ ぷにぷに</b></small></div>
+  <a href="/">← ゲームを選び直す</a>
+</div></header>
+
+<main class="wrap">
+{% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}{% if maint.url %}<br><a href="{{ maint.url }}">お知らせ</a>{% endif %}</div>{% endif %}
+
+<section id="s-menu" class="card">
+  <h2>何をしますか？</h2>
+  <p class="note">メニューは複数まとめて選べます。アカウント作成・久垢作成はほかのメニューと同時に選べません。料金はメニュー1件ごと（周回は10周ごと／回し放題は1時間ごと）です。</p>
+  <div class="menu" id="menuList">
+  {% for m in menus %}
+    <label data-key="{{ m.key }}">
+      <input type="checkbox" value="{{ m.key }}">
+      <span>
+        <b>{{ m.label }} <em>{{ m.amount }}円</em></b>
+        <small>{{ m.desc }}</small>
+        {% if m.value %}<span class="qty" hidden>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" placeholder="{{ m.value[0] }}〜{{ m.value[1] }}" data-min="{{ m.value[0] }}" data-max="{{ m.value[1] }}" aria-label="{{ m.label }}の数量">
+          <button type="button" class="qmax">最大</button>
+        </span>
+        <small class="unit">単位：{{ m.unit }}／上限 {{ "{:,}".format(m.value[1]) }}</small>{% endif %}
+        {% if m.key in stage_menus %}<span class="stage" hidden>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" placeholder="ステージID（例：29704006）" data-stage="1" aria-label="{{ m.label }}のステージID">
+          <small>ゲーム内の「情報」で確認できる、8桁前後の数字のステージIDを入力してください。</small>
+        </span>{% endif %}
+      </span>
+    </label>
+  {% endfor %}
+  </div>
+  <p class="err" id="menuErr"></p>
+</section>
+
+<section id="s-acct" class="card">
+  <h2>アカウント</h2>
+  <p class="note">入力されたメールアドレス・パスワードは、代行の実行にだけ使い、画面やログには出しません。</p>
+  <div class="modes" id="modeList">
+    <label><input type="radio" name="mode" value="email" checked><span><b>メールアドレスでログイン</b><small>LEVEL5 ID のメールアドレスとパスワードを入力してください。</small></span></label>
+    <label><input type="radio" name="mode" value="new"><span><b>新しいアカウントを作る</b><small>「アカウント作成」「久垢作成」を選んだときはこちらになります。作成後のメール・パスワードをお渡しします。</small></span></label>
+  </div>
+  <label class="field" id="f-login"><span id="loginLabel">メールアドレス</span><input id="login" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"></label>
+  <label class="field" id="f-pw"><span>パスワード</span><input id="password" type="password" autocomplete="off"></label>
+  {% if payments and not is_admin %}<label class="field"><span>クーポン（任意・{{ coupon_min }}円以上のご注文で10%引き）</span><input id="coupon" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>{% endif %}
+  <p class="err" id="acctErr"></p>
+</section>
+
+<section id="s-cart" class="card">
+  <h2>ご注文</h2>
+  <ul class="cart" id="cart"></ul>
+  <div class="total"><span>合計</span><b id="total">0円</b></div>
+  <p class="err" id="runErr"></p>
+</section>
+
+<section id="s-status" class="card" hidden>
+  <h2>状況</h2>
+  <p class="nowmsg" id="now">準備しています…</p>
+  <div class="pbar"><i id="pbar"></i></div>
+  <p class="lines" id="resultLines"></p>
+  <div id="codes"></div>
+  <p class="okbox" id="coupBox" hidden></p>
+  <details class="logbox"><summary>くわしい記録</summary><pre id="log"></pre></details>
+</section>
+
+<section id="s-resume" class="card" hidden>
+  <h2>このブラウザの注文</h2>
+  <div id="resumeList"></div>
+</section>
+
+<details id="s-claim" class="card">
+  <summary><b>画面を閉じた・別の端末で続けたい方へ</b></summary>
+  <p class="note">お支払い済みで止まってしまった注文は、<b>再送金なし</b>でもう一度実行できます。控えた<b>注文番号</b>を入れて「再開」を押してください。同じブラウザなら、上の「このブラウザの注文」に出ます。</p>
+  <label class="field"><span>注文番号</span><input id="claimNo" type="text" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="注文番号"></label>
+  <p class="err" id="claimErr"></p>
+  <div class="row"><button class="btn primary" id="claimGo" type="button">再開</button></div>
+</details>
+
+<div class="foot"><p>TN SHOP ／ お問い合わせ：X <b>@paysms1212</b></p><p>v{{ version }} ／ あなたの番号 {{ uid }}</p></div>
+</main>
+
+<div class="bar"><div class="in">
+  <div class="sum"><span id="barWhat">メニュー未選択</span><b id="barYen">0円</b></div>
+  <button class="go" id="go" type="button" disabled>{% if payments and not is_admin %}お支払いへ進む{% elif is_admin %}無料で実行（管理者）{% else %}実行{% endif %}</button>
+</div></div>
+
+<div class="panel" id="payPanel" hidden><div class="inner">
+  <h3>PayPayでお支払い</h3>
+  <p class="note" id="payInfo">PayPayアプリで <b id="payYen">0円</b> ちょうどの送金リンクを作って、下に貼り付けてください（パスコードなし）。</p>
+  <label class="field"><span>PayPay送金リンク</span><input id="payLink" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://pay.paypay.ne.jp/..."></label>
+  <p class="err" id="payErr"></p>
+  <div class="row"><button class="btn" id="payCancel" type="button">やめる</button><button class="btn primary" id="payGo" type="button">支払って実行する</button></div>
+  <p class="note" id="payOrderNo"></p>
+</div></div>
+
+<script>
+"use strict";
+const MENUS={{ menus|tojson }};
+const SOLO={{ solo|tojson }};
+const STAGE_MENUS={{ stage_menus|tojson }};
+const PAYMENTS={{ 'true' if payments else 'false' }};
+const IS_ADMIN={{ 'true' if is_admin else 'false' }};
+const TOTAL_STEPS={{ total_steps }};
+const COUPON_MIN={{ coupon_min }};
+const GO_LABEL={{ ('お支払いへ進む' if payments and not is_admin else ('無料で実行（管理者）' if is_admin else '実行'))|tojson }};
+const BY_KEY={}; MENUS.forEach(m=>{BY_KEY[m.key]=m;});
+const $=s=>document.querySelector(s);
+const $$=s=>Array.from(document.querySelectorAll(s));
+const yen=n=>Number(n).toLocaleString('ja-JP')+'円';
+let curJob=null, payOrder=null, payAmount=0, timer=null;
+
+function picked(){
+  const keys=$$('#menuList input[type=checkbox]:checked').map(i=>i.value);
+  return MENUS.map(m=>m.key).filter(k=>keys.includes(k));
+}
+function qtyOf(key){
+  const box=document.querySelector('#menuList label[data-key="'+key+'"] .qty input');
+  return box?box.value.trim():'';
+}
+function stageOf(key){
+  const box=document.querySelector('#menuList label[data-key="'+key+'"] .stage input');
+  return box?box.value.trim():'';
+}
+function qtyMap(){
+  const out={};
+  picked().forEach(k=>{ if(BY_KEY[k].value) out[k]=qtyOf(k); });
+  return out;
+}
+function stageMap(){
+  const out={};
+  picked().forEach(k=>{ if(STAGE_MENUS.includes(k)) out[k]=stageOf(k); });
+  return out;
+}
+function unitsForPrice(m, val){
+  /* 画面の見積もり（サーバの pricing.compute_puni_amount と一致させる） */
+  const n=Number(val||0)||0;
+  if(m.key==='puni_farm') return Math.max(1,Math.ceil(n/10));
+  if(m.key==='puni_unlimited') return Math.max(1,Math.ceil(n/60));
+  if(m.key==='puni_account'||m.key==='puni_aged') return Math.max(1,n||1);
+  return 1;
+}
+function rows(){
+  const out=[];
+  picked().forEach(k=>{
+    const m=BY_KEY[k];
+    const units=m.value?unitsForPrice(m,qtyOf(k)):1;
+    out.push([m.label+(units>1?(' ×'+units):''), m.amount*units]);
+  });
+  return out;
+}
+function qtyError(){
+  for(const k of picked()){
+    const m=BY_KEY[k];
+    const qbox=document.querySelector('#menuList label[data-key="'+k+'"] .qty input');
+    if(m.value){
+      const raw=qtyOf(k);
+      const ok=/^[0-9]+$/.test(raw)&&Number(raw)>=m.value[0]&&Number(raw)<=m.value[1];
+      if(qbox) qbox.classList.toggle('bad',!!raw&&!ok);
+      if(!raw) return '「'+m.label+'」の数量を入力してください。';
+      if(!ok) return '「'+m.label+'」は '+m.value[0].toLocaleString('ja-JP')+'〜'+m.value[1].toLocaleString('ja-JP')+' の範囲で入力してください。';
+      if(k==='puni_unlimited'&&Number(raw)%30!==0) return '「回し放題代行」の時間は 30分単位で入力してください。';
+    }
+    if(STAGE_MENUS.includes(k)){
+      const sbox=document.querySelector('#menuList label[data-key="'+k+'"] .stage input');
+      const raw=stageOf(k);
+      const ok=/^[0-9]+$/.test(raw)&&Number(raw)>=1000000&&Number(raw)<=99999999;
+      if(sbox) sbox.classList.toggle('bad',!!raw&&!ok);
+      if(!raw) return '「'+m.label+'」のステージIDを入力してください。';
+      if(!ok) return '「'+m.label+'」のステージIDは 1,000,000〜99,999,999 の整数で入力してください。';
+    }
+  }
+  return '';
+}
+function soloError(){
+  const p=picked(), s=p.filter(k=>SOLO.includes(k));
+  if(s.length&&p.length>1) return '「'+BY_KEY[s[0]].label+'」はほかのメニューと同時に選べません。';
+  return '';
+}
+function mode(){ return ($$('#modeList input[name=mode]:checked')[0]||{}).value||'email'; }
+function setMode(v){ $$('#modeList input[name=mode]').forEach(i=>{ i.checked=i.value===v; }); syncMode(); }
+function syncMode(){
+  const m=mode(), isNew=m==='new';
+  $$('#modeList label').forEach(l=>l.classList.toggle('on',l.querySelector('input').checked));
+  $('#f-login').hidden=isNew; $('#f-pw').hidden=isNew;
+}
+function total(){ return rows().reduce((a,r)=>a+r[1],0); }
+function renderCart(){
+  const list=$('#cart'); list.textContent='';
+  rows().forEach(([label,amount])=>{
+    const li=document.createElement('li');
+    const a=document.createElement('span'); a.textContent=label;
+    const b=document.createElement('span'); b.textContent=yen(amount);
+    li.append(a,b); list.append(li);
+  });
+  if(!rows().length){ const li=document.createElement('li'); li.textContent='メニューを選んでください'; list.append(li); }
+  const t=IS_ADMIN&&PAYMENTS?0:total();
+  $('#total').textContent=yen(t);
+  $('#barYen').textContent=yen(t);
+  $('#barWhat').textContent=rows().length?('選択 '+rows().length+'件'):'メニュー未選択';
+  $('#menuErr').textContent=soloError();
+  $('#go').disabled=!rows().length||!!soloError()||!!curJob;
+  $$('#menuList label').forEach(l=>{
+    const on=l.querySelector('input').checked;
+    l.classList.toggle('on',on);
+    const q=l.querySelector('.qty'); if(q) q.hidden=!on;
+    const u=l.querySelector('.unit'); if(u) u.hidden=!on;
+    const s=l.querySelector('.stage'); if(s) s.hidden=!on;
+    if(on&&SOLO.includes(l.dataset.key)) setMode('new');
+  });
+}
+$('#menuList').addEventListener('change',renderCart);
+$('#menuList').addEventListener('input',()=>{ $('#runErr').textContent=''; qtyError(); renderCart(); });
+$('#menuList').addEventListener('click',e=>{
+  if(!e.target.classList.contains('qmax')) return;
+  const box=e.target.parentElement.querySelector('input');
+  box.value=box.dataset.max; renderCart();
+});
+$('#modeList').addEventListener('change',syncMode);
+
+async function api(url,opts,tries){
+  tries=tries||40;
+  for(let i=0;;i++){
+    const r=await fetch(url,Object.assign({cache:'no-store'},opts||{}));
+    if(r.status!==503||i>=tries-1) return r;
+    let j={}; try{ j=await r.clone().json(); }catch(e){}
+    if(j.code!=='updating') return r;
+    $('#runErr').textContent=j.error||'ただいまアップデート中です。自動で続きます…';
+    await new Promise(ok=>setTimeout(ok,5000));
+  }
+}
+async function copyText(val){
+  try{ await navigator.clipboard.writeText(val); return true; }catch(e){}
+  try{
+    const t=document.createElement('textarea'); t.value=val; t.setAttribute('readonly','');
+    t.style.position='fixed'; t.style.opacity='0'; document.body.append(t); t.select();
+    const ok=document.execCommand('copy'); t.remove(); return ok;
+  }catch(e){ return false; }
+}
+const SEEN_KEY='puni-seen-jobs';
+function seenJobs(){ try{ const v=JSON.parse(sessionStorage.getItem(SEEN_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function markSeen(job){ try{ const v=seenJobs(); if(!v.includes(job)) sessionStorage.setItem(SEEN_KEY,JSON.stringify(v.concat(job).slice(-20))); }catch(e){} }
+
+function body(){
+  return {puni:{mode:mode(),login:$('#login').value.trim(),password:$('#password').value,
+                menus:picked(),qty:qtyMap(),stages:stageMap()},
+          coupon:($('#coupon')&&!IS_ADMIN)?$('#coupon').value.trim().toUpperCase():''};
+}
+$('#go').addEventListener('click',async()=>{
+  $('#runErr').textContent=''; $('#acctErr').textContent='';
+  const qe=qtyError()||soloError();
+  if(qe){ $('#runErr').textContent=qe; return; }
+  if(mode()!=='new'&&(!$('#login').value.trim()||!$('#password').value)){
+    $('#acctErr').textContent='メールアドレスとパスワードを入力してください。';
+    $('#login').focus();
+    return;
+  }
+  $('#go').disabled=true; $('#go').textContent='送信中…';
+  try{
+    const r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())});
+    const j=await r.json();
+    if(!r.ok){ $('#runErr').textContent=j.error||'注文できませんでした。'; return; }
+    $('#runErr').textContent='';
+    if(j.job){ watch(j.job); return; }
+    payOrder=j.order; payAmount=j.amount;
+    if(j.state==='paid'&&j.prepaid){ await payNow(''); return; }
+    openPay();
+  }catch(e){ $('#runErr').textContent='通信できませんでした。電波の良いところでもう一度お試しください。'; }
+  finally{ $('#go').textContent=GO_LABEL; renderCart(); }
+});
+
+function openPay(){
+  $('#payYen').textContent=yen(payAmount);
+  $('#payOrderNo').textContent='注文番号：'+payOrder;
+  $('#payErr').textContent=''; $('#payLink').value=''; $('#payGo').disabled=false;
+  $('#payLink').closest('label').hidden=false; $('#payGo').textContent='支払って実行する';
+  $('#payPanel').hidden=false; document.body.style.overflow='hidden';
+  $('#payLink').focus();
+}
+function closePay(){ $('#payPanel').hidden=true; document.body.style.overflow=''; renderCart(); loadResume(); }
+$('#payCancel').addEventListener('click',closePay);
+$('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
+$('#payGo').addEventListener('click',()=>{
+  const link=$('#payLink').value.trim();
+  if(!$('#payLink').closest('label').hidden&&!/pay\.paypay\.ne\.jp\//i.test(link)){
+    $('#payErr').textContent='PayPayの送金リンク（https://pay.paypay.ne.jp/…）を貼り付けてください。'; return;
+  }
+  payNow(link);
+});
+async function payNow(link){
+  const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…（画面を閉じずにお待ちください）';
+  try{
+    const r=await api('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link})});
+    const j=await r.json();
+    if(!r.ok){
+      $('#payErr').textContent=j.error||'決済を確認できませんでした。';
+      if(j.hold){
+        $('#payLink').closest('label').hidden=true; btn.textContent='今すぐ確認する'; btn.disabled=false;
+        $('#payErr').textContent='保留中です。送金した方がPayPayアプリで保留を解除すると、自動で確認して実行します。同じリンクを送り直したり、再送金したりしないでください。この画面は閉じても大丈夫です。';
+        startOrderWatch(); return;
+      }
+      if(j.code==='started'){ closePay(); await loadResume(true); return; }
+      btn.disabled=['dead','order_missing','done'].includes(j.code);
+      return;
+    }
+    $('#payPanel').hidden=true; document.body.style.overflow='';
+    watch(j.job);
+  }catch(e){ $('#payErr').textContent='通信エラーです。もう一度お試しください（同じリンクのままで大丈夫です）。'; btn.disabled=false; }
+}
+
+let pollFails=0;
+function watch(job){
+  if(!job) return;
+  curJob=job; pollFails=0; markSeen(job);
+  $('#codes').textContent=''; delete $('#codes').dataset.done;
+  $('#resultLines').textContent=''; $('#coupBox').hidden=true; $('#log').textContent='';
+  $('#now').dataset.s='running'; $('#now').textContent='準備しています…'; $('#pbar').style.width='0'; $('#pbar').dataset.s='';
+  $('#s-status').hidden=false; renderCart();
+  $('#s-status').scrollIntoView({behavior:'smooth',block:'start'});
+  if(timer) clearInterval(timer);
+  poll(); timer=setInterval(poll,1500);
+}
+function stopWatch(){ clearInterval(timer); timer=null; curJob=null; renderCart(); }
+async function poll(){
+  if(!curJob) return;
+  let j;
+  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json(); if(!r.ok) throw new Error(j.error||'not found'); pollFails=0; }
+  catch(e){
+    if(++pollFails>=20){
+      stopWatch(); $('#now').dataset.s='error';
+      $('#now').textContent='状況を確認できなくなりました。下の「注文」から結果を確認できます。'; loadResume();
+    } else { $('#now').textContent='状況を確認しています…（通信が不安定です）'; }
+    return;
+  }
+  const st=j.status;
+  $('#now').dataset.s=st;
+  $('#now').textContent=st==='queued'?('順番待ちです（'+(j.queue_position||1)+'番目）。そのままお待ちください'):
+    st==='done'?'完了しました':st==='error'?('エラー：'+(j.error||'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
+  const pct=st==='done'?100:Math.round(Math.min(1,(j.step||0)/TOTAL_STEPS)*100);
+  $('#pbar').style.width=pct+'%'; $('#pbar').dataset.s=st;
+  $('#log').textContent=(j.log||[]).join('\n');
+  if(j.puni&&j.puni.lines&&j.puni.lines.length) $('#resultLines').textContent=j.puni.lines.join('\n');
+  if(j.result&&j.result.puni_account) showAccounts(j.result.puni_account, st==='error');
+  if(st==='done'||st==='error'){
+    stopWatch(); loadCoupon(); loadResume();
+    if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
+  }
+}
+function showAccounts(accounts, failed){
+  const box=$('#codes'); if(box.dataset.done==='1') return;
+  box.textContent=''; box.dataset.done='1';
+  const h=document.createElement('h3'); h.textContent='作成したアカウント（必ず控えてください）'; box.append(h);
+  if(failed){
+    const w=document.createElement('p'); w.className='err';
+    w.textContent='途中で止まりましたが、作成済みのアカウントがあればこちらに表示されます。';
+    box.append(w);
+  }
+  const list=Array.isArray(accounts)?accounts:[accounts];
+  list.forEach((acc,i)=>{
+    [['メールアドレス',acc.email],['パスワード',acc.password],['プレイヤー名',acc.player_name]].forEach(([name,val])=>{
+      if(!val) return;
+      const row=document.createElement('div'); row.className='code';
+      const d=document.createElement('div');
+      const s=document.createElement('small'); s.textContent=(list.length>1?('#'+(i+1)+' '):'')+name;
+      const v=document.createElement('strong'); v.textContent=val;
+      d.append(s,v);
+      const b=document.createElement('button'); b.className='btn'; b.type='button'; b.textContent='コピー';
+      b.addEventListener('click',async()=>{ b.textContent=(await copyText(val))?'コピーしました':'コピーできません'; });
+      row.append(d,b); box.append(row);
+    });
+  });
+}
+async function loadCoupon(){
+  if(!PAYMENTS) return;
+  try{
+    const r=await fetch('/api/orders/mine',{cache:'no-store'}); const j=await r.json();
+    const o=(j.orders||[]).filter(x=>x.puni).find(x=>x.coupon_issued);
+    if(o){ $('#coupBox').hidden=false; $('#coupBox').textContent='🎟 次回使えるクーポン '+o.coupon_issued+'（次回 '+COUPON_MIN+'円以上のご注文で10%引き・1回きり・30日間）'; }
+  }catch(e){}
+}
+window.addEventListener('beforeunload',e=>{ if(curJob){ e.preventDefault(); e.returnValue=''; } });
+
+let orderTimer=null;
+function startOrderWatch(){ if(!orderTimer) orderTimer=setInterval(()=>loadResume(true),20000); }
+function stopOrderWatch(){ clearInterval(orderTimer); orderTimer=null; }
+const STATE_JA={unpaid:'お支払い待ち',hold:'保留中（自動で確認しています）',paid:'お支払い済み・開始待ち',
+                started:'実行中',done:'完了',dead:'自動では確認できませんでした'};
+async function loadResume(){
+  if(!PAYMENTS) return;
+  let list=[];
+  try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); const j=await r.json(); list=(j.orders||[]).filter(o=>o.puni); }catch(e){ return; }
+  const live=list.find(o=>o.job&&o.state==='started'&&!seenJobs().includes(o.job));
+  if(live&&!curJob){ if(!$('#payPanel').hidden&&payOrder===live.order) closePay(); watch(live.job); }
+  const box=$('#resumeList'); box.textContent='';
+  $('#s-resume').hidden=!list.length;
+  list.forEach(o=>{
+    const d=document.createElement('div'); d.className='code';
+    const t=document.createElement('div');
+    const s=document.createElement('small'); s.textContent=STATE_JA[o.state]||o.state;
+    const v=document.createElement('strong'); v.textContent=yen(o.amount)+'（注文 '+o.order+'）';
+    t.append(s,v); d.append(t);
+    const b=document.createElement('button'); b.className='btn primary'; b.type='button';
+    if(o.state==='done'&&o.result&&o.result.puni_account){
+      b.textContent='アカウント情報を見る';
+      b.addEventListener('click',()=>{ $('#s-status').hidden=false; $('#codes').textContent=''; delete $('#codes').dataset.done;
+        $('#now').dataset.s='done'; $('#now').textContent='完了した注文のアカウント情報です'; $('#pbar').style.width='100%'; $('#pbar').dataset.s='done';
+        showAccounts(o.result.puni_account,false); $('#s-status').scrollIntoView({behavior:'smooth',block:'start'}); });
+      d.append(b);
+    }else if(o.job&&(o.state==='started'||o.state==='done')){
+      b.textContent=o.state==='done'?'結果を見る':'状況を見る';
+      b.addEventListener('click',()=>watch(o.job)); d.append(b);
+    }else if(o.state==='dead'){
+      b.textContent='注文番号をコピー';
+      b.addEventListener('click',async()=>{ b.textContent=(await copyText(o.order))?'コピーしました。管理者に伝えてください':'コピーできません'; });
+      d.append(b);
+    }else if(['unpaid','hold','paid'].includes(o.state)){
+      b.textContent=o.state==='paid'?'実行する':o.state==='hold'?'確認する':'支払う';
+      b.addEventListener('click',()=>{ payOrder=o.order; payAmount=o.amount; if(o.state==='unpaid'){ openPay(); } else { $('#payPanel').hidden=false; document.body.style.overflow='hidden'; $('#payYen').textContent=yen(o.amount); $('#payOrderNo').textContent='注文番号：'+o.order; $('#payLink').closest('label').hidden=true; payNow(''); } });
+      d.append(b);
+    }
+    box.append(d);
+  });
+  if(list.some(o=>['hold','paying','starting'].includes(o.state)||(o.state==='started'&&o.job))) startOrderWatch(); else stopOrderWatch();
+}
+
+async function claimOrder(){
+  const el=$('#claimNo'); const no=(el.value||'').trim();
+  const err=$('#claimErr'); err.textContent='';
+  if(!no){ err.textContent='注文番号を入れてください。'; return; }
+  const btn=$('#claimGo'); btn.disabled=true;
+  try{
+    const r=await api('/api/orders/'+encodeURIComponent(no)+'/claim',{method:'POST'});
+    let j={}; try{ j=await r.json(); }catch(e){}
+    if(!r.ok){ err.textContent=j.error||'再開できませんでした。番号を確認してください。'; return; }
+    el.value='';
+    await loadResume();
+    $('#s-resume').hidden=false;
+    $('#s-resume').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){ err.textContent='通信に失敗しました。少し待ってからお試しください。'; }
+  finally{ btn.disabled=false; }
+}
+if(PAYMENTS){
+  $('#claimGo').addEventListener('click',claimOrder);
+  $('#claimNo').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); claimOrder(); } });
+}else{
+  const c=$('#s-claim'); if(c) c.hidden=true;
+}
+
+syncMode(); renderCart(); loadResume();
+</script>
+</body></html>

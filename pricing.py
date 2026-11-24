@@ -10,7 +10,10 @@ PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other":
           # ツムツム代行（別の大メニュー。1メニューごとの料金）
           "tsum_coin": 50, "tsum_coin_max": 50, "tsum_level_max": 50, "tsum_score": 50, "tsum_score_max": 50,
           "tsum_tsum_lv": 50, "tsum_tsum_lv_pick": 50, "tsum_all_lv": 300, "tsum_medal": 50, "tsum_medal_max": 50,
-          "tsum_nickname": 50, "tsum_box": 100, "tsum_premium": 100, "tsum_guest_create": 30}
+          "tsum_nickname": 50, "tsum_box": 100, "tsum_premium": 100, "tsum_guest_create": 30,
+          # ぷにぷに代行（3つ目の大メニュー）
+          "puni_account": 50, "puni_aged": 100, "puni_farm_10": 50, "puni_hour": 100,
+          "puni_hitodama": 50, "puni_coin_gacha": 60, "puni_stage_clear": 50}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
                 "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
                 "restart": "初期垢作成（リスタートパック・基本料金）",
@@ -20,7 +23,11 @@ PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "
                 "tsum_tsum_lv_pick": "ツム：指定ツムをレベルMAX", "tsum_all_lv": "ツム：全ツムをレベルMAX",
                 "tsum_medal": "ツム：メダル指定", "tsum_medal_max": "ツム：メダルMAX", "tsum_nickname": "ツム：ニックネーム変更",
                 "tsum_box": "ツム：セレクトBOX完売",
-                "tsum_premium": "ツム：プレミアム完売", "tsum_guest_create": "ツム：ゲストアカウント生成"}
+                "tsum_premium": "ツム：プレミアム完売", "tsum_guest_create": "ツム：ゲストアカウント生成",
+                "puni_account": "ぷに：アカウント作成（1件）", "puni_aged": "ぷに：久垢作成（1件）",
+                "puni_farm_10": "ぷに：自動周回（10周ごと）", "puni_hour": "ぷに：回し放題（1時間ごと）",
+                "puni_hitodama": "ぷに：ひとだま補充", "puni_coin_gacha": "ぷに：コインガチャ回し切り",
+                "puni_stage_clear": "ぷに：ステージクリア（1マップ単発）"}
 PT_KEY = "プレイ時間+分"          # qty に入れる「プレイ時間を増やす（分）」の特別なキー
 PT_MIN_MINUTES = 60
 PT_MAX_MINUTES = 2147483647 // (30 * 60)   # セーブの上限（1/30秒単位の int）を超えない
@@ -113,4 +120,20 @@ def compute_tsum_amount(menus, qty=None) -> tuple[int, list]:
     for key in tsum_service.sort_menus(menus or []):
         price = PRICES.get(tsum_service.MENUS[key]["price"], 0)
         rows.append((f"ツムツム：{tsum_service.menu_label(key)}", 1, price))
+    return sum(n * p for _, n, p in rows), rows
+
+
+def compute_puni_amount(menus, qty=None) -> tuple[int, list]:
+    """ぷにぷに代行の金額を決める（サーバー側の正）。戻り値は (合計, 内訳)。
+    puni_farm は 10周ごとに1件、puni_unlimited は 1時間ごとに1件、
+    puni_account/puni_aged は作成件数ぶん、ほかは 1件固定。
+    件数の計算規則そのものは puni_service.pricing_units が決める。"""
+    import puni_service
+    rows = []
+    for price_key, units in puni_service.pricing_units(menus or [], qty or {}):
+        label = puni_service.MENUS.get(
+            next((k for k, v in puni_service.MENUS.items() if v["price"] == price_key), ""), {}
+        ).get("label") or PRICE_LABELS.get(price_key, price_key)
+        price = PRICES.get(price_key, 0)
+        rows.append((f"ぷにぷに：{label}", units, price))
     return sum(n * p for _, n, p in rows), rows

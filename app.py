@@ -38,10 +38,11 @@ import paypay_gateway
 import save_audit
 import save_repair
 import tsum_service
+import puni_service
 from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py からも同じ名前で使えるようにしている
     COUPON_DAYS, COUPON_MIN, CRASH_ITEMS, DB_OFFSET, EV_PREFIX, EVENT_BY_ID, EVENT_MAPS, EVENT_SELECTABLE, PRICE_LABELS, PRICES,
     PT_KEY, PT_MAX_MINUTES, PT_MIN_MINUTES, RESTART_KEY, _ALL_EVENT_MAPS, _event_ids, _legend_kinds, _load_event_maps,
-    _one_legend_tier, chara_units, compute_amount, compute_tsum_amount,
+    _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
 APP_VERSION = "1.15"
@@ -452,6 +453,7 @@ JOB_TTL = 30 * 60                     # 結果は30分で消す
 TOTAL_STEPS = 4
 TSUM_TOTAL_STEPS = 6                  # ツムツム代行の段取り（回線→ログイン→接続→取得→実行→発行）
 TSUM_CAPTCHA_WAIT = 240               # 画像認証（CAPTCHA）の入力を待つ秒数
+PUNI_TOTAL_STEPS = 10                 # ぷにぷに代行の段取り（受付→ログイン→実行→完了）
 _job_pipes: dict[str, object] = {}    # 実行中のジョブへ送る口（画像認証の答えを渡すのに使う）
 _job_pipes_lock = threading.Lock()
 
@@ -666,10 +668,14 @@ def _publish_job(job: dict) -> None:
 
 
 def _lock_subject(job: dict, arguments: tuple) -> str:
-    """同じアカウントを同時に処理しないための鍵。にゃんこは引継ぎコード、ツムツムはログインID。"""
+    """同じアカウントを同時に処理しないための鍵。にゃんこは引継ぎコード、
+    ツムツム・ぷにぷにはログインID。"""
     if job.get("mode") == "tsum":
         payload = arguments[0] if arguments else {}
         return "tsum:" + str((payload or {}).get("login") or "")
+    if job.get("mode") == "puni":
+        payload = arguments[0] if arguments else {}
+        return "puni:" + str((payload or {}).get("login") or "")
     return str(arguments[0] or "") if arguments else ""
 
 
@@ -750,6 +756,45 @@ def _run_tsum_job(job: dict, payload: dict) -> None:
     _publish_job(job)
 
 
+def _run_puni_job(job: dict, payload: dict) -> None:
+    """ぷにぷに代行1件を実行する（ワーカープロセスの中）。
+    アカウント情報（メールアドレス・パスワード）はログに出さない。"""
+    def log(text: str) -> None:
+        _log(job, str(text))
+
+    def progress(step: int, text: str) -> None:
+        job["step"] = max(0, min(int(step or 0), PUNI_TOTAL_STEPS))
+        _log(job, str(text))
+
+    try:
+        out = puni_service.run_order(
+            payload.get("mode", "email"), payload.get("login", ""), payload.get("password", ""),
+            payload.get("menus") or [], payload.get("qty") or {}, payload.get("stages") or {},
+            progress=progress, log=log,
+        )
+    except Exception as exc:  # noqa: BLE001
+        job.update(status="error", error=f"ぷにぷに代行の実行中にエラーが発生しました（{type(exc).__name__}）。"
+                                        "もう一度お試しいただくか、注文番号を管理者にお伝えください。",
+                   finished=time.time())
+        _log(job, "エラー: 実行中に想定外のエラーが発生しました。")
+        _publish_job(job)
+        return
+    job["puni"] = {"lines": out["lines"], "done": int(out["done"]),
+                   "menus": [puni_service.menu_label(k) for k in (payload.get("menus") or [])]}
+    if out.get("account"):
+        job["result"] = {"puni_account": out["account"]}
+    if out.get("ok"):
+        job.update(status="done", step=PUNI_TOTAL_STEPS)
+        _log(job, "完了しました。")
+    else:
+        job["status"] = "error"
+        job["error"] = out["error"] or "ぷにぷに代行を実行できませんでした。"
+        job["outcome_unknown"] = bool(out.get("moved") and not out.get("account"))
+        _log(job, "エラー: " + job["error"])
+    job["finished"] = time.time()
+    _publish_job(job)
+
+
 def _worker_entry(pipe, job, arguments, slot, learned_version, names):
     """Run BCSFE in its own process and its own persistent slot directory."""
     global _worker_pipe, _bcsfe_base, _NAMES_FILE, _VERSION_FILE
@@ -776,6 +821,10 @@ def _worker_entry(pipe, job, arguments, slot, learned_version, names):
             if job.get("mode") == "tsum":
                 # ツムツム代行は bcsfe（にゃんこのセーブ編集）を使わないので、その準備はしない
                 _run_tsum_job(job, arguments[0])
+                return
+            if job.get("mode") == "puni":
+                # ぷにぷに代行も bcsfe を使わない（ゲームサーバへ直接ログイン）
+                _run_puni_job(job, arguments[0])
                 return
 
             original_config = engine.core.Path.get_config_folder().to_str()
@@ -1907,7 +1956,8 @@ def _gc_orders() -> None:
 
 
 def _is_tsum_arguments(args) -> bool:
-    """ツムツム代行の注文は、実行用の内容を1つの辞書で持つ（にゃんこは11個の並び）。"""
+    """ツムツム代行・ぷにぷに代行の注文は、実行用の内容を1つの辞書で持つ
+    （にゃんこは11個の並び）。保存／復元ではどちらも同じ扱いでよいので一緒に判定する。"""
     return bool(args) and len(args) == 1 and isinstance(args[0], dict)
 
 
@@ -2112,7 +2162,7 @@ def robots_txt():
 @app.get("/sitemap.xml")
 def sitemap_xml():
     urls = "".join(f"<url><loc>{xml_escape(_site() + path)}</loc></url>"
-                   for path in ("/", "/nyanko", "/tsum"))
+                   for path in ("/", "/nyanko", "/tsum", "/puni"))
     return Response(
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -2135,6 +2185,20 @@ def tsum_page():
         TSUM_HTML, menus=menus, modes=tsum_service.MODE_LABELS, solo=list(tsum_service.SOLO_MENUS),
         is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
         coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=TSUM_TOTAL_STEPS, site=_site(),
+    )
+
+
+@app.get("/puni")
+def puni_page():
+    """ぷにぷに代行の画面（にゃんこ・ツムツムに次ぐ3つ目の大メニュー）。"""
+    menus = [dict(key=k, **{kk: vv for kk, vv in v.items() if kk != "price"},
+                  amount=PRICES.get(v["price"], 0))
+             for k, v in sorted(puni_service.MENUS.items(), key=lambda kv: kv[1]["order"])]
+    return render_template_string(
+        PUNI_HTML, menus=menus, modes=puni_service.MODE_LABELS, solo=list(puni_service.SOLO_MENUS),
+        stage_menus=list(puni_service.STAGE_MENUS),
+        is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
+        coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=PUNI_TOTAL_STEPS, site=_site(),
     )
 
 
@@ -2433,6 +2497,85 @@ def _run_tsum_order(data: dict, admin_free: bool):
     return _place_order(job, arguments, transfer_key, amount, breakdown, summary, [], data.get("coupon", ""))
 
 
+def _puni_summary(mode: str, menus: list, qty: dict, stages: dict) -> str:
+    """管理画面に出す注文の要約。アカウント情報（メールアドレス・パスワード）は入れない。"""
+    parts = [puni_service.MODE_LABELS.get(mode, mode)]
+    for key in menus:
+        label = puni_service.menu_label(key)
+        sfx = ""
+        if key in puni_service.STAGE_MENUS and stages.get(key) is not None:
+            sfx += f"@{stages[key]}"
+        value = qty.get(key)
+        if isinstance(value, int):
+            sfx += f"={value:,}"
+        elif value is not None:
+            sfx += f"={value}"
+        parts.append(label + sfx)
+    return ("ぷにぷに代行／" + "／".join(parts))[:400]
+
+
+def _new_puni_job(mode: str, menus: list) -> dict:
+    return {"status": "running", "step": 0, "log": [], "warn": [], "report": [], "skipped": [],
+            "dry": False, "clone": False, "integrity_only": False, "result": None, "error": None,
+            "created": time.time(), "finished": None, "owner": _owner(),
+            "mode": "puni", "puni_mode": mode, "count": len(menus)}
+
+
+def _run_puni_order(data: dict, admin_free: bool):
+    """ぷにぷに代行の注文を受け取る（/run のぷにぷに分）。支払い・実行枠はにゃんこ・ツムツムと共通。"""
+    request_body = data.get("puni") or {}
+    mode = str(request_body.get("mode", "email")).strip()[:8]
+    login = str(request_body.get("login", "")).strip()[:160]
+    password = str(request_body.get("password", ""))[:160]
+    raw_menus = request_body.get("menus") if isinstance(request_body.get("menus"), list) else []
+    raw_qty = request_body.get("qty") if isinstance(request_body.get("qty"), dict) else {}
+    raw_stages = request_body.get("stages") if isinstance(request_body.get("stages"), dict) else {}
+    menus, qty, stages, error = puni_service.validate_order(
+        [str(x) for x in raw_menus if isinstance(x, (str, int)) and not isinstance(x, bool)][:40],
+        raw_qty, raw_stages)
+    if error:
+        return jsonify(error=error), 400
+    if menus and menus[0] in puni_service.SOLO_MENUS:
+        mode = "new"
+    error = puni_service.check_account(mode, login, password)
+    if error:
+        return jsonify(error=error), 400
+    if mode == "new":
+        login, password = "", ""
+    if not _rate_ok("punirun:" + _client_ip(), 20, 600):
+        return _too_fast()
+    payload = {"mode": mode, "login": login, "password": password,
+               "menus": menus, "qty": qty, "stages": stages}
+    job = _new_puni_job(mode, menus)
+    arguments = (payload,)
+    transfer_key = hmac.new(app.secret_key.encode(), ("puni:" + login).encode(), hashlib.sha256).digest() if login else None
+    if transfer_key is not None:
+        with _jobs_lock:
+            if transfer_key in _active_transfers:
+                return jsonify(error="このアカウントの処理はすでに実行中です。完了までお待ちください。"), 409
+    summary = _puni_summary(mode, menus, qty, stages)
+    if not PAYMENTS_ENABLED:
+        if _draining():
+            return _updating_response()
+        return _start_job(job, arguments, transfer_key)
+    if admin_free:
+        if _draining():
+            return _updating_response()
+        oid = secrets.token_urlsafe(16)
+        me = _owner()
+        free = {"owner": me, "uid": _uid(me), "state": "paid", "amount": 0, "created": time.time(), "admin_free": True,
+                "job": job, "arguments": arguments, "transfer_key": transfer_key, "breakdown": [], "skipped": [],
+                "summary": "【管理者・無料】" + summary}
+        with _orders_lock:
+            _orders[oid] = free
+        resp = _start_paid_order(free)
+        _persist_orders()
+        return resp
+    amount, rows = compute_puni_amount(menus, qty)
+    breakdown = [{"label": label, "count": n, "unit": p} for label, n, p in rows]
+    return _place_order(job, arguments, transfer_key, amount, breakdown, summary, [], data.get("coupon", ""))
+
+
 @app.post("/run")
 def run():
     _gc_jobs()
@@ -2444,6 +2587,8 @@ def run():
         return jsonify(error="注文の内容を読み取れませんでした。画面を再読み込みしてから、もう一度お試しください。"), 400
     if isinstance(data.get("tsum"), dict):
         return _run_tsum_order(data, admin_free)
+    if isinstance(data.get("puni"), dict):
+        return _run_puni_order(data, admin_free)
     transfer = str(data.get("transfer", "")).strip()[:64]
     confirm = str(data.get("confirm", "")).strip()[:16]
     if bool(transfer) != bool(confirm):
@@ -2654,6 +2799,7 @@ VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号�
 def _public_order(order_id: str, o: dict) -> dict:
     return {"order": order_id, "amount": o["amount"], "state": o["state"], "created": int(o["created"]), "retry": bool(o.get("retry")),
             "tsum": (o.get("job") or {}).get("mode") == "tsum",   # ツムツム代行の注文（画面が別なので区別する）
+            "puni": (o.get("job") or {}).get("mode") == "puni",   # ぷにぷに代行の注文
             "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
             "coupon_issued": o.get("coupon_issued"),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
@@ -2918,7 +3064,7 @@ def status(job_id: str):
         result=job["result"], error=job["error"], integrity=job.get("integrity"), integrity_only=job.get("integrity_only", False),
         audit=job.get("audit"),
         repair=job.get("repair"), post_audit=job.get("post_audit"),
-        tsum=job.get("tsum"), captcha=job.get("captcha"),
+        tsum=job.get("tsum"), captcha=job.get("captcha"), puni=job.get("puni"),
     )
 
 
@@ -2980,6 +3126,9 @@ MAIN_HTML = _template("main.html")     # 利用者の画面（HTML・CSS・JavaS
 
 
 TSUM_HTML = _template("tsum.html")     # ツムツム代行の画面
+
+
+PUNI_HTML = _template("puni.html")     # ぷにぷに代行の画面
 
 
 HOME_HTML = _template("home.html")     # トップ（大メニュー）

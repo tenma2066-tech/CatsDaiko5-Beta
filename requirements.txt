@@ -6,3 +6,6 @@ cryptography>=42.0
 requests>=2.32
 PySocks>=1.7
 msgpack>=1.0
+# ぷにぷに代行（puni_engine）が必要とする暗号／SOCKS プロキシ対応
+pycryptodome>=3.20
+aiohttp-socks>=0.9

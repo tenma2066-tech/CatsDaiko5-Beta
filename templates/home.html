@@ -2,7 +2,7 @@
 <meta name="google-site-verification" content="HOaFZOzV5t4jyEXdAr2bMg6f2OVwvdpedlAosg1FXT0" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>にゃんこ大戦争・ツムツム代行｜TN SHOP</title>
+<title>にゃんこ大戦争・ツムツム・ぷにぷに代行｜TN SHOP</title>
 <link rel="canonical" href="{{ site }}/">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
@@ -65,6 +65,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
     <b>このブラウザの注文があります</b>
     <a href="/nyanko" id="mineNyanko" hidden>🐱 にゃんこ代行の注文・コードを見る →</a>
     <a href="/tsum" id="mineTsum" hidden>🧸 ツムツム代行の注文・引き継ぎ情報を見る →</a>
+    <a href="/puni" id="minePuni" hidden>👾 ぷにぷに代行の注文・アカウント情報を見る →</a>
   </div>
 
   <a class="gamecard" href="/nyanko">
@@ -79,6 +80,12 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
     <small>コイン・スコア・ツムレベル・ガチャ完売・ゲストアカウント生成など。<em>{{ prices.tsum_coin }}円</em>〜</small>
     <span class="go">ツムツム代行へ →</span>
   </a>
+  <a class="gamecard" href="/puni">
+    <picture><source srcset="/static/game-puni.webp?v=1" type="image/webp"><img src="/static/game-puni.jpg?v=1" alt="ぷにぷに代行" width="1024" height="512"></picture>
+    <b>👾 妖怪ウォッチ ぷにぷに</b>
+    <small>アカウント作成・自動周回・回し放題・ひとだま補充・コインガチャなど。<em>{{ prices.puni_account }}円</em>〜</small>
+    <span class="go">ぷにぷに代行へ →</span>
+  </a>
 
   <div class="foot"><p>TN SHOP ／ お問い合わせ：X <b>@paysms1212</b></p><p>v{{ version }}</p></div>
 </main>
@@ -91,10 +98,13 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
     const r=await fetch('/api/orders/mine',{cache:'no-store'}); if(!r.ok) return;
     const list=(await r.json()).orders||[];
     const live=o=>['unpaid','hold','paid','started'].includes(o.state)||(o.state==='done'&&o.result)||o.state==='dead';
-    const n=list.some(o=>!o.tsum&&live(o)), t=list.some(o=>o.tsum&&live(o));
+    const n=list.some(o=>!o.tsum&&!o.puni&&live(o)),
+          t=list.some(o=>o.tsum&&live(o)),
+          p=list.some(o=>o.puni&&live(o));
     document.getElementById('mineNyanko').hidden=!n;
     document.getElementById('mineTsum').hidden=!t;
-    document.getElementById('mine').hidden=!(n||t);
+    document.getElementById('minePuni').hidden=!p;
+    document.getElementById('mine').hidden=!(n||t||p);
   }catch(e){}
 })();
 </script>
