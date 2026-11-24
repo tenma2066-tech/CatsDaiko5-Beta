@@ -2,7 +2,9 @@
 tsum 側の test_tsum.py と同じ型で、画面・PayPay は触らずに検査だけ回す。"""
 from __future__ import annotations
 
+import types
 import unittest
+from unittest import mock
 
 import pricing
 import puni_service
@@ -107,6 +109,86 @@ class MenusTable(unittest.TestCase):
     def test_stage_menus_exist(self):
         for key in puni_service.STAGE_MENUS:
             self.assertIn(key, puni_service.MENUS)
+
+
+class RunOrderDispatch(unittest.TestCase):
+    """run_order の筋道（ネットワークには触らず、engine をスタブして分岐だけ確かめる）。"""
+
+    def _fake_core(self):
+        return types.SimpleNamespace(
+            requests=mock.MagicMock(), VipUnavailable=RuntimeError,
+            create_save=mock.MagicMock(), link_email=mock.MagicMock(),
+            save_udkey_for=mock.MagicMock(), login_email_prepared=mock.MagicMock())
+
+    def test_empty_menus_errors(self):
+        out = puni_service.run_order("email", "a@b.c", "x", [], {}, {})
+        self.assertFalse(out["ok"])
+        self.assertIn("メニュー", out["error"])
+
+    def test_login_failure_is_reported_gracefully(self):
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_login", side_effect=RuntimeError("bad creds")):
+            out = puni_service.run_order(
+                "email", "a@b.c", "x", ["puni_hitodama"], {"puni_hitodama": 500}, {})
+        self.assertFalse(out["ok"])
+        self.assertIn("ログイン", out["error"])
+        self.assertIsNone(out["account"])
+
+    def test_action_menu_runs_after_login(self):
+        client = object()
+        calls = []
+
+        def fake_action(c_mod, cli, menu, qty, stages, prog, log):
+            calls.append(menu)
+            return f"■ {puni_service.menu_label(menu)}：完了"
+
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_login", return_value=client), \
+             mock.patch.object(puni_service, "_run_action", side_effect=fake_action):
+            out = puni_service.run_order(
+                "email", "a@b.c", "x", ["puni_farm", "puni_hitodama"],
+                {"puni_farm": 10, "puni_hitodama": 500}, {"puni_farm": 29704006})
+        self.assertTrue(out["ok"], out["error"])
+        self.assertEqual(out["done"], 2)
+        self.assertEqual(calls, ["puni_farm", "puni_hitodama"])
+
+    def test_action_failure_stops_and_reports(self):
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_login", return_value=object()), \
+             mock.patch.object(puni_service, "_run_action", side_effect=RuntimeError("rc=202")):
+            out = puni_service.run_order(
+                "email", "a@b.c", "x", ["puni_stage_clear"],
+                {"puni_stage_clear": 29704006}, {"puni_stage_clear": 29704006})
+        self.assertFalse(out["ok"])
+        self.assertIn("rc=202", out["error"])
+        self.assertTrue(out["lines"])
+
+    def test_new_mode_creates_accounts(self):
+        def fake_create(c_mod, menu, count, prog, log):
+            accs = [{"email": f"u{i}@x.com", "password": "pw", "player_name": "ぷに1"}
+                    for i in range(count)]
+            return accs, ""
+
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_create_accounts", side_effect=fake_create):
+            out = puni_service.run_order(
+                "new", "", "", ["puni_account"], {"puni_account": 2}, {})
+        self.assertTrue(out["ok"], out["error"])
+        self.assertEqual(len(out["account"]), 2)
+        self.assertEqual(out["done"], 2)
+
+    def test_solo_menu_forces_account_path(self):
+        """mode=email でも puni_aged が先頭なら作成系に流れる。"""
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_create_accounts",
+                               return_value=([{"email": "a@x.com", "password": "p",
+                                               "player_name": "ぷに1", "cleared": True}], "")) as cre, \
+             mock.patch.object(puni_service, "_login") as login:
+            out = puni_service.run_order(
+                "email", "a@b.c", "x", ["puni_aged"], {"puni_aged": 1}, {})
+        self.assertTrue(out["ok"])
+        cre.assert_called_once()
+        login.assert_not_called()
 
 
 if __name__ == "__main__":
