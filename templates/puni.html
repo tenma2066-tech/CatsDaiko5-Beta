@@ -72,6 +72,13 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .err{margin:8px 0 0;padding:9px 11px;border-radius:10px;background:var(--badbg);color:var(--bad);font-size:13.5px;font-weight:700}
 .err:empty{display:none}
 .okbox{margin:8px 0 0;padding:9px 11px;border-radius:10px;background:var(--okbg);font-size:13.5px}
+.notice{margin:0;padding:11px 13px;border:2px solid var(--line);border-radius:12px;background:var(--soft);font-size:13px;line-height:1.75}
+.notice b{color:var(--ink)}
+.notice ul{margin:6px 0 0;padding-left:1.1em}
+.notice li{margin:2px 0}
+.warnbox{margin:8px 0 0;padding:9px 11px;border:2px solid var(--warn);border-radius:10px;background:var(--badbg);font-size:13px;line-height:1.7}
+.esthint{display:block;margin-top:4px;font-size:12px;color:var(--warn);font-weight:700}
+.acctnote{margin:0;padding:11px 13px;border:2px solid var(--line);border-radius:12px;background:var(--okbg);font-size:13px;line-height:1.75}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:2px solid var(--line);
   padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));z-index:5}
 .bar .in{max-width:640px;margin:0 auto;display:flex;gap:10px;align-items:center}
@@ -139,13 +146,25 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="err" id="menuErr"></p>
 </section>
 
+<details class="card" id="s-notes">
+  <summary><b>⚠️ ご利用前の注意（タップで開く）</b></summary>
+  <div class="notice" style="margin-top:10px">
+    <ul>
+      <li><b>アカウント停止のおそれ：</b>自動周回・自動作成はゲームの規約上、アカウントが停止される可能性があります。大切なアカウントでのご利用はお控えください。</li>
+      <li><b>アカウント作成のメールは受信できません：</b>「アカウント作成」「久垢作成」で発行するメールアドレスは使い捨てのため、<b>パスワードの再発行や確認メールの受信はできません</b>。お渡しするメールとパスワードは必ず控えてください。</li>
+      <li><b>周回・回し放題は時間がかかります：</b>周回数や指定時間に応じて、完了まで数分〜数時間かかります。画面は閉じても、注文番号から続きを確認できます。</li>
+    </ul>
+  </div>
+</details>
+
 <section id="s-acct" class="card">
   <h2>アカウント</h2>
-  <p class="note">入力されたメールアドレス・パスワードは、代行の実行にだけ使い、画面やログには出しません。</p>
+  <p class="note" id="acctIntro">入力されたメールアドレス・パスワードは、代行の実行にだけ使い、画面やログには出しません。</p>
   <div class="modes" id="modeList">
     <label><input type="radio" name="mode" value="email" checked><span><b>メールアドレスでログイン</b><small>LEVEL5 ID のメールアドレスとパスワードを入力してください。</small></span></label>
     <label><input type="radio" name="mode" value="new"><span><b>新しいアカウントを作る</b><small>「アカウント作成」「久垢作成」を選んだときはこちらになります。作成後のメール・パスワードをお渡しします。</small></span></label>
   </div>
+  <p class="acctnote" id="acctCreateNote" hidden>新しいアカウントを作成します。入力は不要です。完了後に<b>メールアドレスとパスワード</b>をこの画面でお渡しします（使い捨てメールのため再発行はできません。必ず控えてください）。</p>
   <label class="field" id="f-login"><span id="loginLabel">メールアドレス</span><input id="login" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"></label>
   <label class="field" id="f-pw"><span>パスワード</span><input id="password" type="password" autocomplete="off"></label>
   {% if payments and not is_admin %}<label class="field"><span>クーポン（任意・{{ coupon_min }}円以上のご注文で10%引き）</span><input id="coupon" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>{% endif %}
@@ -264,7 +283,6 @@ function qtyError(){
       if(qbox) qbox.classList.toggle('bad',!!raw&&!ok);
       if(!raw) return '「'+m.label+'」の数量を入力してください。';
       if(!ok) return '「'+m.label+'」は '+m.value[0].toLocaleString('ja-JP')+'〜'+m.value[1].toLocaleString('ja-JP')+' の範囲で入力してください。';
-      if(k==='puni_unlimited'&&Number(raw)%30!==0) return '「回し放題代行」の時間は 30分単位で入力してください。';
     }
     if(STAGE_MENUS.includes(k)){
       const sbox=document.querySelector('#menuList label[data-key="'+k+'"] .stage input');
@@ -284,21 +302,34 @@ function soloError(){
 }
 function mode(){ return ($$('#modeList input[name=mode]:checked')[0]||{}).value||'email'; }
 function setMode(v){ $$('#modeList input[name=mode]').forEach(i=>{ i.checked=i.value===v; }); syncMode(); }
+function isCreate(){ return picked().some(k=>SOLO.includes(k)); }
 function syncMode(){
-  const m=mode(), isNew=m==='new';
+  const create=isCreate();
+  const m=create?'new':mode(), isNew=m==='new';
   $$('#modeList label').forEach(l=>l.classList.toggle('on',l.querySelector('input').checked));
+  /* 作成系メニューを選んだときは、入力方法の選択を隠して「作成します」の案内だけ出す（操作フローを簡潔に） */
+  $('#modeList').hidden=create;
+  $('#acctIntro').hidden=create;
+  $('#acctCreateNote').hidden=!create;
   $('#f-login').hidden=isNew; $('#f-pw').hidden=isNew;
 }
 function total(){ return rows().reduce((a,r)=>a+r[1],0); }
+let _cartSig='';
 function renderCart(){
-  const list=$('#cart'); list.textContent='';
-  rows().forEach(([label,amount])=>{
-    const li=document.createElement('li');
-    const a=document.createElement('span'); a.textContent=label;
-    const b=document.createElement('span'); b.textContent=yen(amount);
-    li.append(a,b); list.append(li);
-  });
-  if(!rows().length){ const li=document.createElement('li'); li.textContent='メニューを選んでください'; list.append(li); }
+  const rs=rows();
+  /* 内訳が変わったときだけ作り直す（毎キーストロークの不要な再描画・ちらつきを避ける） */
+  const sig=JSON.stringify(rs);
+  if(sig!==_cartSig){
+    _cartSig=sig;
+    const list=$('#cart'); list.textContent='';
+    rs.forEach(([label,amount])=>{
+      const li=document.createElement('li');
+      const a=document.createElement('span'); a.textContent=label;
+      const b=document.createElement('span'); b.textContent=yen(amount);
+      li.append(a,b); list.append(li);
+    });
+    if(!rs.length){ const li=document.createElement('li'); li.textContent='メニューを選んでください'; list.append(li); }
+  }
   const t=IS_ADMIN&&PAYMENTS?0:total();
   $('#total').textContent=yen(t);
   $('#barYen').textContent=yen(t);
@@ -311,8 +342,9 @@ function renderCart(){
     const q=l.querySelector('.qty'); if(q) q.hidden=!on;
     const u=l.querySelector('.unit'); if(u) u.hidden=!on;
     const s=l.querySelector('.stage'); if(s) s.hidden=!on;
-    if(on&&SOLO.includes(l.dataset.key)) setMode('new');
   });
+  if(isCreate()) setMode('new');   /* 作成系：入力方法を new に固定して案内に切替 */
+  else syncMode();                 /* 作成系を外したら入力方法の選択を戻す */
 }
 $('#menuList').addEventListener('change',renderCart);
 $('#menuList').addEventListener('input',()=>{ $('#runErr').textContent=''; qtyError(); renderCart(); });
@@ -460,6 +492,10 @@ function showAccounts(accounts, failed){
     w.textContent='途中で止まりましたが、作成済みのアカウントがあればこちらに表示されます。';
     box.append(w);
   }
+  const warn=document.createElement('p'); warn.className='warnbox';
+  warn.innerHTML='このメールアドレスは<b>使い捨て</b>のため受信できません。パスワードの再発行・確認メールは届きません。'
+    +'下のメールアドレスとパスワードを<b>今すぐ控えて</b>ください。';
+  box.append(warn);
   const list=Array.isArray(accounts)?accounts:[accounts];
   list.forEach((acc,i)=>{
     [['メールアドレス',acc.email],['パスワード',acc.password],['プレイヤー名',acc.player_name]].forEach(([name,val])=>{

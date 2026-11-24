@@ -2,6 +2,7 @@
 tsum 側の test_tsum.py と同じ型で、画面・PayPay は触らずに検査だけ回す。"""
 from __future__ import annotations
 
+import os
 import types
 import unittest
 from unittest import mock
@@ -235,6 +236,255 @@ class RunOrderDispatch(unittest.TestCase):
         self.assertTrue(out["ok"])
         cre.assert_called_once()
         login.assert_not_called()
+
+
+class PartialDelivery(unittest.TestCase):
+    """P-02：一部でも提供したらフラグを立て、自動再実行させない。"""
+
+    def _fake_core(self):
+        return types.SimpleNamespace(
+            requests=mock.MagicMock(), VipUnavailable=RuntimeError,
+            create_save=mock.MagicMock(), link_email=mock.MagicMock(),
+            save_udkey_for=mock.MagicMock(), login_email_prepared=mock.MagicMock())
+
+    def test_partial_marks_delivered(self):
+        def partial(*a, **k):
+            raise puni_service._ActionPartial("3/10 周で中断：rc=202", 3)
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_login", return_value=object()), \
+             mock.patch.object(puni_service, "_run_action", side_effect=partial):
+            out = puni_service.run_order(
+                "email", "a@b.com", "x", ["puni_farm"],
+                {"puni_farm": 10}, {"puni_farm": 29704006})
+        self.assertFalse(out["ok"])
+        self.assertTrue(out["delivered"])
+        self.assertIn("一部完了", out["lines"][0])
+
+    def test_total_failure_not_delivered(self):
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_login", return_value=object()), \
+             mock.patch.object(puni_service, "_run_action", side_effect=RuntimeError("rc=202")):
+            out = puni_service.run_order(
+                "email", "a@b.com", "x", ["puni_stage_clear"],
+                {}, {"puni_stage_clear": 29704006})
+        self.assertFalse(out["ok"])
+        self.assertFalse(out["delivered"])
+
+    def test_login_failure_not_delivered(self):
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_login", side_effect=RuntimeError("bad")):
+            out = puni_service.run_order(
+                "email", "a@b.com", "x", ["puni_farm"],
+                {"puni_farm": 5}, {"puni_farm": 29704006})
+        self.assertFalse(out["delivered"])
+
+    def test_accounts_partial_marks_delivered(self):
+        def one_then_fail(c_mod, menu, count, prog, log):
+            return [{"email": "a@x.com", "password": "p", "player_name": "ぷに1"}], "2件目失敗"
+        with mock.patch.object(puni_service, "core", self._fake_core), \
+             mock.patch.object(puni_service, "_create_accounts", side_effect=one_then_fail):
+            out = puni_service.run_order("new", "", "", ["puni_account"], {"puni_account": 2}, {})
+        self.assertFalse(out["ok"])        # 2件目失敗
+        self.assertTrue(out["delivered"])  # 1件は作成済み → 再実行させない
+
+
+class BattleCodes(unittest.TestCase):
+    """_battle_once のリザルトコード処理（P-10 ほか）。"""
+
+    def test_success_returns(self):
+        c = mock.MagicMock()
+        client = mock.MagicMock()
+        client.battle.return_value = (0, {})
+        puni_service._battle_once(c, client, 29704006, lambda _t: None)  # 例外なし
+
+    def test_version_code_raises_update_message(self):
+        c = mock.MagicMock()
+        client = mock.MagicMock()
+        client.battle.return_value = (20, {})
+        with self.assertRaises(RuntimeError) as cm:
+            puni_service._battle_once(c, client, 29704006, lambda _t: None)
+        self.assertIn("バージョン", str(cm.exception))
+
+    def test_fatal_code_raises(self):
+        c = mock.MagicMock()
+        client = mock.MagicMock()
+        client.battle.return_value = (202, {})
+        with self.assertRaises(RuntimeError):
+            puni_service._battle_once(c, client, 29704006, lambda _t: None)
+
+    def test_hitodama_shortage_tries_refill_then_succeeds(self):
+        c = mock.MagicMock()
+        client = mock.MagicMock()
+        # 1回目：ひとだま不足、補充後2回目成功
+        client.battle.side_effect = [(5, {"dialogMsg": "ひとだまが足りません"}), (0, {})]
+        client.buy_hitodama.return_value = 500
+        puni_service._battle_once(c, client, 29704006, lambda _t: None)
+        client.buy_hitodama.assert_called_once()
+
+
+class StageExistence(unittest.TestCase):
+    """P-08：ステージIDのマスタ照合。"""
+
+    def test_unknown_stage_is_false(self):
+        c = mock.MagicMock()
+        client = mock.MagicMock()
+        client.master_table.return_value = [["29704006", "x"], ["1001001", "y"]]
+        self.assertTrue(puni_service._stage_exists(c, client, 29704006))
+        self.assertFalse(puni_service._stage_exists(c, client, 12345678))
+
+    def test_master_unavailable_does_not_block(self):
+        c = mock.MagicMock()
+        client = mock.MagicMock()
+        client.master_table.side_effect = RuntimeError("no master")
+        self.assertTrue(puni_service._stage_exists(c, client, 12345678))
+
+
+class CommsSplit(unittest.TestCase):
+    """通信の分離（ツムツムに合わせる）。"""
+
+    def test_login_proxy_from_env(self):
+        with mock.patch.dict(os.environ, {"PUNI_SOCKS_URL": "socks5://127.0.0.1:9050"}, clear=False):
+            self.assertEqual(puni_service._login_proxy(), "socks5://127.0.0.1:9050")
+
+    def test_game_api_direct_by_default(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("PUNI_TOR_GAME_API",)}
+        with mock.patch.dict(os.environ, env, clear=True):
+            os.environ["PUNI_SOCKS_URL"] = "socks5://127.0.0.1:9050"
+            self.assertIsNone(puni_service._game_api_proxy())
+
+    def test_game_api_proxy_when_opted_in(self):
+        with mock.patch.dict(os.environ, {"PUNI_SOCKS_URL": "socks5://h:1", "PUNI_TOR_GAME_API": "1"}, clear=False):
+            self.assertEqual(puni_service._game_api_proxy(), "socks5://h:1")
+
+    def test_no_proxy_when_unset(self):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("PUNI_SOCKS_URL", "PUNI_PROXY", "PUNI_TOR_GAME_API")}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(puni_service._login_proxy())
+            self.assertIsNone(puni_service._game_api_proxy())
+
+
+class PrepareEngine(unittest.TestCase):
+    """P-12/P-13：コピー判定。"""
+
+    def test_needs_copy_when_missing(self):
+        self.assertTrue(puni_service._needs_copy(__file__, "/nonexistent/xyz"))
+
+    def test_no_copy_when_identical(self):
+        import shutil
+        import tempfile
+        d = tempfile.mkdtemp()
+        try:
+            src = os.path.join(d, "a"); dst = os.path.join(d, "b")
+            with open(src, "w") as f:
+                f.write("x" * 100)
+            shutil.copy2(src, dst)
+            self.assertFalse(puni_service._needs_copy(src, dst))
+        finally:
+            import shutil as sh
+            sh.rmtree(d, ignore_errors=True)
+
+
+class AppIntegration(unittest.TestCase):
+    """app.py との結合（画面・注文・ジョブ）。他部門への回帰も確認。"""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("PUNI_DATA_DIR", "/tmp/puni_t")
+        import app
+        cls.app = app
+        cls.client = app.app.test_client()
+
+    def test_puni_page_renders(self):
+        r = self.client.get("/puni")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_data(as_text=True)
+        self.assertIn("puni_coin_gacha", body)
+        self.assertIn("使い捨て", body)   # P-04 注意
+
+    def test_run_rejects_solo_combo(self):
+        r = self.client.post("/run", json={"puni": {
+            "mode": "email", "login": "a@b.com", "password": "x",
+            "menus": ["puni_account", "puni_farm"],
+            "qty": {"puni_account": "1", "puni_farm": "5"},
+            "stages": {"puni_farm": "29704006"}}})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("同時に選べません", r.get_json()["error"])
+
+    def test_run_rejects_bad_email(self):
+        r = self.client.post("/run", json={"puni": {
+            "mode": "email", "login": "not-an-email", "password": "x",
+            "menus": ["puni_hitodama"], "qty": {"puni_hitodama": "500"}}})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("メールアドレス", r.get_json()["error"])
+
+    def test_run_rejects_unlimited_out_of_range(self):
+        r = self.client.post("/run", json={"puni": {
+            "mode": "email", "login": "a@b.com", "password": "x",
+            "menus": ["puni_unlimited"], "qty": {"puni_unlimited": "9"},
+            "stages": {"puni_unlimited": "29704006"}}})
+        self.assertEqual(r.status_code, 400)
+
+    def _run_puni_job(self, menus, out, payload):
+        with self.app.app.test_request_context():
+            job = self.app._new_puni_job("email", menus)
+        with mock.patch.object(self.app.puni_service, "run_order", return_value=out):
+            self.app._run_puni_job(job, payload)
+        return job
+
+    def test_run_puni_job_marks_outcome_unknown_on_partial(self):
+        """P-02：delivered な失敗は outcome_unknown=True（自動再実行させない）。"""
+        out = {"ok": False, "error": "3/10 周で中断", "lines": ["■ 自動周回：一部完了（…）"],
+               "done": 0, "account": None, "moved": False, "delivered": True}
+        job = self._run_puni_job(["puni_farm"], out,
+                                 {"mode": "email", "login": "a@b.com", "password": "x",
+                                  "menus": ["puni_farm"], "qty": {"puni_farm": 10},
+                                  "stages": {"puni_farm": 29704006}})
+        self.assertEqual(job["status"], "error")
+        self.assertTrue(job["outcome_unknown"])
+
+    def test_run_puni_job_retry_on_clean_failure(self):
+        """何も提供していない失敗は outcome_unknown=False（払い直しなし再実行に回す）。"""
+        out = {"ok": False, "error": "ログインできません", "lines": [], "done": 0,
+               "account": None, "moved": False, "delivered": False}
+        job = self._run_puni_job(["puni_hitodama"], out,
+                                 {"mode": "email", "login": "a@b.com", "password": "x",
+                                  "menus": ["puni_hitodama"], "qty": {"puni_hitodama": 500},
+                                  "stages": {}})
+        self.assertEqual(job["status"], "error")
+        self.assertFalse(job["outcome_unknown"])
+
+    def test_run_puni_job_done_on_success(self):
+        out = {"ok": True, "error": "", "lines": ["■ コインガチャ：完了"], "done": 1,
+               "account": None, "moved": False, "delivered": True}
+        job = self._run_puni_job(["puni_coin_gacha"], out,
+                                 {"mode": "email", "login": "a@b.com", "password": "x",
+                                  "menus": ["puni_coin_gacha"], "qty": {}, "stages": {}})
+        self.assertEqual(job["status"], "done")
+
+    def test_status_total_is_mode_aware(self):
+        """P-16：puni ジョブの進捗 total は PUNI_TOTAL_STEPS。"""
+        self.assertEqual(self.app.PUNI_TOTAL_STEPS, 10)
+        self.assertNotEqual(self.app.TOTAL_STEPS, self.app.PUNI_TOTAL_STEPS)
+        # status API が使う対応表（P-16 の修正箇所と同じロジック）
+        table = {"tsum": self.app.TSUM_TOTAL_STEPS, "puni": self.app.PUNI_TOTAL_STEPS}
+        self.assertEqual(table.get("puni", self.app.TOTAL_STEPS), 10)
+        self.assertEqual(table.get("nyanko", self.app.TOTAL_STEPS), self.app.TOTAL_STEPS)
+
+    def test_lock_subject_distinguishes_departments(self):
+        """_is_tsum_arguments と _lock_subject が puni/tsum/nyanko を取り違えない。"""
+        puni_job = {"mode": "puni"}
+        tsum_job = {"mode": "tsum"}
+        self.assertTrue(self.app._lock_subject(puni_job, ({"login": "a@b.com"},)).startswith("puni:"))
+        self.assertTrue(self.app._lock_subject(tsum_job, ({"login": "x"},)).startswith("tsum:"))
+
+    def test_home_and_sitemap_have_puni(self):
+        self.assertIn("/puni", self.client.get("/").get_data(as_text=True))
+        self.assertIn("/puni", self.client.get("/sitemap.xml").get_data(as_text=True))
+
+    def test_nyanko_and_tsum_pages_unaffected(self):
+        self.assertEqual(self.client.get("/nyanko").status_code, 200)
+        self.assertEqual(self.client.get("/tsum").status_code, 200)
 
 
 if __name__ == "__main__":
