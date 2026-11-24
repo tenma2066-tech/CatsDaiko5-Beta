@@ -60,7 +60,34 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
 - `test_puni.py` 30 passed
 - 回帰：`test_puni test_seo test_order_flow test_price_parity test_tsum test_ui_results` → 155 passed / 14 skipped（capture off）。にゃんこ・ツムツム無傷
 
+### 通信・サーバー構成の監査（2026-11-25）
+- **tsum との整合**：ツムツムは `TSUM_SOCKS_URL`（Tor/SOCKS）でログインを秘匿し、ゲームAPIは
+  既定で直結（`tor_game_api` false・1件で多量通信のため）。ぷにぷにも同じ分離に合わせた：
+  `PUNI_SOCKS_URL` でログイン・アカ作成を通し、周回などゲームAPIは既定直結
+  （`PUNI_TOR_GAME_API=1` で経由）。`_set_client_egress` でログイン後に出口を切替。
+- **タイムアウト**：捨てメール/LEVEL5 登録は `requests timeout=30`。ゲームAPIはエンジンの
+  `post_nhn`（timeout=30・retry）。HTTPは gunicorn `--timeout 120`。長時間ジョブは worker 別プロセスで
+  走るため gunicorn のHTTPタイムアウトには当たらない。
+- **TLS/DNS**：Fly が TLS 終端（`force_https=true`）。送信元の秘匿は SOCKS 設定時のみ。未設定なら
+  サーバーの固定IPで直結（tsum と同じ）。意図しない経路変更は無し（プロキシは明示設定のときだけ）。
+- **データ保全**：`PUNI_DATA_DIR=/data/puni`（Fly 永続ボリューム）。`fly.toml [env]` に明示追加。
+  udkey/ログ/マスタはリポジトリ外。注文 payload（email/パスワード）は `orders.enc`（暗号化）。
+  完了時に `_reconcile_orders` が `arguments=None` にしてパスワードを消す（P-01 最小化）。
+
+### 完了条件の確認（2026-11-25）
+- [x] 重大な既知バグ：P-02（過剰提供）・P-07（二重入力）・P-16（進捗段階）を修正
+- [x] 既存・追加テスト通過：`test_puni.py` 57 passed、全体 226 passed（capture off）。ruff clean
+- [x] UI/UX：既存部門と統一・作成フロー簡潔化・注意明示・ちらつき解消。ライト/ダーク/iPhone幅で確認
+- [x] 注文・決済整合：部分提供は再実行させず管理者対応へ（outcome_unknown）。完了時パスワード消去
+- [x] 顧客情報保護：乱数 secrets 化・ログにパスワード出さない・暗号化保存・完了時消去
+- [x] 他部門回帰なし：にゃんこ・ツムツムのコード無変更、両画面200・全テスト通過
+- 本番デプロイ・実決済・実機動作は別途承認／確認が必要（この環境では不可）
+
 ### 残課題 / 次の作業
-- P-06 専用実行枠：共通スケジューラ（`_pending_jobs`/`_slots`）を puni 専用に分けるのは、にゃんこ・ツムツムへの回帰リスクがあるため本改修では見送り。回し放題の上限時間制限で緩和。将来、キュー選択時に puni 長時間ジョブの同時数を制限する案。
-- 実機（LEVEL5 アカウント・ぷにぷにゲームサーバ）での動作確認は本環境では不可。本番初回は捨て垢で coin_gacha / hitodama を1件通して rc を確認。
-- バナー画像 `static/game-puni.{webp,jpg}`・`static/ogp-puni.jpg` 未配置。
+- **P-06 専用実行枠**：共通スケジューラ（`_pending_jobs`/`_slots`）を puni 専用に分けるのは、
+  にゃんこ・ツムツムへの回帰リスクがあるため本改修では見送り。回し放題は最大6時間に制限して緩和。
+  将来案：キュー選択時に puni 長時間ジョブの同時数だけ上限を設ける（共通スケジューラに最小の分岐）。
+- **実機確認**：LEVEL5 アカウント・ぷにぷにゲームサーバでの動作は本環境では不可。本番初回は捨て垢で
+  `puni_coin_gacha` / `puni_hitodama` を1件通して rc を確認。rc=20 なら APPVER 更新（P-10）。
+- **バナー画像**：`static/game-puni.{webp,jpg}`・`static/ogp-puni.jpg` 未配置（home カードの画像は後日）。
+- **任意の運用設定**：`PUNI_SOCKS_URL`（送信元秘匿したい場合）・`PUNI_TOR_GAME_API=1`（周回も経由）。
