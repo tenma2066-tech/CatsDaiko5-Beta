@@ -40,33 +40,70 @@ def engine_dir() -> str:
     return os.path.join(data_dir(), "engine")
 
 
+def _needs_copy(src: str, dst: str) -> bool:
+    """コピーが要るか。存在しない／サイズ違い／ソースが新しい のいずれか。
+    mtime だけに頼らない（/data 永続時の時刻ズレ対策・P-13）。"""
+    if not os.path.exists(dst):
+        return True
+    try:
+        ss, ds = os.stat(src), os.stat(dst)
+    except OSError:
+        return True
+    return ss.st_size != ds.st_size or ss.st_mtime > ds.st_mtime
+
+
+def _atomic_copy(src: str, dst: str) -> None:
+    """同じディレクトリに一時ファイルで書いてから os.replace で差し替える。
+    他プロセスが読み込み中でも半端なファイルを見せない（P-12）。"""
+    import tempfile
+    d = os.path.dirname(dst)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-")
+    os.close(fd)
+    try:
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dst)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 def _prepare_engine() -> str:
     """素のスクリプトを書き込める場所へ写す（更新されていれば上書きする）。
     スクリプトは自分の隣に状態ファイル（udkeys.json 等）を作るため、
-    リポジトリの中では動かさない。"""
+    リポジトリの中では動かさない。
+
+    worker は別プロセスで同時に起動しうるので、fcntl のファイルロックで
+    1プロセスずつ準備する（プロセス内の threading.Lock では守れない・P-12）。"""
+    import fcntl
     dest = engine_dir()
     os.makedirs(dest, mode=0o700, exist_ok=True)
-    for name in _ENGINE_FILES:
-        src = os.path.join(_ENGINE_SOURCE, name)
-        dst = os.path.join(dest, name)
-        if not os.path.isfile(src):
-            raise RuntimeError(f"ぷにぷにの実行ファイルがありません: {name}")
-        if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
-            shutil.copy2(src, dst)
-    src_data = os.path.join(_ENGINE_SOURCE, _ENGINE_DATA)
-    dst_data = os.path.join(dest, _ENGINE_DATA)
-    os.makedirs(dst_data, exist_ok=True)
-    if os.path.isdir(src_data):
-        for name in os.listdir(src_data):
-            s = os.path.join(src_data, name)
-            d = os.path.join(dst_data, name)
-            if not os.path.isfile(s):
-                continue
-            # map_names.json / current_event.json は実行中に更新されうるので上書きしない
-            if name in ("map_names.json", "current_event.json", "master_cache.json") and os.path.exists(d):
-                continue
-            if not os.path.exists(d) or os.path.getmtime(s) > os.path.getmtime(d):
-                shutil.copy2(s, d)
+    lock_path = os.path.join(dest, ".prepare.lock")
+    with open(lock_path, "a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        for name in _ENGINE_FILES:
+            src = os.path.join(_ENGINE_SOURCE, name)
+            dst = os.path.join(dest, name)
+            if not os.path.isfile(src):
+                raise RuntimeError(f"ぷにぷにの実行ファイルがありません: {name}")
+            if _needs_copy(src, dst):
+                _atomic_copy(src, dst)
+        src_data = os.path.join(_ENGINE_SOURCE, _ENGINE_DATA)
+        dst_data = os.path.join(dest, _ENGINE_DATA)
+        os.makedirs(dst_data, exist_ok=True)
+        if os.path.isdir(src_data):
+            for name in os.listdir(src_data):
+                s = os.path.join(src_data, name)
+                d = os.path.join(dst_data, name)
+                if not os.path.isfile(s):
+                    continue
+                # map_names.json / current_event.json は実行中に更新されうるので上書きしない
+                if name in ("map_names.json", "current_event.json", "master_cache.json") and os.path.exists(d):
+                    continue
+                if _needs_copy(s, d):
+                    _atomic_copy(s, d)
     return dest
 
 
@@ -98,15 +135,15 @@ MENUS = {
                          "desc": "アカウント作成に加えて、設定された初回ステージを"
                                  "クリアした状態まで進めてお渡しします。",
                          "order": 20},
-    "puni_farm":        {"label": "自動周回（ステージID・周回数指定）", "price": "puni_farm_10",
-                         "value": (1, 999), "unit": "周",
+    "puni_farm":        {"label": "自動周回（ステージ・周回数指定）", "price": "puni_farm_10",
+                         "value": (1, 300), "unit": "周",
                          "desc": "指定ステージを指定回数まで自動で周回します。"
                                  "ひとだまは自動補充します（10周ごとの料金）。",
                          "order": 30},
     "puni_unlimited":   {"label": "回し放題代行（時間制）", "price": "puni_hour",
-                         "value": (30, 24 * 60), "unit": "分",
+                         "value": (1, 6), "unit": "時間",
                          "desc": "指定した時間のあいだ、ステージを回し続けます"
-                                 "（30分単位・最大24時間）。",
+                                 "（1時間単位・最大6時間）。",
                          "order": 40},
     "puni_hitodama":    {"label": "ひとだま補充", "price": "puni_hitodama",
                          "value": (50, 9999), "unit": "個",
@@ -116,7 +153,6 @@ MENUS = {
                          "desc": "開催中の「まわし放題ガチャ」を回し切ります。",
                          "order": 60},
     "puni_stage_clear": {"label": "ステージクリア（1マップ単発）", "price": "puni_stage_clear",
-                         "value": (1, 99_999_999), "unit": "ステージID",
                          "desc": "指定したステージを 1回クリアします（単発）。",
                          "order": 70},
 }
@@ -180,9 +216,6 @@ def validate_order(menus, qty: dict, stages: dict | None = None):
         low, high = limits
         if num < low or num > high:
             return [], {}, {}, f"「{menu_label(key)}」は {low:,}〜{high:,} の範囲で入力してください。"
-        # 回し放題は30分単位
-        if key == "puni_unlimited" and num % 30 != 0:
-            return [], {}, {}, "「回し放題代行」の時間は 30分単位で入力してください。"
         clean_qty[key] = num
     clean_stage: dict = {}
     for key in picked:
@@ -201,6 +234,24 @@ def validate_order(menus, qty: dict, stages: dict | None = None):
     return picked, clean_qty, clean_stage, ""
 
 
+import re as _re
+
+# メールアドレスの実用的な検査（RFC 完全準拠は狙わない。打ち間違いと不正入力を弾く）。
+_EMAIL_RE = _re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,}$")
+
+
+def valid_email(email: str) -> bool:
+    """メールアドレスとして妥当か。制御文字・空白・@ の欠落・ドメイン不備を弾く。"""
+    s = str(email or "")
+    if not (1 <= len(s) <= 254):
+        return False
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in s):
+        return False
+    if ".." in s:
+        return False
+    return bool(_EMAIL_RE.match(s))
+
+
 def check_account(mode: str, email: str, password: str):
     """アカウント入力の検査。戻り値はエラー文（問題なければ空文字）。"""
     if mode not in MODES:
@@ -209,8 +260,11 @@ def check_account(mode: str, email: str, password: str):
         return ""
     if not email or not password:
         return "メールアドレスとパスワードを入力してください。"
-    if "@" not in email:
-        return "メールアドレスを入力してください（半角 @ を含む形式）。"
+    if not valid_email(email):
+        return ("メールアドレスの形式が正しくありません"
+                "（例：name@example.com）。半角で入力してください。")
+    if len(password) > 128:
+        return "パスワードが長すぎます。"
     return ""
 
 
@@ -229,8 +283,8 @@ def pricing_units(menus, qty: dict) -> list[tuple[str, int]]:
             laps = int((qty or {}).get(key, 0) or 0)
             units = (laps + 9) // 10
         elif key == "puni_unlimited":
-            minutes = int((qty or {}).get(key, 0) or 0)
-            units = (minutes + 59) // 60
+            # 入力は時間単位。1時間 = 1件（puni_hour の料金）。入力と課金の単位を一致させる（P-09）
+            units = int((qty or {}).get(key, 0) or 0)
         elif key in ("puni_account", "puni_aged"):
             units = int((qty or {}).get(key, 1) or 1)
         else:
@@ -265,10 +319,20 @@ def _mask_email(value: str) -> str:
 
 
 # バトルのリザルトコード。bot.py の同名定数と同じ。
-FATAL_CODES = (202, 30)   # これが出たら打ち切る（更新必須・データ異常など）
+FATAL_CODES = (202, 30)   # これが出たら打ち切る（データ異常など）
+VERSION_CODES = (20,)     # アプリのバージョンが古い（ゲーム更新後・APPVER更新待ち）
 TOKEN_CODES = (32,)       # token ズレ。再ログインで復帰を試みる
 BATTLE_RETRY = 3          # 連続エラー時の再試行回数
 RETRY_WAIT = 4.0          # 再試行の間隔（秒）
+
+
+class _ActionPartial(RuntimeError):
+    """メニューの途中まで実際に提供できた状態での失敗（周回を数周こなした後の致命エラー等）。
+    すでに提供済みなので、呼び出し側は「自動再実行」ではなく管理者対応に回す（P-02）。"""
+
+    def __init__(self, message: str, delivered: int):
+        super().__init__(message)
+        self.delivered = int(delivered)
 
 # 久垢作成でクリアさせるステージ（engine の settings.json → 既定 1001001）。
 AGED_STAGE_ID = int(os.environ.get("PUNI_AGED_STAGE_ID", "0") or 0)
@@ -292,10 +356,29 @@ _BROWSER_HEADERS = {
 }
 
 
-def _proxy() -> str | None:
-    """このサーバーでぷにぷにの通信を通すプロキシ（任意）。
-    SOCKS/HTTP どちらも可。未設定ならサーバーの固定IPで直接つなぐ。"""
+def _login_proxy() -> str | None:
+    """ログイン・アカウント作成（IPで弾かれやすい部分）を通すプロキシ（任意）。
+    SOCKS/HTTP どちらも可。未設定ならサーバーの固定IPで直接つなぐ。
+    ツムツムの TSUM_SOCKS_URL と同じ役割（PUNI_SOCKS_URL）。"""
     return (os.environ.get("PUNI_SOCKS_URL") or os.environ.get("PUNI_PROXY") or "").strip() or None
+
+
+def _game_api_proxy() -> str | None:
+    """周回などゲームAPIの多量通信を通すプロキシ。
+    既定は直結（1件で数十〜数百回叩くため）。PUNI_TOR_GAME_API=1 のときだけ
+    ログインと同じ出口を通す。ツムツムの tor_game_api と同じ考え方。"""
+    if os.environ.get("PUNI_TOR_GAME_API", "") not in ("", "0"):
+        return _login_proxy()
+    return None
+
+
+def _set_client_egress(c_mod, client, proxy: str | None) -> None:
+    """ログイン済み Client の以後の通信の出口を切り替える。
+    ゲームAPI段ではログイン用プロキシから直結（または専用設定）へ移す。"""
+    try:
+        client._px = c_mod.normalize_proxy(proxy)
+    except Exception:  # noqa: BLE001  出口の切替失敗で本処理を止めない
+        pass
 
 
 def _aged_stage(c) -> int:
@@ -315,16 +398,22 @@ def _aged_stage(c) -> int:
 
 
 def _gen_password(length: int = _PASSWORD_LEN) -> str:
-    import random
+    """暗号的に安全な乱数でパスワードを作る（P-14）。英大・英小・数字を必ず1つ以上含める。"""
+    import secrets
     import string
-    chars = string.ascii_letters + string.digits
-    return "".join(random.choice(chars) for _ in range(length))
+    lowers, uppers, digits = string.ascii_lowercase, string.ascii_uppercase, string.digits
+    pool = lowers + uppers + digits
+    length = max(length, 8)
+    while True:
+        pw = "".join(secrets.choice(pool) for _ in range(length))
+        if any(c in lowers for c in pw) and any(c in uppers for c in pw) and any(c in digits for c in pw):
+            return pw
 
 
 def _random_player_name() -> str:
-    import random
+    import secrets
     import string
-    return "ぷに" + "".join(random.choice(string.digits) for _ in range(4))
+    return "ぷに" + "".join(secrets.choice(string.digits) for _ in range(4))
 
 
 def _find_auth_token(html: str) -> str | None:
@@ -411,9 +500,8 @@ def _create_level5_id(c_mod, player_name: str, log) -> dict:
     LEVEL5 ID 登録に失敗したら RuntimeError。セーブ作成だけ失敗した場合は
     client/userId が None（ID は作成済みなので捨てない）。"""
     import re
-    import time
     requests = c_mod.requests
-    proxy = _proxy()
+    proxy = _login_proxy()
     session = requests.Session()
     if proxy:
         session.proxies = {"http": proxy, "https": proxy}
@@ -482,13 +570,26 @@ def _create_level5_id(c_mod, player_name: str, log) -> dict:
 
 
 def _login(c_mod, email: str, password: str, log):
-    """メールアドレスでログインして、ログイン済みの Client を返す。失敗は RuntimeError。"""
-    proxy = _proxy()
-    client, accs = c_mod.login_email_prepared(email, password, proxy=proxy)
+    """メールアドレスでログインして、ログイン済みの Client を返す。失敗は RuntimeError。
+    ログインはログイン用プロキシ（秘匿）、以後のゲームAPIは _game_api_proxy() の出口へ移す。"""
+    client, accs = c_mod.login_email_prepared(email, password, proxy=_login_proxy())
     uid = next((a.get("userId") for a in accs if a.get("userId")), None)
     client.login(uid)
+    # 周回などの多量通信はゲームAPI用の出口（既定：直結）へ切り替える
+    _set_client_egress(c_mod, client, _game_api_proxy())
     log("ゲームサーバーに接続しました。")
     return client
+
+
+def _stage_exists(c_mod, client, stage_id: int) -> bool:
+    """入力ステージIDがゲームのマスタに実在するか（P-08）。
+    マスタを取れないときは True（確認できないだけで止めない）。"""
+    try:
+        rows = client.master_table("ywp_mst_stage")
+    except Exception:  # noqa: BLE001  マスタ取得失敗。存在確認はスキップ
+        return True
+    ids = {str(r[0]) for r in rows if r}
+    return str(stage_id) in ids if ids else True
 
 
 def _battle_once(c_mod, client, stage_id: int, log) -> None:
@@ -505,6 +606,10 @@ def _battle_once(c_mod, client, stage_id: int, log) -> None:
             continue
         if code == 0:
             return
+        if code in VERSION_CODES:
+            # アプリのバージョンが古い（ゲーム更新後）。エンジンの APPVER 更新待ち（P-10）
+            raise RuntimeError("ゲームのアプリバージョンが古いため実行できません"
+                               "（APPVER の更新が必要です。管理者にお問い合わせください）。")
         if code in FATAL_CODES:
             raise RuntimeError(f"ステージ {stage_id} を開始できません（rc={code}）")
         text = ""
@@ -536,6 +641,9 @@ def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
     label = menu_label(menu)
     if menu in ("puni_farm", "puni_stage_clear", "puni_unlimited"):
         stage_id = int(stages[menu])
+        # 入力IDの実在をマスタで確認（誤IDで長い再試行ループに入らない・P-08）
+        if not _stage_exists(c_mod, client, stage_id):
+            raise RuntimeError(f"ステージID {stage_id} が見つかりません。IDをご確認ください。")
         if menu == "puni_stage_clear":
             prog.update(5, f"ステージ {stage_id} をクリア中…", force=True)
             _battle_once(c_mod, client, stage_id, log)
@@ -544,20 +652,36 @@ def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
             laps = int(qty[menu])
             done = 0
             for i in range(laps):
-                prog.update(5, f"周回中… {i + 1}/{laps}（ステージ {stage_id}）", force=True)
-                _battle_once(c_mod, client, stage_id, log)
+                # 進捗バーは実行段（2）から完了手前（9）まで比例して進める（P-16 UX）
+                prog.update(2 + int(7 * i / max(1, laps)),
+                            f"周回中… {i + 1}/{laps}（ステージ {stage_id}）", force=True)
+                try:
+                    _battle_once(c_mod, client, stage_id, log)
+                except Exception as exc:  # noqa: BLE001  途中まで回せていれば提供済み扱い
+                    if done > 0:
+                        raise _ActionPartial(f"{done}/{laps} 周で中断：{exc}", done) from exc
+                    raise
                 done += 1
             return f"■ {label}：完了（ステージ {stage_id} を {done} 周）"
-        # puni_unlimited（時間制）
-        minutes = int(qty[menu])
-        deadline = time.time() + minutes * 60
+        # puni_unlimited（時間制・入力は時間単位）
+        hours = int(qty[menu])
+        total_sec = hours * 3600
+        start = time.time()
+        deadline = start + total_sec
         done = 0
         while time.time() < deadline:
-            left = int((deadline - time.time()) / 60) + 1
-            prog.update(5, f"回し放題 実行中…（残り約 {left} 分 / {done} 周）", force=True)
-            _battle_once(c_mod, client, stage_id, log)
+            elapsed = time.time() - start
+            left_min = int((deadline - time.time()) / 60) + 1
+            prog.update(2 + int(7 * elapsed / max(1, total_sec)),
+                        f"回し放題 実行中…（残り約 {left_min} 分 / {done} 周）", force=True)
+            try:
+                _battle_once(c_mod, client, stage_id, log)
+            except Exception as exc:  # noqa: BLE001  途中まで回せていれば提供済み扱い
+                if done > 0:
+                    raise _ActionPartial(f"{hours}時間のうち {done} 周で中断：{exc}", done) from exc
+                raise
             done += 1
-        return f"■ {label}：完了（ステージ {stage_id} を {minutes} 分・{done} 周）"
+        return f"■ {label}：完了（ステージ {stage_id} を {hours} 時間・{done} 周）"
     if menu == "puni_hitodama":
         target = int(qty[menu])
         prog.update(5, f"ひとだまを {target:,} 個まで補充中…", force=True)
@@ -614,7 +738,7 @@ def run_order(mode: str, login_id: str, password: str,
     qty = qty or {}
     stages = stages or {}
     out = {"ok": False, "error": "", "lines": [], "done": 0,
-           "account": None, "moved": False}
+           "account": None, "moved": False, "delivered": False}
     menus = sort_menus(menus)
     if not menus:
         out["error"] = "実行するメニューがありません。"
@@ -636,6 +760,7 @@ def run_order(mode: str, login_id: str, password: str,
         accounts, error = _create_accounts(c_mod, menu, count, prog, log)
         out["account"] = accounts
         out["done"] = len(accounts)
+        out["delivered"] = bool(accounts)   # 1件でも作成済みなら自動再実行しない（P-02）
         out["lines"] = [f"■ {menu_label(menu)}：{a['email']}"
                         + ("（初回クリア済み）" if a.get("cleared") else
                            "（初回クリア失敗）" if a.get("cleared") is False else "")
@@ -660,15 +785,24 @@ def run_order(mode: str, login_id: str, password: str,
     for menu in menus:
         try:
             line = _run_action(c_mod, client, menu, qty, stages, prog, log)
+        except _ActionPartial as exc:
+            # 途中まで提供済み。自動再実行させない（over-delivery 防止・P-02）
+            out["delivered"] = True
+            lines.append(f"■ {menu_label(menu)}：一部完了（{exc}）")
+            out["error"] = str(exc)[:200]
+            out["lines"] = lines
+            return out
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)[:200] or f"「{menu_label(menu)}」の実行に失敗しました。"
             lines.append(f"■ {menu_label(menu)}：失敗（{msg}）")
             out["error"] = msg
             out["lines"] = lines
-            out["done"] = len([x for x in lines if "：完了" in x])
+            # それまでのメニューで提供済みがあれば再実行しない
+            out["delivered"] = out["delivered"] or out["done"] > 0
             return out
         lines.append(line)
         out["done"] += 1
+        out["delivered"] = True
 
     out["lines"] = lines
     out["ok"] = True

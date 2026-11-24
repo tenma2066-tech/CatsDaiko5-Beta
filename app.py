@@ -789,7 +789,9 @@ def _run_puni_job(job: dict, payload: dict) -> None:
     else:
         job["status"] = "error"
         job["error"] = out["error"] or "ぷにぷに代行を実行できませんでした。"
-        job["outcome_unknown"] = bool(out.get("moved") and not out.get("account"))
+        # すでに一部でも提供できていれば「結果不明」扱いにして自動再実行を止める（over-delivery 防止・P-02）。
+        # 何も提供していない失敗（ログイン失敗など）だけ、払い直しなしの再実行に回す。
+        job["outcome_unknown"] = bool(out.get("delivered") or (out.get("moved") and not out.get("account")))
         _log(job, "エラー: " + job["error"])
     job["finished"] = time.time()
     _publish_job(job)
@@ -3051,12 +3053,15 @@ def status(job_id: str):
     if not job or job.get("owner") != _owner():
         return jsonify(error="見つかりません（時間切れ、またはサーバーが再起動した可能性）"), 404
     end = job["finished"] or time.time()
+    # 段取りの総数はメニューの種類で変わる（にゃんこ=4・ツムツム=6・ぷにぷに=10）。
+    # 画面は自分の total_steps 定数で進捗バーを計算するが、API もモードに合った total を返す（P-16）。
+    total_steps = {"tsum": TSUM_TOTAL_STEPS, "puni": PUNI_TOTAL_STEPS}.get(job.get("mode"), TOTAL_STEPS)
     return jsonify(
         status=job["status"], queue_position=position, slot=slot_number,
         active_jobs=parallel["running_jobs"], warmup_slots=parallel["warmup_slots"],
         occupied_slots=parallel["occupied_slots"], available_slots=parallel["available_slots"],
         max_concurrent_jobs=parallel["max_concurrent_jobs"], queued_jobs=parallel["queued_jobs"],
-        step=job["step"], total=TOTAL_STEPS,
+        step=job["step"], total=total_steps,
         mode=job["mode"], count=job["count"],
         elapsed=round(end - job["created"], 1),
         log=job["log"], warn=job["warn"], report=job["report"], dry=job["dry"], clone=job["clone"],

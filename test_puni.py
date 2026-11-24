@@ -26,18 +26,30 @@ class ValidateOrder(unittest.TestCase):
             ["puni_farm"], {"puni_farm": "5"}, {})
         self.assertIn("ステージID", err)
 
-    def test_unlimited_must_be_30min_step(self):
+    def test_unlimited_is_hours_and_bounded(self):
+        # P-09：入力は時間単位（1〜6）。範囲外は弾く。
         _, _, _, err = puni_service.validate_order(
-            ["puni_unlimited"], {"puni_unlimited": "45"},
+            ["puni_unlimited"], {"puni_unlimited": "7"},
             {"puni_unlimited": "29704006"})
-        self.assertIn("30分単位", err)
+        self.assertIn("1〜6", err)
+        m, q, s, err = puni_service.validate_order(
+            ["puni_unlimited"], {"puni_unlimited": "3"},
+            {"puni_unlimited": "29704006"})
+        self.assertEqual(err, "")
+        self.assertEqual(q["puni_unlimited"], 3)
+
+    def test_stage_clear_has_no_quantity_field(self):
+        # P-07：ステージクリアは数量欄を持たず、ステージIDだけで通る（二重入力解消）。
+        self.assertNotIn("value", puni_service.MENUS["puni_stage_clear"])
+        _, q, s, err = puni_service.validate_order(
+            ["puni_stage_clear"], {}, {"puni_stage_clear": "29704006"})
+        self.assertEqual(err, "")
+        self.assertEqual(q, {})
+        self.assertEqual(s, {"puni_stage_clear": 29704006})
 
     def test_stage_id_range(self):
-        # puni_stage_clear は qty（数量＝ID）と stages（ステージID）の両方を持つので、
-        # qty は通る値を入れてステージ側の範囲外だけを検査する。
         _, _, _, err = puni_service.validate_order(
-            ["puni_stage_clear"], {"puni_stage_clear": "29704006"},
-            {"puni_stage_clear": "999"})
+            ["puni_stage_clear"], {}, {"puni_stage_clear": "999"})
         self.assertIn("ステージID", err)
 
     def test_good_order(self):
@@ -60,20 +72,52 @@ class ValidateOrder(unittest.TestCase):
 
 class CheckAccount(unittest.TestCase):
     def test_email_needs_both(self):
-        self.assertIn("入力", puni_service.check_account("email", "a@b.c", ""))
+        self.assertIn("入力", puni_service.check_account("email", "a@b.com", ""))
         self.assertIn("入力", puni_service.check_account("email", "", "x"))
 
     def test_email_needs_at(self):
         self.assertIn("メールアドレス", puni_service.check_account("email", "no-at-sign", "x"))
 
     def test_email_ok(self):
-        self.assertEqual(puni_service.check_account("email", "a@b.c", "x"), "")
+        self.assertEqual(puni_service.check_account("email", "a@b.com", "x"), "")
 
     def test_new_skips_credentials(self):
         self.assertEqual(puni_service.check_account("new", "", ""), "")
 
     def test_bad_mode(self):
-        self.assertIn("入力方法", puni_service.check_account("xxx", "a@b.c", "x"))
+        self.assertIn("入力方法", puni_service.check_account("xxx", "a@b.com", "x"))
+
+
+class EmailValidation(unittest.TestCase):
+    """P-17：メールアドレス検証の拡充。"""
+
+    def test_accepts_normal_addresses(self):
+        for e in ("name@example.com", "a.b+c@sub.example.co.jp", "x_y@mail-server.io"):
+            self.assertTrue(puni_service.valid_email(e), e)
+
+    def test_rejects_malformed(self):
+        for e in ("", "no-at", "a@b", "a@b.c", "a b@c.com", "a@@b.com",
+                  "a..b@c.com", "a@b..com", "x" * 260 + "@a.com",
+                  "a@b.com\n", "a@b.com ", " a@b.com"):
+            self.assertFalse(puni_service.valid_email(e), e)
+
+
+class PasswordQuality(unittest.TestCase):
+    """P-14：暗号的に安全な乱数＋文字種保証。"""
+
+    def test_length_and_classes(self):
+        for _ in range(50):
+            pw = puni_service._gen_password()
+            self.assertGreaterEqual(len(pw), 8)
+            self.assertTrue(any(c.islower() for c in pw))
+            self.assertTrue(any(c.isupper() for c in pw))
+            self.assertTrue(any(c.isdigit() for c in pw))
+
+    def test_uses_secrets_module(self):
+        import inspect
+        src = inspect.getsource(puni_service._gen_password)
+        self.assertIn("secrets", src)
+        self.assertNotIn("random.choice", src)
 
 
 class ComputePuniAmount(unittest.TestCase):
@@ -83,9 +127,11 @@ class ComputePuniAmount(unittest.TestCase):
         self.assertEqual(amt, 3 * pricing.PRICES["puni_farm_10"])
         self.assertEqual(rows[0][1], 3)
 
-    def test_unlimited_rounds_up_per_hour(self):
-        amt, _ = pricing.compute_puni_amount(["puni_unlimited"], {"puni_unlimited": 120})
-        self.assertEqual(amt, 2 * pricing.PRICES["puni_hour"])
+    def test_unlimited_bills_per_hour(self):
+        # P-09：入力時間（時間単位）と課金単位が一致する。3時間 → 3件。
+        amt, rows = pricing.compute_puni_amount(["puni_unlimited"], {"puni_unlimited": 3})
+        self.assertEqual(amt, 3 * pricing.PRICES["puni_hour"])
+        self.assertEqual(rows[0][1], 3)
 
     def test_account_multiplies_by_count(self):
         amt, _ = pricing.compute_puni_amount(["puni_account"], {"puni_account": 5})
