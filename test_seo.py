@@ -24,7 +24,7 @@ class SearchIndexing(unittest.TestCase):
         self.assertEqual(response.mimetype, "application/xml")
         root = ElementTree.fromstring(response.data)
         locations = [node.text for node in root.findall("{*}url/{*}loc")]
-        self.assertEqual(locations, [self.origin + p for p in ("/", "/nyanko", "/tsum")])
+        self.assertEqual(locations, [self.origin + p for p in ("/", "/nyanko", "/tsum", "/puni")])
 
     def test_robots_points_to_canonical_sitemap(self):
         response = self.client.get("/robots.txt")
@@ -35,7 +35,7 @@ class SearchIndexing(unittest.TestCase):
             self.assertIn("Disallow: " + path, response.text)
 
     def test_public_pages_have_canonical_without_query(self):
-        for path in ("/", "/nyanko", "/tsum"):
+        for path in ("/", "/nyanko", "/tsum", "/puni"):
             with self.subTest(path=path):
                 response = self.client.get(path + "?ref=share", base_url="https://alternate.example")
                 self.assertEqual(response.status_code, 200)
