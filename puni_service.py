@@ -631,7 +631,8 @@ def _battle_once(c_mod, client, stage_id: int, log) -> None:
             continue
         last = f"rc={code}"
         time.sleep(RETRY_WAIT)
-    raise RuntimeError(last or f"ステージ {stage_id} をクリアできませんでした")
+    raise RuntimeError((last + f"：ステージ {stage_id} を開始できませんでした。ステージIDをご確認ください。")
+                       if last else f"ステージ {stage_id} をクリアできませんでした。ステージIDをご確認ください。")
 
 
 def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
@@ -641,9 +642,11 @@ def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
     label = menu_label(menu)
     if menu in ("puni_farm", "puni_stage_clear", "puni_unlimited"):
         stage_id = int(stages[menu])
-        # 入力IDの実在をマスタで確認（誤IDで長い再試行ループに入らない・P-08）
+        # 入力IDをマスタで確認（P-08）。ただしマスタは最大24hのキャッシュで、新イベントの
+        # 追加直後は載っていないことがある。見つからなくても止めず、注意を記録して進める
+        # （存在しないIDは battle_start が即失敗するので長い待ちにはならない）。
         if not _stage_exists(c_mod, client, stage_id):
-            raise RuntimeError(f"ステージID {stage_id} が見つかりません。IDをご確認ください。")
+            log(f"ステージID {stage_id} はマスタに見つかりません（新イベント等の可能性）。そのまま試します。")
         if menu == "puni_stage_clear":
             prog.update(5, f"ステージ {stage_id} をクリア中…", force=True)
             _battle_once(c_mod, client, stage_id, log)
@@ -711,6 +714,8 @@ def _create_accounts(c_mod, menu: str, count: int, prog: _Progress, log) -> tupl
         entry = {"email": rec["email"], "password": rec["password"],
                  "player_name": rec["player_name"]}
         if aged and rec.get("client") is not None:
+            # 初回クリアはゲームAPI段。ログイン用の出口から周回用の出口へ切替（既定：直結）
+            _set_client_egress(c_mod, rec["client"], _game_api_proxy())
             stage = _aged_stage(rec["client"])
             prog.update(5, f"初回ステージ {stage} をクリア中…（{i + 1}/{count}）", force=True)
             try:
@@ -754,7 +759,9 @@ def run_order(mode: str, login_id: str, password: str,
     log(f"モード: {mode}（{MODE_LABELS.get(mode, mode)}）")
 
     # --- 新規アカウント作成系（puni_account / puni_aged） ---
-    if mode == "new" or (menus and menus[0] in SOLO_MENUS):
+    # 実行経路はメニューで決める（mode は email/new の区別だけ。経路の判断には使わない）。
+    # 作成系メニューは単独でしか選べない（SOLO_MENUS・validate_order で保証）。
+    if menus[0] in SOLO_MENUS:
         menu = menus[0]
         count = int(qty.get(menu, 1) or 1)
         accounts, error = _create_accounts(c_mod, menu, count, prog, log)

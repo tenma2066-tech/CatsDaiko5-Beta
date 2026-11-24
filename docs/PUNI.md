@@ -60,6 +60,19 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
 - `test_puni.py` 30 passed
 - 回帰：`test_puni test_seo test_order_flow test_price_parity test_tsum test_ui_results` → 155 passed / 14 skipped（capture off）。にゃんこ・ツムツム無傷
 
+### 2026-11-25（追加）自律バグ修正
+
+精査で見つけた実在バグを修正：
+
+| # | バグ | 原因 | 修正 |
+|---|---|---|---|
+| B-A | **回し放題の料金が画面で過少表示** | P-09 で入力を時間単位に変えたが、画面JS `unitsForPrice` が `ceil(n/60)`（分前提）のまま。3時間が 100円表示・サーバは 300円 | JS を `max(1,n)`（1時間=1件）に。ブラウザで 3h=300円 とサーバ一致を確認 |
+| B-B | **mode なりすましで注文が化ける** | `_run_puni_order` が SOLO のとき mode=new に上書きするが、非SOLOで mode=new を強制しない。`mode=new`＋`puni_farm` で資格情報が空にされ、`run_order` が mode=new を見てアカウント作成経路へ → 周回注文がアカウント作成に化ける | app はモードをメニューから決定（非SOLOは必ず email）。`run_order` も経路をメニューで判定（mode を経路判断に使わない）。テスト追加 |
+| B-C | **ステージ存在チェックの誤拒否** | `_stage_exists` が最大24hキャッシュのマスタで hard reject。新イベント追加直後の有効IDを誤って弾く。無効IDは battle_start が即失敗するので長い待ちにならない | hard reject をやめ、見つからなくても注意記録のうえ実行。battle 失敗時のエラーに「IDをご確認ください」を追加 |
+| B-D | 久垢の初回クリアがログイン用出口のまま | 作成直後の client の出口が login_proxy | 初回クリア前に `_set_client_egress` でゲームAPI用出口へ |
+
+回帰：全ルート 383 passed。ruff clean。ブラウザで価格整合・ライト/ダーク確認。
+
 ### 通信・サーバー構成の監査（2026-11-25）
 - **tsum との整合**：ツムツムは `TSUM_SOCKS_URL`（Tor/SOCKS）でログインを秘匿し、ゲームAPIは
   既定で直結（`tor_game_api` false・1件で多量通信のため）。ぷにぷにも同じ分離に合わせた：

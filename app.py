@@ -2537,8 +2537,10 @@ def _run_puni_order(data: dict, admin_free: bool):
         raw_qty, raw_stages)
     if error:
         return jsonify(error=error), 400
-    if menus and menus[0] in puni_service.SOLO_MENUS:
-        mode = "new"
+    # モードはメニューから決める（クライアントの mode を実行経路の判断に使わない）。
+    # 作成系（SOLO）は new、それ以外は必ず email（ログイン）。mode のなりすましで
+    # 周回注文がアカウント作成に化けるのを防ぐ。
+    mode = "new" if (menus and menus[0] in puni_service.SOLO_MENUS) else "email"
     error = puni_service.check_account(mode, login, password)
     if error:
         return jsonify(error=error), 400

@@ -486,6 +486,42 @@ class AppIntegration(unittest.TestCase):
         self.assertEqual(self.client.get("/nyanko").status_code, 200)
         self.assertEqual(self.client.get("/tsum").status_code, 200)
 
+    def test_mode_new_with_action_menu_does_not_create_accounts(self):
+        """なりすまし対策：mode=new + 非作成メニューでも、アカウント作成に化けない。
+        経路はメニューから決まるので、周回メニューはログイン経路（資格情報が要る）になる。"""
+        created = {"n": 0}
+
+        def fake_create(*a, **k):
+            created["n"] += 1
+            return [{"email": "x@y.com", "password": "p", "player_name": "ぷに1"}], ""
+
+        captured = {}
+
+        def fake_login(c_mod, email, password, log):
+            captured["email"] = email
+            raise RuntimeError("login attempted")  # 資格情報が無いので失敗で良い
+
+        with mock.patch.object(self.app.puni_service, "_create_accounts", side_effect=fake_create), \
+             mock.patch.object(self.app.puni_service, "_login", side_effect=fake_login), \
+             mock.patch.object(self.app.puni_service, "core", lambda: types.SimpleNamespace()):
+            out = self.app.puni_service.run_order(
+                "new", "attacker@x.com", "pw", ["puni_farm"],
+                {"puni_farm": 5}, {"puni_farm": 29704006})
+        self.assertEqual(created["n"], 0)          # アカウントは作られない
+        self.assertFalse(out["ok"])
+        self.assertIn("email", captured)           # ログイン経路に入った
+
+    def test_run_order_routes_account_only_for_solo_menu(self):
+        with mock.patch.object(self.app.puni_service, "_create_accounts",
+                               return_value=([{"email": "a@b.com", "password": "p", "player_name": "ぷに1"}], "")) as cre, \
+             mock.patch.object(self.app.puni_service, "_login") as login, \
+             mock.patch.object(self.app.puni_service, "core", lambda: types.SimpleNamespace()):
+            out = self.app.puni_service.run_order(
+                "new", "", "", ["puni_account"], {"puni_account": 1}, {})
+        self.assertTrue(out["ok"])
+        cre.assert_called_once()
+        login.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
