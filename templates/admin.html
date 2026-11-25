@@ -163,6 +163,11 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <div class="sub" style="white-space:pre-wrap;word-break:break-word;margin:4px 0">{{ r.text }}</div>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="{{ 'review_show' if r.hidden else 'review_hide' }}"><input type="hidden" name="id" value="{{ r.id }}"><button class="btn" style="padding:4px 10px;font-size:12px">{{ 'もう一度表示する' if r.hidden else '非表示にする' }}</button></form></div>
 {% else %}<div class="empty">まだ実績はありません</div>{% endfor %}</div>
+<div class="card"><h2>実績に載せない言葉</h2>
+<p class="sub">暴言・下品な言葉・差別語・URLや連絡先は、最初から書けないようになっています。ほかに止めたい言葉があれば、1行に1つずつ足してください（2文字以上。その言葉を含む感想は送信できなくなります）。すでに載っている感想には効かないので、そちらは上の「非表示にする」で。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="review_words_save">
+<label for="rvw">追加する言葉（1行に1つ）</label><textarea id="rvw" name="words" rows="5" style="width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:inherit">{{ review_words }}</textarea>
+<button class="btn pri full" style="margin-top:8px">保存する</button></form></div>
 </section>
 <section class="view" id="sec-settings">
 <div class="card"><h2>メンテナンス表示</h2>

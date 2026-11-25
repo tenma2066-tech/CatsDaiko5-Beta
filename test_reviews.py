@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import app as A
 import paypay_gateway as G
+import review_filter
 import site_config
 
 GOOD = "注文から5分で完了しました。案内が分かりやすくて安心でした。"
@@ -108,6 +109,60 @@ class Posting(Base):
         self.assertFalse(row()["reviewed"])
         self.post({"stars": 5, "text": GOOD, "order": oid})
         self.assertTrue(row()["reviewed"])
+
+
+class CleanWords(Base):
+    """汚い言葉・宣伝・連絡先は保存しない。ふつうの言葉や、低い評価・不満そのものは止めない。"""
+
+    FINE = ["約束どおり、やくそくの時間より早く終わりました。ありがとうございます。",
+            "カスタムの設定も細かくできて、カスタマー対応も丁寧でした。",
+            "ああほんとに助かりました。こればかり使っています。",
+            "イエローカードみたいな警告もなく、ハガキが届くより早かったです。",
+            "星2です。待ち時間が長くて不満でした。一度失敗もしました。改善してほしい。",
+            "Great service, fast and easy to use. I will pass this to my class!",
+            "ザコ敵も一掃できるデータになって最高でした。キモチよく遊べます。"]
+    DIRTY = ["死ねよマジで使えないサービスだと思いましたほんとに", "し ね よ ま じ で 使 え な い と 思 い ま し た",
+             "死.ね.よ.本当に使えないサービスだと思いました", "クソみたいな対応でした。二度と使いません本当に。",
+             "ク　ソ　すぎて話にならないレベルでしたもう使わない", "運営はバカなんですか？全然終わらないんですけど",
+             "ばーかばーか、全然だめじゃんこのサービスほんとに", "ｆｕｃｋ this service it is terrible and slow so bad",
+             "f.u.c.k this, worst thing I have ever used in my life", "What a piece of shit, never again, total waste of money",
+             "えっちな広告かと思いましたが普通に使えましたよかった", "この店はゴ・ミです。お金の無駄でしたもう使いません。"]
+    ADS = ["詳しくは https://example.com を見てください。おすすめです。", "example.jp で同じことが半額でできますよおすすめです",
+           "もっと安い代行はこちら→ @cheap_daikou までどうぞお願いします", "LINE ID 教えるので連絡ください。安くやります本当です。",
+           "09012345678 に電話ください。もっと安くできますよ本当に。", "ディスコで安くやってます。気になる人は連絡ください。"]
+
+    def test_filter_rules(self):
+        for t in self.FINE:
+            self.assertEqual(review_filter.check(t), (True, "", ""), t)
+        for t in self.DIRTY:
+            self.assertEqual(review_filter.check(t)[:2], (False, "bad_words"), t)
+        for t in self.ADS:
+            self.assertEqual(review_filter.check(t)[:2], (False, "ad"), t)
+
+    def test_dirty_reviews_are_rejected_and_not_saved(self):
+        oid = self.done_order()
+        for t, code in ((self.DIRTY[0], "bad_words"), (self.DIRTY[7], "bad_words"), (self.ADS[0], "ad")):
+            r = self.post({"stars": 1, "text": t, "order": oid})
+            self.assertEqual((r.status_code, r.get_json()["code"]), (400, code), t)
+            self.assertNotIn(t[:4], r.get_json()["error"])            # どの言葉かは繰り返さない
+        self.assertEqual(G.review_list(), [])
+        self.assertFalse(A._orders[oid].get("reviewed"))              # 書き直せば送れる
+        self.assertTrue(self.post({"stars": 2, "text": self.FINE[4], "order": oid}).get_json()["saved"])
+
+    def test_admin_can_add_words(self):
+        oid = self.done_order()
+        with patch.object(A, "_REVIEW_WORDS_FILE", str(Path(self.tmp.name) / "words.json")), \
+             patch.dict(A._review_words_cache, {"mtime": None, "words": []}):
+            self.assertEqual(A._save_review_words("ライバル店\n\n  ライ バル店 \nあ\nＮＧワード"), 2)   # 重複・1文字は捨てる
+            self.assertEqual(A.review_extra_words(), ["ライバル店", "ngワード"])
+            r = self.post({"stars": 5, "text": "ラ イ バ ル 店のほうが安いと聞きましたが、こちらも良かったです。", "order": oid})
+            self.assertEqual(r.get_json()["code"], "bad_words")
+            self.assertTrue(self.post({"stars": 5, "text": GOOD, "order": oid}).get_json()["saved"])
+
+    def test_admin_free_orders_are_not_reviewed(self):
+        oid = self.done_order(admin_free=True)
+        self.assertEqual(self.post({"stars": 5, "text": GOOD, "order": oid}).get_json(), {"ok": True, "saved": False})
+        self.assertEqual(G.review_list(), [])
 
 
 class PublicPage(Base):

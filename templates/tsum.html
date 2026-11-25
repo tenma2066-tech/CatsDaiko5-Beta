@@ -109,6 +109,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .flowbox{padding:12px 14px}.flowbox summary{cursor:pointer;font-size:15px}
 .flowbox img{display:block;width:100%;height:auto;margin-top:10px;border-radius:12px}
 .foot{margin:24px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}
+/* 評価と感想を送るまで、結果は読めないようにする（static/shop.js の lockResult） */
+.rvlock #codes .code strong,.rvlock #resultLines{filter:blur(7px);-webkit-user-select:none;user-select:none;pointer-events:none}
 [hidden]{display:none!important}
 </style><link rel="stylesheet" href="/static/qa.css?v=2">
 </head><body>
@@ -179,11 +181,6 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="lines" id="resultLines"></p>
   <div id="codes"></div>
   <p class="okbox" id="coupBox" hidden></p>
-  {% if reviews_on %}<div class="card" id="reviewBox" style="margin:12px 0 0" hidden>
-    <h3 style="margin:0 0 2px;font-size:16px">⭐ 評価と感想をお聞かせください</h3>
-    <p class="note" style="margin:0 0 6px">星と{{ review_min }}文字以上の感想を送ると、「<a href="/reviews" target="_blank" rel="noopener">実績</a>」に掲載されます（お名前・注文内容は出ません）。</p>
-    <div id="reviewForm"></div>
-  </div>{% endif %}
   <details class="logbox"><summary>くわしい記録</summary><pre id="log"></pre></details>
 </section>
 
@@ -219,6 +216,13 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <button class="go" id="go" type="button" disabled>{% if payments and not is_admin %}お支払いへ進む{% elif is_admin %}無料で実行（管理者）{% else %}実行{% endif %}</button>
 </div></div>
 
+{% if reviews_on %}<div class="panel" id="reviewPanel" role="dialog" aria-modal="true" aria-labelledby="rvTtl" hidden><div class="inner">
+  <h3 id="rvTtl">ご利用ありがとうございました！✨</h3>
+  <p class="note" style="font-size:14px;color:inherit"><b>結果をお渡しする前に、評価と感想をお聞かせください。</b>🙇‍♂️<br>星を選んで、{{ review_min }}文字以上の感想を書いて送信すると、すぐに<b>新しい引き継ぎ番号とパスワード</b>が表示されます。</p>
+  <p class="note">いただいた感想は「<a href="/reviews" target="_blank" rel="noopener">実績</a>」に掲載します（お名前・注文内容は出ません）。</p>
+  <div id="reviewForm"></div>
+</div></div>{% endif %}
+
 <div class="panel" id="payPanel" role="dialog" aria-modal="true" aria-labelledby="payTtl" hidden><div class="inner">
   <h3 id="payTtl">PayPayでお支払い</h3>
   <p class="okbox" id="payCoupon" style="white-space:pre-line" hidden></p>
@@ -239,7 +243,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 </div></div>
 
 <script src="/static/review.js?v=1"></script>
-<script src="/static/shop.js?v=2"></script>
+<script src="/static/shop.js?v=3"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
@@ -343,7 +347,7 @@ $('#modeList').addEventListener('change',syncMode);
 /* ---------- 注文まわり（支払い・一覧・再開）は共通の static/shop.js ---------- */
 const orders=ShopOrders({
   shop:'tsum', payments:PAYMENTS, couponMin:COUPON_MIN,
-  review:{min:{{ review_min }},max:{{ review_max }},pastUrl:{{ past_reviews_url|tojson }}},
+  review:{min:{{ review_min }},max:{{ review_max }},pastUrl:{{ past_reviews_url|tojson }}}, isAdmin:IS_ADMIN,
   isBusy:()=>!!curJob, watch, afterClose:renderCart,
   result:{ has:o=>!!o.result, label:'引き継ぎ情報を見る', name:'引き継ぎ情報', show:o=>{
     $('#s-status').hidden=false; $('#codes').textContent=''; delete $('#codes').dataset.done;
@@ -387,7 +391,7 @@ function watch(job){
   /* 前の注文の結果を消してから表示する（取り違え防止） */
   $('#codes').textContent=''; delete $('#codes').dataset.done;
   $('#resultLines').textContent=''; $('#coupBox').hidden=true; $('#log').textContent='';
-  if($('#reviewBox')) $('#reviewBox').hidden=true;
+  orders.resetReview();
   $('#now').dataset.s='running'; $('#now').textContent='準備しています…'; $('#pbar').style.width='0'; $('#pbar').dataset.s='';
   $('#s-status').hidden=false; renderCart();
   $('#s-status').scrollIntoView({behavior:'smooth',block:'start'});
@@ -418,7 +422,7 @@ async function poll(){
   if(j.result) showCodes(j.result, st==='error');
   if(st==='done'||st==='error'){
     const job=curJob; stopWatch(); orders.loadCoupon(job); orders.loadResume();
-    if(st==='done') orders.offerReview(job);
+    if(st==='done') orders.requireReview(job);   /* 評価と感想を送ってもらってから、結果を見せる */
     if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }
 }

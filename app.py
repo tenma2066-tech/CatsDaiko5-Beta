@@ -54,6 +54,7 @@ import save_repair
 import tsum_service
 import puni_service
 import qa_bot
+import review_filter
 import site_config
 import source_pack
 from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py からも同じ名前で使えるようにしている
@@ -64,7 +65,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.17"
+APP_VERSION = "1.18"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
@@ -1666,7 +1667,7 @@ def admin():
 
 
 ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
-             "maint_save": "settings", "price_save": "settings", "review_hide": "reviews", "review_show": "reviews", "order_recheck": "orders", "order_start": "orders",
+             "maint_save": "settings", "price_save": "settings", "review_hide": "reviews", "review_show": "reviews", "review_words_save": "reviews", "order_recheck": "orders", "order_start": "orders",
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
 
@@ -1829,6 +1830,12 @@ def _admin_post(token):
             _log_orders.exception("review moderation failed")
             ok = False
         msg = ("実績を非表示にしました。" if action == "review_hide" else "実績をもう一度表示するようにしました。") if ok else "変更できませんでした。"
+    elif action == "review_words_save":
+        try:
+            n = _save_review_words(request.form.get("words", ""))
+            msg = f"実績に載せない言葉を保存しました（追加分 {n} 語）。これから書かれる感想に効きます。"
+        except OSError:
+            msg = "保存できませんでした。"
     elif action == "backup_download":
         return _backup_response()
     elif action == "lock":
@@ -1967,7 +1974,7 @@ def _admin_page(msg):
             _log_orders.exception("review list failed")
     rp = restart_pack()
     rp_text = "\n".join(f"{k}={v}" for k, v in rp["items"].items())
-    return render_template_string(ADMIN_HTML, coupons=coupons, reviews=reviews, review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
+    return render_template_string(ADMIN_HTML, coupons=coupons, reviews=reviews, review_words="\n".join(review_extra_words()), review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
                                   maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED,
@@ -3190,6 +3197,36 @@ def support_order():
 SHOP_LABELS = {"nyanko": "にゃんこ代行", "tsum": "ツムツム代行", "puni": "ぷにぷに代行"}
 
 
+_REVIEW_WORDS_FILE = os.path.join(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay"), "review_words.json")
+_review_words_cache: dict = {"mtime": None, "words": []}
+
+
+def review_extra_words() -> list:
+    """管理画面で足した「実績に載せない言葉」（最初から入っている一覧は review_filter.py）。"""
+    try:
+        m = os.stat(_REVIEW_WORDS_FILE).st_mtime
+    except OSError:
+        return []
+    if _review_words_cache["mtime"] != m:
+        try:
+            with open(_REVIEW_WORDS_FILE, encoding="utf-8") as f:
+                words = json.load(f)
+            _review_words_cache.update(mtime=m, words=[str(w) for w in words if isinstance(w, str)][:200])
+        except Exception:  # noqa: BLE001
+            return []
+    return _review_words_cache["words"]
+
+
+def _save_review_words(raw: str) -> int:
+    words = review_filter.clean_words(raw)
+    os.makedirs(os.path.dirname(_REVIEW_WORDS_FILE) or ".", exist_ok=True)
+    tmp = _REVIEW_WORDS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(words, f, ensure_ascii=False)
+    os.replace(tmp, _REVIEW_WORDS_FILE)
+    return len(words)
+
+
 def _order_shop(o: dict) -> str:
     """その注文がどの部門のものか（nyanko / tsum / puni）。"""
     mode = (o.get("job") or {}).get("mode")
@@ -3208,7 +3245,8 @@ def _review_target(me: str, order_id: str, job_id: str):
     """実績を書ける注文を探す：本人の、完了した代行の注文で、まだ実績を書いていないもの。
     注文番号 → 実行の番号 → いちばん新しいもの、の順に当てはめる。呼び出し側で _orders_lock を持つこと。"""
     def ok(o):
-        return o["owner"] == me and o["state"] == "done" and not o.get("product") and not o.get("reviewed")
+        return (o["owner"] == me and o["state"] == "done" and not o.get("product") and not o.get("reviewed")
+                and not o.get("admin_free"))   # 管理者の無料実行は、実績の対象にしない
     if order_id and order_id in _orders and ok(_orders[order_id]):
         return order_id
     if job_id:
@@ -3237,6 +3275,9 @@ def review_post():
         return jsonify(error=f"感想は{high}文字までにしてください。", code="too_long"), 400
     if len(set(text)) < 5:
         return jsonify(error="同じ文字のくり返しではなく、感想を書いてください。", code="too_plain"), 400
+    fine, why, message = review_filter.check(text, review_extra_words())   # 汚い言葉・宣伝・連絡先は載せない
+    if not fine:
+        return jsonify(error=message, code=why), 400
     if not _rate_ok("review:" + _client_ip(), 8, 600):
         return _too_fast()
     me = _owner()

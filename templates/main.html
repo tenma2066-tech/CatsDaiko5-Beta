@@ -1332,7 +1332,7 @@ function pill(id,s,text){const e=$(id); e.dataset.s=s; e.lastElementChild.textCo
 /* ---------- 実績（評価と感想）：完了したら、星と感想を送ってもらってからコードを見せる ----------
    入力欄は全画面共通の static/review.js。送信できたらその場で開く（X へ移動しないので、戻ってこられない事故が起きない）。
    どの結果を見せたかは、コードそのものではなく目印（ハッシュ）で端末に覚えておく。 */
-const REVIEWS_ON={{ reviews_on|tojson }}&&PAYMENTS;
+const REVIEWS_ON={{ reviews_on|tojson }}&&PAYMENTS&&!IS_ADMIN;   /* 管理者の無料実行では聞かない */
 const RVKEY='nyanko-review-ok';
 function rvHash(t){ let h=5381; t=String(t||''); for(let i=0;i<t.length;i++) h=((h*33)^t.charCodeAt(i))>>>0; return h.toString(36); }   /* コードそのものは保存しない */
 function rvLoad(){ try{ return JSON.parse(localStorage.getItem(RVKEY)||'[]'); }catch(e){ return []; } }
@@ -1350,6 +1350,16 @@ function rvOpen(result,then){
   $('#reviewPanel').hidden=false; document.body.style.overflow='hidden';
 }
 let rvThen=[];
+/* コードの出ない完了：その注文がまだ実績を書いていなければ、入力欄を出す */
+async function rvAskAfter(job){
+  if(!REVIEWS_ON||!job) return;
+  for(let i=0;i<4;i++){
+    await sleep(1500);
+    try{ const m=await (await fetch('/api/orders/mine',{cache:'no-store'})).json();
+      const o=(m.orders||[]).find(x=>x.job===job&&x.state==='done');
+      if(o){ if(!o.reviewed) rvOpen(null); return; } }catch(e){}
+  }
+}
 function rvApply(){
   [['#donePanel',window.__doneResult],['#res',window.__resResult]].forEach(([q,r])=>{ const e=$(q); if(e) e.classList.toggle('rvlock',needReview(r)); });
   try{ renderHist(); }catch(e){}
@@ -1546,6 +1556,7 @@ async function poll(){
     if(j.status!=='running'&&j.status!=='queued'){
       stopJob(); setTimeout(loadResume,1500);
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
+      if(j.status==='done'&&!j.result&&!j.dry) rvAskAfter(curJob);   /* コードが出ない注文（バン保証の検査だけ等）でも、評価はお願いする */
       if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); if(PAYMENTS) fetchCoupon(curJob); $('#transfer').value=''; $('#confirm').value=''; refresh(); }
       if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① メニュー」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'バン保証の検査が完了しました'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
@@ -1563,6 +1574,7 @@ $('#download-result').addEventListener('click',async()=>{
     if(!response.ok) throw Error('expired');
     const job=await response.json();
     if(!job.result) throw Error('no result');
+    if(needReview(job.result)){ rvOpen(job.result); return; }   /* 保存も、評価と感想を送ってから */
     const url=URL.createObjectURL(new Blob([JSON.stringify(job.result,null,2)],{type:'application/json'}));
     const link=document.createElement('a'); link.href=url; link.download='nyanko-result.json'; link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -1975,6 +1987,8 @@ async function loadResume(quiet){
     const r=quiet?await fetch('/api/orders/mine',{cache:'no-store'}):await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
     const j=await r.json(); const list=(j.orders||[]).filter(o=>!o.tsum&&!o.puni&&!o.product);   /* ツム・ぷにの注文は各画面で扱う */
     let seen=[]; try{ seen=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); }catch(e){}
+    // すでに実績を書いた注文の結果は、この端末でもそのまま見られるようにする（別の端末で書いた場合など）
+    { let n=rvOk.size; list.forEach(o=>{ if(o.reviewed&&o.result) rvKeys(o.result).forEach(k=>rvOk.add(k)); }); if(rvOk.size!==n){ rvSave(); rvApply(); } }
     // いま見ている（見た）実行の注文は「結果を見せた」として記録する
     list.forEach(o=>{ if(o.job&&o.job===curJob&&o.state==='done') markShown(o.order); });
     // 1) 実行が始まった注文（管理者の承認・保留解除・別のタブで戻った など）→ 見ていなければ、その注文の状況画面へ（こちらを優先）

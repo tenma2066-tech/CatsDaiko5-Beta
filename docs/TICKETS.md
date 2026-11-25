@@ -46,11 +46,18 @@
 
 完了した代行の注文に、お客さんが **星1〜5と感想（20〜400文字）** を書ける。以前の「X のポストにリプライ」を置き換えたもの。
 
-- 入力欄は全画面共通の `static/review.js`（`ReviewForm`）。にゃんこは**送信するとコードが見られる**（`templates/main.html` の `needReview` / `rvOpen` / `rvUnlock`）。ツムツム・ぷにぷには完了後に任意で出す（`static/shop.js` の `offerReview`）。
+- 入力欄は全画面共通の `static/review.js`（`ReviewForm`）。**全部門で必須**：送信するまで結果は読めない。
+  にゃんこは `templates/main.html` の `needReview` / `rvOpen` / `rvUnlock`（コードの出ない完了でも `rvAskAfter` で聞く）、
+  ツムツム・ぷにぷには `static/shop.js` の `requireReview` / `showResult`（結果をぼかし、`inert` でコピーも止める）。
+  書いたかどうかは注文の `reviewed` が正（開き直し・別の端末でも同じ）。管理者の無料実行では聞かない・保存しない。
+- **汚い言葉・宣伝は保存しない**：`review_filter.py` の `check`。暴言・侮辱・差別語・性的な言葉（`JA_WORDS`・`EN_WORDS`）と、
+  URL・@ID・連絡先・電話番号を 400 で断る（幅・大小をそろえ、あいだの空白や記号を取り除いて探す）。
+  普通の言葉を巻き込む語は登録しない（「ばかり」「カスタム」「やくそく」「イエロー」など。`test_reviews.py` の `FINE` に例）。
+  低い評価や不満そのものは止めない。お店ごとに足す言葉は、管理画面「実績」タブ →「実績に載せない言葉」（`review_words.json`）。
 - 保存：`POST /api/reviews {stars, text, order?, job?}`。本人の・完了した・代行の注文で、まだ書いていないものだけ（1注文1件。注文に `reviewed` の印）。対象が無いときも `ok`（`saved:false`）を返し、画面は先へ進める。
 - **お客さんを止めない**：保存に2回続けて失敗したら、入力欄は閉じてコードを見せる。
 - 置き場所：台帳（SQLite）の `reviews` 表（`paypay_gateway.review_*`）。注文番号は外へ出さない。部門名と日付だけ添える（注文内容・名前は出さない）。
 - 公開：`/reviews`（平均・星ごとの件数・一覧・「もっと見る」＝`GET /api/reviews?before=id`）。`REVIEW_POST_ID` があれば「今までの実績を見る（X）」のリンクを出す。
 - 管理：`/admin` の「実績」タブで非表示／再表示（平均と件数からも外れる）。
 - 止める：`REVIEWS_ENABLED=0`（入力のお願い・ページ・トップの帯・sitemap すべて消える）。
-- テスト：`test_reviews.py`、ブラウザは `test_ui_results.py` の `ReviewGate`。
+- テスト：`test_reviews.py`（保存・検査・公開・管理）、ブラウザは `test_ui_results.py` の `ReviewGate`。
