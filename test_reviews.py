@@ -211,6 +211,32 @@ class PublicPage(Base):
         self.assertEqual(set(j["reviews"][0]), {"id", "stars", "text", "shop", "date"})
         self.assertEqual(self.c.get("/api/reviews?before=abc").status_code, 200)
 
+    def test_filter_by_shop(self):
+        self.add(3, 5)
+        self.add(2, 2, "puni")
+        self.assertEqual(G.review_stats("puni")["count"], 2)
+        self.assertEqual(G.review_stats("puni")["average"], 2.0)
+        self.assertEqual(G.review_stats("tsum")["count"], 0)
+        self.assertEqual({x["shop"] for x in G.review_list(shop="puni")}, {"puni"})
+        page = self.c.get("/reviews?shop=puni").get_data(as_text=True)
+        self.assertIn("2件の評価", page)
+        self.assertIn('href="/reviews?shop=puni" aria-current="page"', page)
+        self.assertIn("この部門の実績はまだありません", self.c.get("/reviews?shop=tsum").get_data(as_text=True))
+        self.assertIn("5件の評価", self.c.get("/reviews?shop=%27%20OR%201=1").get_data(as_text=True))   # 知らない指定は絞らない
+        j = self.c.get("/api/reviews?shop=puni").get_json()
+        self.assertEqual([x["shop"] for x in j["reviews"]], ["ぷにぷに代行"] * 2)
+
+    def test_shop_pages_show_their_own_summary(self):
+        self.assertIsNone(A._shop_reviews("puni"))                      # 0件のあいだは何も出さない
+        self.assertNotIn('class="rvstrip"', self.c.get("/puni").get_data(as_text=True))
+        self.add(2, 4, "puni")
+        self.assertEqual(A._shop_reviews("puni")["count"], 2)
+        self.assertIsNone(A._shop_reviews("tsum"))
+        self.assertIn('class="rvstrip"', self.c.get("/puni").get_data(as_text=True))
+        self.assertNotIn('class="rvstrip"', self.c.get("/tsum").get_data(as_text=True))
+        with patch.object(site_config, "REVIEWS_ENABLED", False):
+            self.assertIsNone(A._shop_reviews("puni"))
+
     def test_can_be_switched_off(self):
         with patch.object(site_config, "REVIEWS_ENABLED", False):
             self.assertEqual(self.c.get("/reviews").status_code, 302)

@@ -80,8 +80,12 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <div class="stat {{ 'ok' if pp.ready else 'bad' }}"><small>PayPay 接続</small><b>{% if pp.ready %}接続済み{% elif pp.connected %}再認証が必要{% else %}未接続{% endif %}</b></div>
 <div class="stat {{ 'warn' if maint.on else '' }}"><small>メンテナンス表示</small><b>{{ 'オン' if maint.on else 'オフ' }}</b></div>
 <div class="stat"><small>実行中 / 待機</small><b>{{ dash.running }} / {{ dash.queued }}</b><span>同時実行の上限 {{ dash.max_jobs }}</span></div>
+<div class="stat"><small>長時間レーン（ぷにぷにの長い周回）</small><b>{{ dash.long_running }} / {{ dash.long_queued }}</b><span>専用の枠 {{ dash.long_slots }}（実行中 / 待機）</span></div>
 <div class="stat {{ 'bad' if dash.attention else 'ok' }}"><small>要対応の注文</small><b>{{ dash.attention|length }} 件</b><span>未完了 全{{ dash.open_orders }}件</span></div>
 </div></div>
+{% if dash.running_orders %}<div class="card"><h2>実行中の注文</h2><p class="sub">長時間の周回は、サーバーの更新で止まっても続きから自動で再開します（更新は長時間レーンを待たずに進みます）。</p>
+{% for o in dash.running_orders %}<div class="h"><div class="l1">{% if o.long %}<span class="chip warn">長時間</span>{% endif %}<span class="chip">{{ o.created }} 注文</span><span class="amt">{{ o.amount }}円</span></div>
+<div class="sub">{{ o.summary }}</div>{% if o.progress %}<div class="sub" style="font-size:12px">途中経過：{{ o.progress }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
 <div class="card"><h2>売上（入金確認済み）</h2>
 <div class="grid"><div class="stat"><small>今日</small><b>{{ '{:,}'.format(dash.today.yen) }} 円</b><span>{{ dash.today.count }} 件</span></div>
 <div class="stat"><small>直近7日</small><b>{{ '{:,}'.format(dash.week.yen) }} 円</b><span>{{ dash.week.count }} 件</span></div></div>

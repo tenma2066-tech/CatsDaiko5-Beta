@@ -27,7 +27,9 @@
 @media (prefers-color-scheme:dark){:root{
   --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;
   --okbg:#14291f;--badbg:#321a1a;--hit:rgba(255,196,46,.16);--pay:#ff8a4c;--grid:#333943;
-}}
+;--link:#8ab4ff}}
+/* 文中のリンク：明るい画面・暗い画面のどちらでも読める色 */
+a{color:var(--link,#1a56c4)}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;

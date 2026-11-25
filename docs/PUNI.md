@@ -188,3 +188,21 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
   `puni_coin_gacha` / `puni_hitodama` を1件通して rc を確認。rc=20 なら APPVER 更新（P-10）。
 - **バナー画像**：`static/game-puni.{webp,jpg}`・`static/ogp-puni.jpg` 未配置（home カードの画像は後日）。
 - **任意の運用設定**：`PUNI_SOCKS_URL`（送信元秘匿したい場合）・`PUNI_TOR_GAME_API=1`（周回も経由）。
+
+
+## 長時間の周回（回し放題・50周以上の自動周回）の扱い
+
+何時間も動く注文が、ほかの注文やサーバーの更新を止めないようにしてある。
+
+| 困りごと | 対策 | 場所 |
+|---|---|---|
+| 実行枠（全部門で4つ）を何時間も塞ぎ、数分の注文が15分で打ち切られる | **長時間レーン**：専用の枠（`LONG_JOB_SLOTS`・既定3）で動かす。ふつうの枠は使わない。待ちも別で数え、長時間の待ちは最大6時間（`LONG_QUEUE_TTL`） | `app.py` の `_long_slots` / `_free_slot_locked` / `_start_queued_jobs_locked`、判定は `puni_service.is_long` |
+| 実行中があるとデプロイが進まない（12分待って中止） | デプロイが待つ件数（`/api/state` の `running_jobs`・`queued_jobs`）は**ふつうの枠だけ**。長時間レーンは待たずに入れ替える | `_parallel_state_locked` |
+| 入れ替え・再起動で止まると、最初からやり直し（やりすぎ・待たせすぎ） | **途中経過を保存して続きから**：済んだメニュー・周数・使った時間を1周ごとに記録し、60秒ごとに保存。起動後、止まった長時間の注文を自動で続きから始める（最大5回） | `puni_service.run_order` の `resume` / `checkpoint`、`app.py` の `_carry_progress` / `_auto_resume_orders` |
+| 途中の失敗で残りが受けられない | 周回の途中で失敗しても、済んだ分は記録済み → 払い直しなしで「続きから実行」できる（済んだ周・済んだメニューは繰り返さない） | `out["resumable"]`、注文一覧の `resume` |
+| お客さんが途中でやめたい | 実行中の画面に「ここで終了する」。いまの1周が終わったところで正常に終わる（返金なし） | `POST /api/jobs/<id>/stop` → `should_stop` |
+| 何時間も状況を問い合わせ続ける | 長時間の実行中は、画面の問い合わせを6秒おきに落とす。画面は閉じてよい | `templates/puni.html` の `pollEvery` |
+
+負荷の実測：1件あたりのメモリは約66MB（実行用のプロセス）。周回中はエンジンが人間らしい間隔で待つため、CPU はほぼ使わない。
+回し放題の時間は「実際に回した時間」で数える（止まっていたあいだは数えない）。
+テスト：`test_reliability.py` の `LongLane`・`PuniResume`。

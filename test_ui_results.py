@@ -274,13 +274,13 @@ class BackButtonBetweenGames(ResultCodesNotMixedUp):
         pg.route("**/api/orders/mine", lambda r, *_: r.fulfill(status=200, content_type="application/json",
                                                                 body=json.dumps({"orders": [], "maint": {"on": False}})))
         pg.goto(self.url + "tsum")
-        pg.click("text=← ゲームを選び直す")
+        pg.click("text=← メニューへ")
         self.assertEqual(self._where(pg), "/")
         pg.goto(self.url + "nyanko")
         pg.wait_for_timeout(800)
         if pg.is_visible("#helpClose"):
             pg.click("#helpClose")
-        pg.click("text=← ゲームを選び直す")
+        pg.click("text=← メニューへ")
         self.assertEqual(self._where(pg), "/")
         pg.go_back()
         self.assertEqual(self._where(pg), "/nyanko")

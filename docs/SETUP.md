@@ -96,6 +96,7 @@ PAYMENTS_ENABLED=0 ADMIN_PASSWORD=test python app.py
 | `PAYPAY_DATA_DIR` `PAYPAY_LEDGER_PATH` | `instance/paypay` | 注文・台帳・料金・設定の保存先（消えない場所に） |
 | `TSUM_DATA_DIR` `PUNI_DATA_DIR` | — | ツムツム・ぷにぷにの作業用フォルダ |
 | `MAX_CONCURRENT_JOBS` | `4` | 同時に実行する件数 |
+| `LONG_JOB_SLOTS` | `3` | ぷにぷにの長時間周回（回し放題・50周以上）専用の実行枠。1件あたりメモリ約70MB。`0` でふつうの枠を使う |
 | `ANTHROPIC_API_KEY` `QA_MODEL` | — | Q&A チャット（`docs/QA_SETUP.md`） |
 | `TSUM_SOCKS_URL` `PUNI_SOCKS_URL` | — | ログイン時に使うプロキシ（`docs/TSUM.md`・`docs/PUNI.md`） |
 | `SHOP_NAME` `SHOP_X_ID` `REVIEW_POST_ID` `REVIEWS_ENABLED` `GOOGLE_SITE_VERIFICATION` | — | お店の名前など（手順2） |

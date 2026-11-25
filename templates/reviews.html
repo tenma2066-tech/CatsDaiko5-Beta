@@ -15,7 +15,9 @@
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;--bar:#333943;--badbg:#321a1a;
-}}
+;--link:#8ab4ff}}
+/* 文中のリンク：明るい画面・暗い画面のどちらでも読める色 */
+a{color:var(--link,#1a56c4)}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;
@@ -29,6 +31,11 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
 .lead{margin:0 0 16px;font-size:14px;color:var(--muted)}
 .maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
 .card{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px;margin:0 0 14px;box-shadow:0 4px 0 var(--line)}
+.chips{display:flex;gap:6px;overflow-x:auto;margin:0 0 12px;padding:2px 0 4px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips a{flex:none;padding:7px 13px;border:2px solid var(--line);border-radius:999px;background:var(--panel);color:inherit;
+  font-size:13.5px;font-weight:800;text-decoration:none;white-space:nowrap}
+.chips a[aria-current=page]{background:var(--accent);color:#17181c}
 .sum{display:flex;gap:16px;align-items:center}
 .sum .avg{flex:none;text-align:center;min-width:96px}
 .sum .avg b{display:block;font-size:44px;font-weight:800;line-height:1}
@@ -60,6 +67,10 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
   <h1>実績⭐</h1>
   <p class="lead">ご利用いただいたお客さまの評価と感想です。<b>実際に注文が完了した方だけ</b>が、1つの注文につき1回書けます。</p>
 
+  <nav class="chips" aria-label="部門で絞り込む">
+    <a href="/reviews" {% if not shop %}aria-current="page"{% endif %}>すべて</a>
+    {% for key, label in shop_labels.items() %}<a href="/reviews?shop={{ key }}" {% if shop == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+  </nav>
   <section class="card sum" aria-label="評価のまとめ">
     <div class="avg">
       <b>{{ "%.1f"|format(stats.average) if stats.count else "–" }}</b>
@@ -78,7 +89,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
       <p>{{ r.text }}</p>
     </article>
   {% else %}
-    <div class="card empty" id="empty">まだ実績はありません。<br>最初の感想をお待ちしています。</div>
+    <div class="card empty" id="empty">{{ 'この部門の実績はまだありません。' if shop else 'まだ実績はありません。' }}<br>最初の感想をお待ちしています。</div>
   {% endfor %}
   </div>
   <button class="btn" id="more" type="button" {% if not more %}hidden{% endif %}>もっと見る</button>
@@ -107,7 +118,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
   more.addEventListener('click',async()=>{
     if(busy) return; busy=true; more.textContent='読み込んでいます…';
     try{
-      const r=await fetch('/api/reviews?before='+encodeURIComponent(last),{cache:'no-store'}); const j=await r.json();
+      const r=await fetch('/api/reviews?before='+encodeURIComponent(last)+{{ ('&shop=' ~ shop if shop else '')|tojson }},{cache:'no-store'}); const j=await r.json();
       (j.reviews||[]).forEach(x=>{ list.append(card(x)); last=x.id; });
       more.hidden=!j.more;
     }catch(e){}

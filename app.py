@@ -65,7 +65,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.18"
+APP_VERSION = "1.19"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
@@ -1999,7 +1999,14 @@ def _admin_page(msg):
         counts = {}
         for o in orders:
             counts[o["state"]] = counts.get(o["state"], 0) + 1
+        with _orders_lock:   # 実行中の注文（長時間の周回は途中経過つき）
+            running_orders = [{"summary": v.get("summary", ""), "amount": v["amount"], "long": bool((v.get("job") or {}).get("long")),
+                               "created": time.strftime("%m/%d %H:%M", time.localtime(v["created"])),
+                               "progress": _resume_note(v)}
+                              for v in sorted(_orders.values(), key=lambda v: -v["created"]) if v["state"] == "started"][:20]
         dash = {"running": par.get("running_jobs", 0), "queued": par.get("queued_jobs", 0), "max_jobs": par.get("max_concurrent_jobs", 0),
+                "long_running": par.get("long_running_jobs", 0), "long_queued": par.get("long_queued_jobs", 0),
+                "long_slots": par.get("long_slots", 0), "running_orders": running_orders,
                 "today": sales(day0), "week": sales(now - 7 * 86400), "uptime": int(now - _started_at), "version": APP_VERSION,
                 "attention": [o for o in orders if o["state"] in ("dead", "paid", "hold")],
                 "counts": counts, "open_orders": len(orders)}
@@ -2362,6 +2369,7 @@ def index():
     return render_template_string(
         MAIN_HTML, ev_names={m["id"]: m["name"] for m in EVENT_MAPS}, legend_levels={k: v[1] for k, v in engine.LEGEND_TIERS.items()}, is_admin=_is_admin() and PAYMENTS_ENABLED, restart=restart_pack(), pt_min=PT_MIN_MINUTES, coupon_min=COUPON_MIN, maint=_maint(), uid=_uid(_owner()), payments=PAYMENTS_ENABLED, prices=PRICES, crash_items=CRASH_ITEMS, groups=groups, totals=totals, version=APP_VERSION,
         limits=engine.QUANTITY_ITEM_LIMITS, high=HIGH_RISK_ITEMS,
+        shop_reviews=_shop_reviews("nyanko"),
         type_names={k: v for k, v in engine.ITEM_TYPE_NAMES.items() if k != "本能玉"},
         orb_kinds=item_catalog.ORB_KIND_NAMES, orb_grades=item_catalog.ORB_GRADES,
         error_nums=sorted(i + DB_OFFSET for i in engine.ERROR_CAT_IDS), site=_site(),
@@ -2409,6 +2417,14 @@ def favicon():
     return app.send_static_file("favicon.ico")
 
 
+def _shop_reviews(shop: str):
+    """そのお店の画面に出す実績のまとめ（件数と平均）。実績の機能を止めている・まだ0件なら None（何も出さない）。"""
+    if not site_config.REVIEWS_ENABLED:
+        return None
+    stats = _review_stats(shop)
+    return stats if stats["count"] else None
+
+
 def _service_menus(service) -> list:
     """ツムツム・ぷにぷにの画面に渡すメニュー一覧（表示順・いまの料金つき）。"""
     return [dict(key=k, **{kk: vv for kk, vv in v.items() if kk != "price"}, amount=PRICES.get(v["price"], 0))
@@ -2423,6 +2439,7 @@ def tsum_page():
         TSUM_HTML, menus=menus, modes=tsum_service.MODE_LABELS, solo=list(tsum_service.SOLO_MENUS),
         is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
         coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=TSUM_TOTAL_STEPS, site=_site(),
+        shop_reviews=_shop_reviews("tsum"),
     )
 
 
@@ -2435,6 +2452,7 @@ def puni_page():
         stage_menus=list(puni_service.STAGE_MENUS), long_farm_laps=puni_service.LONG_FARM_LAPS,
         is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
         coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=PUNI_TOTAL_STEPS, site=_site(),
+        shop_reviews=_shop_reviews("puni"),
     )
 
 
@@ -3195,6 +3213,7 @@ def _qa_live(shop: str) -> dict:
     return {"now": time.strftime("%m/%d %H:%M"),
             "maintenance": bool(m.get("on")), "maintenance_message": m.get("message", ""),
             "updating": _draining(), "payments": PAYMENTS_ENABLED,
+            "long_running": p["long_running_jobs"], "long_slots": p["long_slots"], "long_queued": p["long_queued_jobs"],
             "running": p["running_jobs"], "slots": p["max_concurrent_jobs"],
             "free_slots": p["available_slots"], "queued": p["queued_jobs"],
             "prices": _qa_prices(shop), "price_note": _QA_PRICE_NOTE.get(shop, ""),
@@ -3537,9 +3556,9 @@ def _public_reviews(rows) -> list:
              "date": time.strftime("%Y/%m/%d", time.localtime(r["created"]))} for r in rows]
 
 
-def _review_stats() -> dict:
+def _review_stats(shop: str | None = None) -> dict:
     try:
-        return paypay_gateway.review_stats()
+        return paypay_gateway.review_stats(shop)
     except Exception:  # noqa: BLE001  台帳が読めなくても、ページは出す
         _log_orders.exception("review stats failed")
         return {"count": 0, "average": 0.0, "dist": {i: 0 for i in range(1, 6)}}
@@ -3555,11 +3574,17 @@ def review_list():
     except (TypeError, ValueError):
         before = None
     try:
-        rows = paypay_gateway.review_list(REVIEW_PAGE, before)
+        rows = paypay_gateway.review_list(REVIEW_PAGE, before, shop=_review_shop())
     except Exception:  # noqa: BLE001
         _log_orders.exception("review list failed")
         rows = []
     return jsonify(reviews=_public_reviews(rows), more=len(rows) == REVIEW_PAGE)
+
+
+def _review_shop():
+    """実績を部門で絞る指定（?shop=nyanko|tsum|puni）。それ以外は絞らない。"""
+    shop = request.args.get("shop", "")
+    return shop if shop in SHOP_LABELS else None
 
 
 REVIEW_PAGE = 20   # 実績を1回に出す件数
@@ -3570,12 +3595,14 @@ def reviews_page():
     """実績（お客さんの評価と感想）の一覧。"""
     if not site_config.REVIEWS_ENABLED:
         return redirect("/")
+    shop = _review_shop()
     try:
-        rows = paypay_gateway.review_list(REVIEW_PAGE)
+        rows = paypay_gateway.review_list(REVIEW_PAGE, shop=shop)
     except Exception:  # noqa: BLE001
         _log_orders.exception("review list failed")
         rows = []
-    return render_template_string(REVIEWS_HTML, stats=_review_stats(), reviews=_public_reviews(rows),
+    return render_template_string(REVIEWS_HTML, stats=_review_stats(shop), reviews=_public_reviews(rows),
+                                  shop=shop or "", shop_labels=SHOP_LABELS,
                                   more=len(rows) == REVIEW_PAGE, maint=_maint(), version=APP_VERSION, site=_site())
 
 

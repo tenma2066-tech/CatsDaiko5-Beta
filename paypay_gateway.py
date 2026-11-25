@@ -649,11 +649,14 @@ def review_add(order_id: str, shop: str, stars: int, body: str) -> bool:
             return False
 
 
-def review_list(limit: int = 30, before: int | None = None, include_hidden: bool = False):
-    """新しい順。before は「この id より前」（続きを読むとき）。注文番号は返さない。"""
+def review_list(limit: int = 30, before: int | None = None, include_hidden: bool = False, shop: str | None = None):
+    """新しい順。before は「この id より前」（続きを読むとき）。shop で部門を絞れる。注文番号は返さない。"""
     sql, args = "SELECT id, created, shop, stars, body, hidden FROM reviews WHERE 1=1", []
     if not include_hidden:
         sql += " AND hidden=0"
+    if shop:
+        sql += " AND shop=?"
+        args.append(shop)
     if before:
         sql += " AND id < ?"
         args.append(int(before))
@@ -664,11 +667,14 @@ def review_list(limit: int = 30, before: int | None = None, include_hidden: bool
         return [dict(r) for r in db.execute(sql, args).fetchall()]
 
 
-def review_stats() -> dict:
-    """公開中の実績の件数・平均・星ごとの件数。"""
+def review_stats(shop: str | None = None) -> dict:
+    """公開中の実績の件数・平均・星ごとの件数（shop を渡すと、その部門だけ）。"""
     with _ledger() as db:
         _review_table(db)
-        rows = db.execute("SELECT stars, COUNT(*) AS n FROM reviews WHERE hidden=0 GROUP BY stars").fetchall()
+        if shop:
+            rows = db.execute("SELECT stars, COUNT(*) AS n FROM reviews WHERE hidden=0 AND shop=? GROUP BY stars", (shop,)).fetchall()
+        else:
+            rows = db.execute("SELECT stars, COUNT(*) AS n FROM reviews WHERE hidden=0 GROUP BY stars").fetchall()
     dist = {i: 0 for i in range(1, 6)}
     for r in rows:
         if r["stars"] in dist:

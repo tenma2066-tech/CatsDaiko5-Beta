@@ -54,6 +54,17 @@
     } catch (e) { return false; }
   }
 
+  /* 注文の前に、クーポン・チケットでいくらになるかを見せる（確定はサーバー。ここは見込み）。
+     コードの頭で種類が分かる：FR-＝1回無料／PS-＝期間無料／SP-＝30%引き／それ以外（NK-）＝ min 円以上で10%引き */
+  window.couponPreview = function (total, code, min) {
+    code = String(code || "").normalize("NFKC").toUpperCase().replace(/\s/g, "");
+    if (!code || !total) return { pay: total, note: "" };
+    if (/^(FR|PS)-/.test(code)) return { pay: 0, note: (code.indexOf("PS-") === 0 ? "期間無料チケット" : "無料チケット") + "で 0円（使えるかは、進むときに確認します）" };
+    if (/^SP-/.test(code)) { var p = Math.floor(total * 70 / 100); return { pay: p, note: "支援クーポン（30%引き）で " + yen(total - p) + " 引き" }; }
+    if (total >= min) { var q = Math.floor(total * 9 / 10); return { pay: q, note: "クーポン（10%引き）で " + yen(total - q) + " 引き" }; }
+    return { pay: total, note: "このクーポンは " + min + "円以上のご注文で使えます（いまは " + yen(total) + "）" };
+  };
+
   window.ShopOrders = function (cfg) {
     var SEEN_KEY = cfg.shop + "-seen-jobs";
     var payOrder = null, payAmount = 0, orderTimer = null;
