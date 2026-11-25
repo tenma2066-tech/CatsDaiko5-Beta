@@ -380,6 +380,19 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 .bar #back{flex:none;min-height:52px;padding:0 14px;font-size:15px}
 .bar .info{min-width:0}
 #p-data,#p-api{display:none!important}
+.qabtn{position:fixed;right:14px;bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:7;border:2px solid var(--line);border-radius:999px;background:var(--accent);color:#17181c;font-weight:800;font-size:14px;padding:10px 14px;box-shadow:0 3px 0 var(--line);cursor:pointer}
+.qapanel{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:10}
+.qapanel[hidden]{display:none}
+.qainner{background:var(--panel);border:2px solid var(--line);border-radius:18px 18px 0 0;width:100%;max-width:560px;max-height:80vh;display:flex;flex-direction:column;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+.qahead{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:2px solid var(--line)}
+.qahead button{border:0;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--ink)}
+.qalog{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.qamsg{max-width:85%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.qamsg.me{align-self:flex-end;background:var(--hit);border:2px solid var(--line)}
+.qamsg.bot{align-self:flex-start;background:var(--soft);border:2px solid var(--line)}
+.qaform{display:flex;gap:8px;padding:10px 14px;border-top:2px solid var(--line)}
+.qaform input{flex:1;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:inherit}
+.qaform button{padding:10px 14px;border:2px solid var(--line);border-radius:12px;background:var(--accent);font-weight:800}
 .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:2px solid var(--line);
   padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px))}
 .bar .in{max-width:640px;margin:0 auto;display:flex;align-items:center;gap:12px}
@@ -815,6 +828,13 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="maintwall" id="maintWall" hidden><div class="mbox"><h2>メンテナンス中</h2><p id="maintWallMsg"></p><p><a id="maintWallLink" class="btn pri" href="#" hidden rel="noopener" style="display:inline-block;padding:12px 18px;text-decoration:none">新しいサイトを開く</a></p><p class="sub">すでに支払い済み・保留中の注文がある方は、同じブラウザでこのページを開き直すと続きを確認できます。</p></div></div>
 <div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
+
+<button class="qabtn" id="qaBtn" type="button" aria-label="質問する">💬 質問</button>
+<div class="qapanel" id="qaPanel" hidden><div class="qainner">
+  <div class="qahead"><b>質問チャット</b><button id="qaClose" type="button" aria-label="閉じる">×</button></div>
+  <div class="qalog" id="qaLog"></div>
+  <form class="qaform" id="qaForm"><input id="qaInput" maxlength="300" placeholder="質問を入力（例：支払い方法は？）" autocomplete="off" aria-label="質問"><button type="submit">送信</button></form>
+</div></div>
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -2078,4 +2098,30 @@ draftReady=true;
 openHelp(); /* 開くたびに確認と使い方を表示 */
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
+
+/* ---------- 質問チャット ---------- */
+(function(){
+  const panel=$('#qaPanel'), log=$('#qaLog'), input=$('#qaInput');
+  let busy=false, greeted=false;
+  function add(text,who){ const d=document.createElement('div'); d.className='qamsg '+who; d.textContent=text; log.append(d); log.scrollTop=log.scrollHeight; return d; }
+  function openQa(){ panel.hidden=false; document.body.style.overflow='hidden';
+    if(!greeted){ greeted=true; add('ご質問をどうぞ。支払い方法・引継ぎコード・注文の状況などにお答えします。','bot'); }
+    input.focus(); }
+  function closeQa(){ panel.hidden=true; document.body.style.overflow=''; }
+  $('#qaBtn').addEventListener('click',openQa);
+  $('#qaClose').addEventListener('click',closeQa);
+  panel.addEventListener('click',e=>{ if(e.target===panel) closeQa(); });
+  $('#qaForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const q=input.value.trim(); if(!q||busy) return;
+    input.value=''; add(q,'me'); busy=true;
+    const wait=add('…','bot');
+    try{
+      const r=await fetch('/api/qa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:q,shop:'nyanko'})});
+      const j=await r.json();
+      wait.textContent = r.ok ? (j.answer||'うまく回答できませんでした。') : (j.error||'送信できませんでした。');
+    }catch(err){ wait.textContent='通信できませんでした。少し待ってお試しください。'; }
+    finally{ busy=false; input.focus(); }
+  });
+})();
 </script></body></html>

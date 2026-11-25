@@ -9,3 +9,5 @@ msgpack>=1.0
 # ぷにぷに代行（puni_engine）が必要とする暗号／SOCKS プロキシ対応
 pycryptodome>=3.20
 aiohttp-socks>=0.9
+# Q&A チャットボット（ANTHROPIC_API_KEY 設定時のみ使用）
+anthropic>=0.40

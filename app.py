@@ -39,6 +39,7 @@ import save_audit
 import save_repair
 import tsum_service
 import puni_service
+import qa_bot
 from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py からも同じ名前で使えるようにしている
     COUPON_DAYS, COUPON_MIN, CRASH_ITEMS, DB_OFFSET, EV_PREFIX, EVENT_BY_ID, EVENT_MAPS, EVENT_SELECTABLE, PRICE_LABELS, PRICES,
     PT_KEY, PT_MAX_MINUTES, PT_MIN_MINUTES, RESTART_KEY, _ALL_EVENT_MAPS, _event_ids, _legend_kinds, _load_event_maps,
@@ -2830,6 +2831,50 @@ def _public_order(order_id: str, o: dict) -> dict:
             "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
             "coupon_issued": o.get("coupon_issued"),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
+
+
+_QA_STATE_JA = {"unpaid": "お支払い待ち", "hold": "保留中", "paid": "お支払い済み・開始待ち",
+                "paying": "確認中", "starting": "開始処理中", "started": "実行中",
+                "done": "完了", "dead": "要確認"}
+_QA_SHOP_MODE = {"tsum": "tsum", "puni": "puni"}   # それ以外（にゃんこ）は mode が tsum/puni 以外
+
+
+def _qa_orders_for(shop: str) -> list:
+    """Q&Aに渡す、このお客様の注文の要約（機密は含めない・最大 MAX_ORDERS 件）。"""
+    me = _owner()
+    out = []
+    with _orders_lock:
+        for v in _orders.values():
+            if v.get("owner") != me or v.get("hidden_by_owner"):
+                continue
+            mode = (v.get("job") or {}).get("mode")
+            is_tsum, is_puni = mode == "tsum", mode == "puni"
+            dept = "tsum" if is_tsum else "puni" if is_puni else "nyanko"
+            if dept != shop:
+                continue
+            out.append({"state_ja": _QA_STATE_JA.get(v.get("state"), v.get("state")),
+                        "amount": v.get("amount"),
+                        "date": time.strftime("%m/%d", time.localtime(v.get("created") or 0)),
+                        "summary": (v.get("summary") or "")[:120]})
+    return out
+
+
+@app.post("/api/qa")
+def qa():
+    """FAQ Q&A チャット。各Shopの FAQ と、このお客様自身の注文状況だけを根拠に答える。
+    鍵（ANTHROPIC_API_KEY）が無ければ固定文で案内する。"""
+    data = request.get_json(silent=True) or {}
+    shop = str(data.get("shop", "")).strip()
+    if shop not in ("nyanko", "tsum", "puni"):
+        shop = "nyanko"
+    question = str(data.get("q", ""))
+    if not question.strip():
+        return jsonify(error="質問を入力してください。"), 400
+    if not _rate_ok("qa:" + _client_ip(), 12, 600):   # 10分で12問まで
+        return _too_fast()
+    orders = _qa_orders_for(shop) if qa_bot.enabled() else []
+    out = qa_bot.answer(shop, question, orders)
+    return jsonify(answer=out["answer"], enabled=out.get("enabled", False))
 
 
 @app.get("/api/orders/mine")
