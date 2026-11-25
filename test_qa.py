@@ -189,6 +189,7 @@ class LiveContext(unittest.TestCase):
         self.assertIn("80円", cap["system"])
         self.assertIn("保留中", cap["system"])            # 状態の意味の一覧
         self.assertNotIn("hold：", cap["system"])         # 内部キーは見せない
+        self.assertIn("注文番号はチャットで聞かない", cap["system"])   # 秘密の番号を会話に書かせない
 
 
 class ApiEndpoint(unittest.TestCase):
