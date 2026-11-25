@@ -53,7 +53,6 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
 .gamecard img{display:block;width:100%;height:100%;object-fit:cover}
 .gamecard .art{display:grid;place-items:center;font-size:44px}
 .gamecard .art.tk{background:linear-gradient(135deg,#ffe27a,#ffb44d)}
-.gamecard .art.pn{background:linear-gradient(135deg,#c9f2d6,#7fd9a8)}
 .gamecard .art.sp{background:linear-gradient(135deg,#ffd1e0,#ff9fbf)}
 .gamecard .txt{padding:8px 10px 10px}
 .gamecard b{display:block;font-size:14.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -88,7 +87,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
       <span class="txt"><b>🧸 ツムツム</b><small><em>{{ prices.tsum_guest_create }}円</em>〜</small></span>
     </a>
     <a class="gamecard" href="/puni">
-      <span class="art pn" aria-hidden="true">👾</span>
+      <picture><source srcset="/static/game-puni.webp?v=2" type="image/webp"><img src="/static/game-puni.jpg?v=2" alt="" width="1024" height="512" style="object-position:left center"></picture>
       <span class="txt"><b>👾 ぷにぷに</b><small><em>{{ [prices.puni_missions, prices.puni_presents, prices.puni_deck]|min }}円</em>〜</small></span>
     </a>
     <a class="gamecard" href="/ticket">
