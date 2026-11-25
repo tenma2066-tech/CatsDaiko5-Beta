@@ -2840,9 +2840,12 @@ _QA_SHOP_MODE = {"tsum": "tsum", "puni": "puni"}   # それ以外（にゃんこ
 
 
 def _qa_orders_for(shop: str) -> list:
-    """Q&Aに渡す、このお客様の注文の要約（機密は含めない・最大 MAX_ORDERS 件）。"""
+    """Q&Aに渡す、このお客様の注文の要約（機密は含めない・新しい順に最大 MAX_ORDERS 件）。
+    状態のキー・経過時間・順番待ちの位置・進み具合も渡し、その時の状況に合わせて答えられるようにする。
+    注文番号・送金リンク・ログイン情報・結果（コード等）は渡さない。"""
     me = _owner()
-    out = []
+    now = time.time()
+    picked = []
     with _orders_lock:
         for v in _orders.values():
             if v.get("owner") != me or v.get("hidden_by_owner"):
@@ -2852,11 +2855,82 @@ def _qa_orders_for(shop: str) -> list:
             dept = "tsum" if is_tsum else "puni" if is_puni else "nyanko"
             if dept != shop:
                 continue
-            out.append({"state_ja": _QA_STATE_JA.get(v.get("state"), v.get("state")),
-                        "amount": v.get("amount"),
-                        "date": time.strftime("%m/%d", time.localtime(v.get("created") or 0)),
-                        "summary": (v.get("summary") or "")[:120]})
+            picked.append({"state": v.get("state"), "retry": bool(v.get("retry")),
+                           "amount": v.get("amount"), "created": v.get("created") or 0,
+                           "summary": (v.get("summary") or "")[:120], "job_id": v.get("job_id"),
+                           "coupon_issued": bool(v.get("coupon_issued")),
+                           "coupon_used": bool(v.get("coupon") and v.get("coupon_used"))})
+    picked.sort(key=lambda o: o["created"], reverse=True)
+    picked = picked[:qa_bot.MAX_ORDERS]
+    with _jobs_lock:   # 実行中の注文は、順番待ちの位置と進み具合も渡す
+        pending = [entry[0] for entry in _pending_jobs]
+        for o in picked:
+            job = _jobs.get(o["job_id"]) if o["job_id"] else None
+            if o["state"] == "started" and job:
+                o["job_status"] = job.get("status")
+                if o["job_id"] in pending:
+                    o["queue_position"] = pending.index(o["job_id"]) + 1
+                total = {"tsum": TSUM_TOTAL_STEPS, "puni": PUNI_TOTAL_STEPS}.get(job.get("mode"), TOTAL_STEPS)
+                o["progress"] = f"{min(int(job.get('step') or 0), total)}/{total}"
+    out = []
+    for o in picked:
+        state = o["state"]
+        row = {"state": state, "state_ja": _QA_STATE_JA.get(state, state), "retry": o["retry"],
+               "amount": o["amount"],
+               "date": time.strftime("%m/%d %H:%M", time.localtime(o["created"])),
+               "age_min": max(0, int((now - o["created"]) // 60)),
+               "summary": o["summary"], "coupon_issued": o["coupon_issued"], "coupon_used": o["coupon_used"]}
+        if state == "unpaid":
+            row["expires_in_min"] = max(0, int((o["created"] + ORDER_TTL - now) // 60))
+        for k in ("job_status", "queue_position", "progress"):
+            if k in o:
+                row[k] = o[k]
+        out.append(row)
     return out
+
+
+def _qa_prices(shop: str) -> list:
+    """その部門の現在の料金（管理画面で変えた PRICES をそのまま使う＝常に最新）。"""
+    rows = []
+    try:
+        if shop in ("tsum", "puni"):
+            svc = tsum_service if shop == "tsum" else puni_service
+            prefix = "ツム：" if shop == "tsum" else "ぷに："
+            for k in svc.sort_menus(list(svc.MENUS)):
+                pk = svc.MENUS[k]["price"]
+                label = PRICE_LABELS.get(pk, svc.MENUS[k]["label"]).removeprefix(prefix)
+                rows.append(f"{label}：{PRICES.get(pk, 0)}円")
+        else:
+            for pk, label in PRICE_LABELS.items():
+                if not pk.startswith(("tsum_", "puni_")):
+                    rows.append(f"{label}：{PRICES.get(pk, 0)}円")
+    except Exception:  # noqa: BLE001  料金が取れなくても回答は続ける
+        _log_orders.exception("qa prices failed")
+    return rows
+
+
+# 料金の数え方（pricing.compute_*_amount と同じ規則）。合計は選んだ内容で画面に自動で出る。
+_QA_PRICE_NOTE = {
+    "tsum": "1メニューごとの料金で、コインの枚数などの数量では値段は変わらない。",
+    "puni": "自動周回は10周ごと（端数は切り上げ）、回し放題は1時間ごと、アカウント作成・久垢作成は作る件数ぶん。"
+            "ほかは数量に関係なく1件分。",
+    "nyanko": "選んだ項目ごとに上の料金がかかる（キャラは1体・1項目ごと、プレイ時間は10分ごと）。",
+}
+
+
+def _qa_live(shop: str) -> dict:
+    """Q&Aに渡す「いまの状況」（料金・メンテ・混み具合・クーポン規則）。個人情報は含めない。"""
+    m = _maint()
+    with _jobs_lock:
+        p = _parallel_state_locked()
+    return {"now": time.strftime("%m/%d %H:%M"),
+            "maintenance": bool(m.get("on")), "maintenance_message": m.get("message", ""),
+            "updating": _draining(), "payments": PAYMENTS_ENABLED,
+            "running": p["running_jobs"], "slots": p["max_concurrent_jobs"],
+            "free_slots": p["available_slots"], "queued": p["queued_jobs"],
+            "prices": _qa_prices(shop), "price_note": _QA_PRICE_NOTE.get(shop, ""),
+            "coupon_min": COUPON_MIN, "coupon_days": COUPON_DAYS,
+            "unpaid_ttl_min": ORDER_TTL // 60}
 
 
 @app.post("/api/qa")
@@ -2872,9 +2946,11 @@ def qa():
         return jsonify(error="質問を入力してください。"), 400
     if not _rate_ok("qa:" + _client_ip(), 12, 600):   # 10分で12問まで
         return _too_fast()
-    orders = _qa_orders_for(shop) if qa_bot.enabled() else []
+    on = qa_bot.enabled()
+    orders = _qa_orders_for(shop) if on else []
+    live = _qa_live(shop) if on else None
     history = data.get("history") if isinstance(data.get("history"), list) else []
-    out = qa_bot.answer(shop, question, orders, history[-qa_bot.MAX_HISTORY:])
+    out = qa_bot.answer(shop, question, orders, history[-qa_bot.MAX_HISTORY:], live)
     return jsonify(answer=out["answer"], enabled=out.get("enabled", False))
 
 

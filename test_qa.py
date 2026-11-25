@@ -143,6 +143,54 @@ class Conversation(unittest.TestCase):
         self.assertIn("装飾は使わない", sp)
 
 
+class LiveContext(unittest.TestCase):
+    """その時の状況（料金・メンテ・混み具合・注文状態の意味）が根拠に入ること。"""
+
+    LIVE = {"now": "11/25 21:00", "maintenance": True, "maintenance_message": "22時まで停止",
+            "updating": False, "payments": True, "running": 4, "slots": 4, "free_slots": 0, "queued": 3,
+            "prices": ["コインガチャ回し切り：80円"], "price_note": "ほかは1件分。",
+            "coupon_min": 200, "coupon_days": 30, "unpaid_ttl_min": 30}
+
+    def test_live_text_reflects_state(self):
+        t = qa_bot._live_text(self.LIVE)
+        self.assertIn("メンテナンス中", t)
+        self.assertIn("22時まで停止", t)
+        self.assertIn("順番待ち 3 件", t)
+        self.assertIn("コインガチャ回し切り：80円", t)   # 管理画面で変えた値がそのまま入る
+        calm = dict(self.LIVE, maintenance=False, running=1, free_slots=3, queued=0)
+        t2 = qa_bot._live_text(calm)
+        self.assertIn("空いている", t2)
+        self.assertNotIn("メンテナンス中", t2)
+        self.assertIn("取得できません", qa_bot._live_text(None))
+
+    def test_hold_order_gets_meaning_and_next_action(self):
+        t = qa_bot._orders_text([{"state": "hold", "state_ja": "保留中", "amount": 110,
+                                  "date": "11/25 21:10", "age_min": 10, "summary": "ぷにぷに代行／コインガチャ"}])
+        self.assertIn("[保留中]", t)
+        self.assertIn("保留を解除", t)
+        self.assertIn("再送金", t)
+        self.assertIn("10分前", t)
+
+    def test_paid_retry_and_queue_and_expiry(self):
+        t = qa_bot._orders_text([
+            {"state": "paid", "retry": True, "state_ja": "お支払い済み・開始待ち", "amount": 50},
+            {"state": "started", "state_ja": "実行中", "queue_position": 2, "job_status": "queued"},
+            {"state": "unpaid", "state_ja": "お支払い待ち", "expires_in_min": 12}])
+        self.assertIn("前回の実行は途中で止まった", t)
+        self.assertIn("順番待ち 2番目", t)
+        self.assertIn("あと約12分", t)
+
+    def test_live_reaches_model(self):
+        cap = {}
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
+             mock.patch.dict(sys.modules, {"anthropic": _fake_anthropic(cap)}):
+            qa_bot.answer("puni", "コインガチャいくら？", [], [], self.LIVE)
+        self.assertIn("【いまの状況】", cap["system"])
+        self.assertIn("80円", cap["system"])
+        self.assertIn("保留中", cap["system"])            # 状態の意味の一覧
+        self.assertNotIn("hold：", cap["system"])         # 内部キーは見せない
+
+
 class ApiEndpoint(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -189,6 +237,52 @@ class ApiEndpoint(unittest.TestCase):
         # 要約にログイン情報が無いこと（_puni_summary/_tsum_summary が除外している前提）
         for o in orders:
             self.assertNotIn("password", str(o).lower())
+
+    def test_qa_orders_state_details_without_secrets(self):
+        import time as _t
+        app = self.app
+        now = _t.time()
+        with mock.patch.object(app, "_owner", return_value="owner-L"):
+            with app._orders_lock:
+                app._orders["QOLD"] = {"owner": "owner-L", "state": "done", "amount": 50, "created": now - 7200,
+                                       "summary": "古い", "job": {"mode": "puni"}}
+                app._orders["QHOLD"] = {"owner": "owner-L", "state": "hold", "amount": 110, "created": now - 60,
+                                        "summary": "新しい", "job": {"mode": "puni"}, "link_code": "LINKSECRET"}
+                app._orders["QUNP"] = {"owner": "owner-L", "state": "unpaid", "amount": 30, "created": now - 600,
+                                       "summary": "未払い", "job": {"mode": "puni"}}
+            try:
+                orders = app._qa_orders_for("puni")
+            finally:
+                with app._orders_lock:
+                    for k in ("QOLD", "QHOLD", "QUNP"):
+                        app._orders.pop(k, None)
+        self.assertEqual([o["summary"] for o in orders], ["新しい", "未払い", "古い"])   # 新しい順
+        self.assertEqual(orders[0]["state"], "hold")
+        self.assertIn(orders[1]["expires_in_min"], (19, 20))                            # 30分の期限
+        blob = str(orders)
+        for secret in ("LINKSECRET", "QHOLD", "QUNP", "QOLD"):                           # リンク・注文番号は渡さない
+            self.assertNotIn(secret, blob)
+
+    def test_live_prices_follow_admin_edits(self):
+        app = self.app
+        with mock.patch.dict(app.PRICES, {"puni_coin_gacha": 777}):
+            live = app._qa_live("puni")
+        self.assertTrue(any("777円" in p for p in live["prices"]))
+        self.assertIn("maintenance", live)
+        self.assertIn("queued", live)
+        self.assertFalse(any("ツム" in p for p in app._qa_live("puni")["prices"]))   # 他部門の料金は混ぜない
+        nyanko = app._qa_live("nyanko")["prices"]
+        self.assertTrue(nyanko and not any(p.startswith(("ぷに", "ツム")) for p in nyanko))
+
+    def test_endpoint_sends_live_context(self):
+        cap = {}
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
+             mock.patch.dict(sys.modules, {"anthropic": _fake_anthropic(cap)}), \
+             mock.patch.dict(self.app.PRICES, {"tsum_box": 432}):
+            r = self.client.post("/api/qa", json={"q": "セレクトBOXいくら？", "shop": "tsum"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("セレクトBOX完売：432円", cap["system"])
+        self.assertIn("混み具合", cap["system"])
 
 
 if __name__ == "__main__":
