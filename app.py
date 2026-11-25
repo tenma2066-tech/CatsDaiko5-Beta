@@ -2873,7 +2873,8 @@ def qa():
     if not _rate_ok("qa:" + _client_ip(), 12, 600):   # 10分で12問まで
         return _too_fast()
     orders = _qa_orders_for(shop) if qa_bot.enabled() else []
-    out = qa_bot.answer(shop, question, orders)
+    history = data.get("history") if isinstance(data.get("history"), list) else []
+    out = qa_bot.answer(shop, question, orders, history[-qa_bot.MAX_HISTORY:])
     return jsonify(answer=out["answer"], enabled=out.get("enabled", False))
 
 

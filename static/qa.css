@@ -1,0 +1,67 @@
+/* 質問チャット（全Shop共通）。色は各ページの CSS 変数を使う（無いときの既定値つき）。 */
+.qa-fab{position:fixed;right:14px;bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:7;
+  display:flex;align-items:center;gap:6px;height:48px;padding:0 16px 0 13px;
+  border:2px solid var(--line,#17181c);border-radius:999px;background:var(--accent,#ffc42e);color:#17181c;
+  font:inherit;font-weight:800;font-size:14px;box-shadow:0 4px 0 var(--line,#17181c);cursor:pointer;
+  opacity:0;transform:translateY(24px) scale(.8);pointer-events:none;
+  transition:opacity .35s ease,transform .35s cubic-bezier(.2,1.4,.4,1),padding .25s ease,box-shadow .12s ease}
+.qa-fab.qa-in{opacity:1;transform:none;pointer-events:auto}
+.qa-fab:active{transform:translateY(3px);box-shadow:0 1px 0 var(--line,#17181c)}
+.qa-fab .qa-ico{font-size:20px;line-height:1;display:inline-block}
+.qa-fab .qa-lbl{max-width:6em;overflow:hidden;white-space:nowrap;transition:max-width .25s ease,opacity .2s ease}
+.qa-fab.qa-mini{padding:0 12px}
+.qa-fab.qa-mini .qa-lbl{max-width:0;opacity:0}
+.qa-fab.qa-hide{opacity:0;transform:scale(.6);pointer-events:none}
+.qa-fab.qa-nudge .qa-ico{animation:qa-wiggle .9s ease}
+.qa-fab.qa-nudge{animation:qa-hop .9s ease}
+.qa-fab::after{content:"";position:absolute;inset:-2px;border-radius:inherit;pointer-events:none;
+  box-shadow:0 0 0 0 rgba(255,196,46,.55)}
+.qa-fab.qa-nudge::after{animation:qa-ring 1.1s ease-out}
+@keyframes qa-wiggle{0%,100%{transform:rotate(0)}20%{transform:rotate(-16deg)}40%{transform:rotate(12deg)}60%{transform:rotate(-8deg)}80%{transform:rotate(4deg)}}
+@keyframes qa-hop{0%,100%{transform:none}30%{transform:translateY(-6px)}55%{transform:translateY(0)}70%{transform:translateY(-2px)}}
+@keyframes qa-ring{0%{box-shadow:0 0 0 0 rgba(255,196,46,.6)}100%{box-shadow:0 0 0 14px rgba(255,196,46,0)}}
+
+.qa-panel{position:fixed;inset:0;z-index:10;display:flex;align-items:flex-end;justify-content:center;
+  background:rgba(0,0,0,0);transition:background .25s ease}
+.qa-panel[hidden]{display:none}
+.qa-panel.qa-open{background:rgba(0,0,0,.5)}
+.qa-sheet{background:var(--panel,#fff);color:var(--ink,#17181c);border:2px solid var(--line,#17181c);border-bottom:0;
+  border-radius:20px 20px 0 0;width:100%;max-width:560px;height:min(78vh,640px);display:flex;flex-direction:column;
+  padding-bottom:env(safe-area-inset-bottom,0px);transform:translateY(100%);transition:transform .3s cubic-bezier(.2,.9,.3,1)}
+.qa-panel.qa-open .qa-sheet{transform:none}
+.qa-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:2px solid var(--line,#17181c)}
+.qa-head .qa-av{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:18px;
+  background:var(--accent,#ffc42e);border:2px solid var(--line,#17181c);flex:none}
+.qa-head .qa-ttl{flex:1;line-height:1.25}
+.qa-head .qa-ttl b{display:block;font-size:15px}
+.qa-head .qa-ttl small{font-size:12px;color:var(--muted,#5b6472)}
+.qa-head button{border:0;background:none;color:inherit;cursor:pointer;font:inherit}
+.qa-head .qa-reset{font-size:12px;color:var(--muted,#5b6472);text-decoration:underline;padding:4px}
+.qa-head .qa-x{font-size:24px;line-height:1;padding:2px 6px}
+.qa-log{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
+.qa-msg{max-width:82%;padding:9px 13px;border-radius:16px;font-size:14.5px;line-height:1.6;white-space:pre-wrap;
+  word-break:break-word;border:2px solid var(--line,#17181c);animation:qa-pop .22s ease}
+.qa-msg.me{align-self:flex-end;background:var(--hit,rgba(255,196,46,.24));border-bottom-right-radius:5px}
+.qa-msg.bot{align-self:flex-start;background:var(--soft,#f1f4f8);border-bottom-left-radius:5px}
+.qa-msg.err{border-color:var(--bad,#d93636)}
+@keyframes qa-pop{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:none}}
+.qa-typing{display:inline-flex;gap:4px;align-items:center;height:20px}
+.qa-typing i{width:7px;height:7px;border-radius:50%;background:var(--muted,#5b6472);animation:qa-dot 1.1s infinite ease-in-out}
+.qa-typing i:nth-child(2){animation-delay:.15s}
+.qa-typing i:nth-child(3){animation-delay:.3s}
+@keyframes qa-dot{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-4px)}}
+.qa-chips{display:flex;gap:6px;overflow-x:auto;padding:8px 14px 0;scrollbar-width:none}
+.qa-chips::-webkit-scrollbar{display:none}
+.qa-chips button{flex:none;border:2px solid var(--line,#17181c);border-radius:999px;background:var(--panel,#fff);
+  color:inherit;font:inherit;font-size:13px;font-weight:700;padding:6px 11px;cursor:pointer;white-space:nowrap}
+.qa-chips button:active{background:var(--hit,rgba(255,196,46,.24))}
+.qa-form{display:flex;gap:8px;padding:10px 14px 12px}
+.qa-form input{flex:1;min-width:0;padding:11px 14px;border:2px solid var(--line,#17181c);border-radius:999px;
+  background:var(--panel,#fff);color:inherit;font:inherit;font-size:16px}
+.qa-form button{flex:none;width:46px;height:46px;border:2px solid var(--line,#17181c);border-radius:50%;
+  background:var(--accent,#ffc42e);color:#17181c;font-size:18px;font-weight:800;cursor:pointer}
+.qa-form button:disabled{opacity:.45}
+@media (prefers-reduced-motion:reduce){
+  .qa-fab,.qa-sheet,.qa-panel,.qa-fab .qa-lbl{transition:none}
+  .qa-fab.qa-nudge,.qa-fab.qa-nudge .qa-ico,.qa-fab.qa-nudge::after,.qa-msg,.qa-typing i{animation:none}
+}

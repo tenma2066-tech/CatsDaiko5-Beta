@@ -16,7 +16,9 @@ import os
 
 MODEL = os.environ.get("QA_MODEL", "claude-haiku-5-5")   # Claude Haiku 5.5
 MAX_Q_CHARS = 300          # 質問の最大文字数
-MAX_TOKENS = 600           # 回答の最大トークン（仕組みの説明が途中で切れない程度）
+MAX_TOKENS = 300           # 回答の最大トークン（チャットの短い返事＋余裕）
+MAX_HISTORY = 6            # 文脈として受け取る直前の会話（発言数）
+MAX_HISTORY_CHARS = 500    # 履歴1発言あたりの最大文字数
 MAX_ORDERS = 10            # 文脈に入れる注文の最大件数
 CONTACT = "X @paysms1212"
 
@@ -128,10 +130,15 @@ def _menu_overview(shop: str) -> str:
 
 def _system_prompt(shop: str, orders) -> str:
     return (
-        f"あなたは TN SHOP「{shop_name(shop)}」のサポート担当です。"
-        "お客様の質問に、日本語で正確に・分かりやすく答えてください。"
-        "仕組みや手順をたずねられたら、下記の情報をもとに順序立てて丁寧に説明します"
-        "（簡単な質問には簡潔に。箇条書きも可）。\n"
+        f"あなたは TN SHOP「{shop_name(shop)}」のチャットサポートです。"
+        "スマホの小さなチャット欄で、お客様と会話しています。\n"
+        "話し方：\n"
+        "- 友だちに話すような、やわらかい丁寧語で。1回の返事は1〜3文、長くても100字程度。\n"
+        "- 見出し・太字・番号付きリスト・記号の箇条書きなどの装飾は使わない（普通の文章だけ）。\n"
+        "- 手順を聞かれても全部を並べず、いま必要な一歩だけを伝え、"
+        "「続きも説明しましょうか？」のように次を促す。\n"
+        "- 前の会話の流れをふまえて答える。質問があいまいなら、短く聞き返してよい。\n"
+        "- 情報は下記だけを根拠に、正確に。\n"
         "ルール：\n"
         "- 根拠が無い・このお店と無関係のことは推測せず、"
         "「わかりかねます。" + CONTACT + " へお問い合わせください」と答える。\n"
@@ -145,9 +152,42 @@ def _system_prompt(shop: str, orders) -> str:
     )
 
 
-def answer(shop: str, question: str, orders=None) -> dict:
+def clean_history(history) -> list:
+    """画面から来た会話履歴を検査して API の messages 形式にする（信用しない入力として扱う）。
+    直近 MAX_HISTORY 件・各 MAX_HISTORY_CHARS 字まで。先頭は user から始める。"""
+    out = []
+    if not isinstance(history, list):
+        return out
+    for m in history[-MAX_HISTORY:]:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        text = clean_question(m.get("text"))[:MAX_HISTORY_CHARS] if role == "user" else \
+            "".join(ch for ch in str(m.get("text") or "") if ch >= " " or ch == "\n").strip()[:MAX_HISTORY_CHARS]
+        if text:
+            out.append({"role": role, "content": text})
+    while out and out[0]["role"] != "user":
+        out.pop(0)
+    return out
+
+
+def plain_text(text: str) -> str:
+    """チャット欄はプレーン表示なので、念のためマークダウン記号を落とす。"""
+    lines = []
+    for line in str(text or "").replace("**", "").replace("__", "").splitlines():
+        s = line.lstrip()
+        if s.startswith("#"):
+            line = s.lstrip("#").lstrip()
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def answer(shop: str, question: str, orders=None, history=None) -> dict:
     """質問に答える。戻り値 {"ok", "answer", "enabled"}。例外は投げない。
-    orders … [{state_ja, amount, date, summary}]（app.py が本人の注文から作る）。"""
+    orders … [{state_ja, amount, date, summary}]（app.py が本人の注文から作る）。
+    history … 直前までの会話 [{role: user|assistant, text}]（対話の文脈用）。"""
     q = clean_question(question)
     if not q:
         return {"ok": False, "enabled": enabled(), "answer": "質問を入力してください。"}
@@ -162,9 +202,9 @@ def answer(shop: str, question: str, orders=None) -> dict:
             max_tokens=MAX_TOKENS,
             output_config={"effort": "low"},   # FAQ応答は低エフォートで十分・安く速い
             system=_system_prompt(shop, orders),
-            messages=[{"role": "user", "content": q}],
+            messages=clean_history(history) + [{"role": "user", "content": q}],
         )
-        text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
+        text = plain_text("".join(b.text for b in resp.content if getattr(b, "type", None) == "text"))
         if not text:
             text = f"うまく回答できませんでした。{CONTACT} へお問い合わせください。"
         return {"ok": True, "enabled": True, "answer": text}
