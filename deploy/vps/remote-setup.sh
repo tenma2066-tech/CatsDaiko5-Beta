@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # サーバー上で root 権限で実行される（GitHub Actions から）。何度実行しても安全。
-# 引数: $1 = SITE_HOST, $2 = 新しいソースを展開したディレクトリ, $3 = 管理者パスワードを書いたファイル（読んだら削除）
+# 引数: $1 = SITE_HOST, $2 = 新しいソースを展開したディレクトリ, $3 = 管理者パスワードを書いたファイル（読んだら削除）,
+#       $4 = ANTHROPIC_API_KEY を書いたファイル（任意・読んだら削除。空なら .env は変更しない）
 set -euo pipefail
 SITE_HOST="$1"
 NEW_SRC="$2"
@@ -58,6 +59,14 @@ grep -q '^SECRET_KEY=' .env || echo "SECRET_KEY=$(openssl rand -hex 32)" >> .env
 grep -q '^PAYPAY_ENCRYPTION_KEY=' .env || echo "PAYPAY_ENCRYPTION_KEY=$(openssl rand 32 | base64 | tr '+/' '-_')" >> .env
 sed -i '/^SITE_HOST=/d' .env
 echo "SITE_HOST=$SITE_HOST" >> .env
+# Q&AチャットのAI回答キー。第4引数にキーを書いた一時ファイルのパスがあれば .env に反映する。
+# 無い・空のときは何もしない＝手動で .env に書いた値を消さない。
+ANTHROPIC_KEY_FILE="${4:-}"
+if [ -n "$ANTHROPIC_KEY_FILE" ] && [ -s "$ANTHROPIC_KEY_FILE" ]; then
+  sed -i '/^ANTHROPIC_API_KEY=/d' .env
+  printf 'ANTHROPIC_API_KEY=%s\n' "$(cat "$ANTHROPIC_KEY_FILE")" >> .env
+  shred -u "$ANTHROPIC_KEY_FILE" 2>/dev/null || rm -f "$ANTHROPIC_KEY_FILE"
+fi
 if [ -n "$ADMIN_PASSWORD" ]; then
   (umask 077; printf '%s' "$ADMIN_PASSWORD" > admin_password)
 fi

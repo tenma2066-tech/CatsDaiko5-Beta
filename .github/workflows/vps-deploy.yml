@@ -79,16 +79,24 @@ jobs:
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -eu
           AF="/tmp/.ap-$GITHUB_RUN_ID"
           printf '%s' "$ADMIN_PASSWORD" | $SSH_CMD "$TARGET" "umask 077; cat > $AF"
+          # Q&AチャットのAI回答キー（任意）。Secret があれば一時ファイルで渡し（第4引数）、remote-setup が .env に反映する。
+          # 未設定なら空文字を渡す＝手動で .env に書いた値を消さない。
+          KF=""
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            KF="/tmp/.ak-$GITHUB_RUN_ID"
+            printf '%s' "$ANTHROPIC_API_KEY" | $SSH_CMD "$TARGET" "umask 077; cat > $KF"
+          fi
           # sudo を使うユーザーの場合は、同じパスワードを標準入力で渡す（root なら不要）
           if [ -n "$SUDO" ] && [ -n "${USE_SSHPASS:-}" ]; then
-            printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
+            printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF'"
           else
             AR="${{ github.event.inputs.allow_running || '0' }}"; case "$AR" in ''|*[!0-9]*) AR=0;; esac
-            $SSH_CMD "$TARGET" "ALLOW_RUNNING=$AR $SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF'"
+            $SSH_CMD "$TARGET" "ALLOW_RUNNING=$AR $SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF'"
           fi
       - name: Health check
         if: env.SKIP != 'true'
