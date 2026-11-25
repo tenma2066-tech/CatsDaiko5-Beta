@@ -60,6 +60,18 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
 - `test_puni.py` 30 passed
 - 回帰：`test_puni test_seo test_order_flow test_price_parity test_tsum test_ui_results` → 155 passed / 14 skipped（capture off）。にゃんこ・ツムツム無傷
 
+### 2026-11-25（追加2）全Shop共通の改善
+
+- **履歴削除**：`POST /api/orders/<id>/forget`（終端状態のみ・`hidden_by_owner`・管理台帳は保持）。
+  にゃんこ・ツム・ぷにの各画面に「削除」ボタン。回帰バグ修正：にゃんこ `loadResume` が
+  `!o.tsum` だけで絞っていてぷにの注文が混ざっていた → `!o.tsum && !o.puni`。
+- **文字量削減＋固定FAQ**：ぷにのメニュー説明・注意・案内を簡潔化。注意とFAQは折りたたみ。
+  ぷに・ツムに「よくある質問」（AIなし・固定）を追加。
+- **Shop↔管理のUI統一**：admin の本文フォントを Shop と同じ角ゴシック基調に（配色・ダークは既に共通）。
+- **新規部門の追加ガイド**：`docs/DEPARTMENTS.md` を作成（4つ目のShopを足すときの触る場所・契約・
+  回帰で踏みやすい3点を1か所ずつ列挙）。親和性の正はこの手順書。
+- AI Q&A：依頼主判断で**固定FAQのみ（AIなし）**。
+
 ### 2026-11-25（追加）自律バグ修正
 
 精査で見つけた実在バグを修正：
