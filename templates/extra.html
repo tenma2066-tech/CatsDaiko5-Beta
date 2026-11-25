@@ -413,12 +413,16 @@ if(MODE==='source'){
 
 /* ---------------- 購入〜支払い〜コード表示（全部共通） ---------------- */
 let payOrder=null, watchTimer=null;
+let buying=false;
 async function buy(url,body,what){
+  if(buying) return;   /* 二度押しで注文が2つできないように */
+  buying=true;
   try{
     const r=await post(url,body); const j=await r.json();
     if(!r.ok){ alert(j.error||'注文を作れませんでした。'); return; }
     openPay(j.order,j.amount,what,'unpaid');
   }catch(e){ alert('通信エラーです。もう一度お試しください。'); }
+  finally{ buying=false; }
 }
 function openPay(order,amount,what,state){
   payOrder=order;
@@ -464,9 +468,15 @@ const WAITING=['hold','paying','starting'];
 function startWatch(){
   clearInterval(watchTimer);
   watchTimer=setInterval(async()=>{
-    const list=(await fetchMine()).filter(o=>WANT.includes(o.product));
+    const all=await fetchMine(); if(!all) return;   /* 今回は取れなかった → 次の回でまた確かめる */
+    const list=all.filter(o=>WANT.includes(o.product));
     const o=list.find(x=>x.order===payOrder);
     if(o&&o.state==='done'&&o.result){ showDone(o.result,o.order); return; }
+    /* 開いたままの支払いパネルにも、保留が解けた・確認できなかった、を反映する */
+    if(o&&!$('#payPanel').hidden&&$('#payGo').textContent==='今すぐ確認する'&&(o.state==='paid'||o.state==='dead')){
+      if(o.state==='paid') openPay(o.order,o.amount,$('#payWhat').textContent,'paid');
+      else{ $('#payErr').textContent='自動では確認できませんでした。お支払い済みの場合は、注文番号を '+CONTACT+' へお知らせください（再送金は不要です）。'; $('#payGo').disabled=true; }
+    }
     if(!list.some(x=>WAITING.includes(x.state))){ clearInterval(watchTimer); watchTimer=null; if($('#payPanel').hidden) loadMine(); }
   },6000);
 }
@@ -476,7 +486,8 @@ function showDone(res,order){
   $('#payPanel').hidden=true; document.body.style.overflow='';
   loadMine(res.coupon||order||payOrder);
 }
-async function fetchMine(){ try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); return r.ok?((await r.json()).orders||[]):[]; }catch(e){ return []; } }
+/* 取れなかったときは null（「注文が無い」とは区別する。区別しないと、通信が一度こけただけで見張りをやめてしまう） */
+async function fetchMine(){ try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); return r.ok?((await r.json()).orders||[]):null; }catch(e){ return null; } }
 
 const PLAN_JA={ticket_once:'1回なんでも無料チケット',ticket_period:'期間無料チケット',support:'支援BOXのお礼（{{ support_pct }}%引き）'};
 const STATE_JA={unpaid:'お支払い待ち',paying:'確認中',hold:'保留中（自動で確認しています）',paid:'お支払い済み・'+(MODE==='source'?'準備待ち':'発行待ち'),starting:'処理中',dead:'自動では確認できませんでした'};
@@ -508,7 +519,7 @@ function downloadRow(o,hl){
 }
 async function loadMine(highlight){
   const want=WANT;
-  const list=(await fetchMine()).filter(o=>want.includes(o.product));
+  const list=((await fetchMine())||[]).filter(o=>want.includes(o.product));
   const root=$('#mineList'); root.textContent='';
   const shown=new Set();
   list.forEach(o=>{

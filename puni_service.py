@@ -169,6 +169,22 @@ MENUS = {
                          "order": 70},
 }
 
+# 長時間メニュー：回し放題（時間制）と、この周数以上の自動周回。
+# 長時間の実行は、専用の実行枠で動かす（数分で終わるほかの注文を待たせない）。app.py の「長時間レーン」。
+LONG_FARM_LAPS = 50
+
+
+def is_long(menus, qty: dict | None) -> bool:
+    """この注文は長時間になるか（回し放題、または LONG_FARM_LAPS 周以上の自動周回）。"""
+    menus = list(menus or [])
+    if "puni_unlimited" in menus:
+        return True
+    try:
+        return "puni_farm" in menus and int((qty or {}).get("puni_farm", 0) or 0) >= LONG_FARM_LAPS
+    except (TypeError, ValueError):
+        return False
+
+
 # 1つの注文で選べないもの（新規垢を作るメニューは単独）
 SOLO_MENUS = ("puni_account", "puni_aged")
 
@@ -659,10 +675,19 @@ def _battle_once(c_mod, client, stage_id: int, log) -> None:
 
 
 def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
-                prog: _Progress, log) -> str:
-    """ログイン済みの client で1メニューを実行する。戻り値は結果の1行。失敗は RuntimeError。"""
+                prog: _Progress, log, state: dict | None = None, tick=None, should_stop=None) -> str:
+    """ログイン済みの client で1メニューを実行する。戻り値は結果の1行。失敗は RuntimeError。
+
+    周回・回し放題は長くかかるので、途中経過を外へ知らせ、続きから始められるようにしてある:
+      state … 前回の途中経過 {"done": 済んだ周数, "elapsed": 使った秒数}（最初からなら空）
+      tick(done, elapsed) … 1周終わるたびに呼ぶ（呼び出し側が記録する）
+      should_stop() … True を返したら、その周で切り上げて「途中で終了」として正常に終える
+    """
     import time
     label = menu_label(menu)
+    state = state or {}
+    tick = tick or (lambda _done, _elapsed: None)
+    should_stop = should_stop or (lambda: False)
     if menu in ("puni_farm", "puni_stage_clear", "puni_unlimited"):
         stage_id = int(stages[menu])
         # 入力IDをマスタで確認（P-08）。ただしマスタは最大24hのキャッシュで、新イベントの
@@ -676,8 +701,12 @@ def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
             return f"■ {label}：完了（ステージ {stage_id}）"
         if menu == "puni_farm":
             laps = int(qty[menu])
-            done = 0
-            for i in range(laps):
+            done = first = min(max(0, int(state.get("done") or 0)), laps)   # 続きからのときは、済んだ周を飛ばす
+            if first:
+                log(f"前回の続きから再開します（{first}/{laps} 周まで完了済み）。")
+            for i in range(first, laps):
+                if should_stop():
+                    return f"■ {label}：途中で終了（お客さまの操作・ステージ {stage_id} を {done}/{laps} 周）"
                 # 進捗バーは実行段（2）から完了手前（9）まで比例して進める（P-16 UX）
                 prog.update(2 + int(7 * i / max(1, laps)),
                             f"周回中… {i + 1}/{laps}（ステージ {stage_id}）", force=True)
@@ -688,14 +717,22 @@ def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
                         raise _ActionPartial(f"{done}/{laps} 周で中断：{exc}", done) from exc
                     raise
                 done += 1
+                tick(done, 0)
             return f"■ {label}：完了（ステージ {stage_id} を {done} 周）"
         # puni_unlimited（時間制・入力は時間単位）
         hours = int(qty[menu])
         total_sec = hours * 3600
-        start = time.time()
+        # 続きからのときは、前回までに使った時間を引く。止まっていたあいだの時間は数えない（買った時間ぶん回す）。
+        used = min(max(0.0, float(state.get("elapsed") or 0)), float(total_sec))
+        done = max(0, int(state.get("done") or 0))
+        if used:
+            log(f"前回の続きから再開します（{int(used // 60)} 分ぶん・{done} 周まで完了済み）。")
+        start = time.time() - used
         deadline = start + total_sec
-        done = 0
         while time.time() < deadline:
+            if should_stop():
+                return (f"■ {label}：途中で終了（お客さまの操作・ステージ {stage_id} を "
+                        f"{int((time.time() - start) // 60)} 分・{done} 周）")
             elapsed = time.time() - start
             left_min = int((deadline - time.time()) / 60) + 1
             prog.update(2 + int(7 * elapsed / max(1, total_sec)),
@@ -707,6 +744,7 @@ def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
                     raise _ActionPartial(f"{hours}時間のうち {done} 周で中断：{exc}", done) from exc
                 raise
             done += 1
+            tick(done, time.time() - start)
         return f"■ {label}：完了（ステージ {stage_id} を {hours} 時間・{done} 周）"
     if menu == "puni_hitodama":
         target = int(qty[menu])
@@ -803,20 +841,27 @@ def _create_accounts(c_mod, menu: str, count: int, prog: _Progress, log) -> tupl
 
 def run_order(mode: str, login_id: str, password: str,
               menus, qty: dict, stages: dict | None = None,
-              progress=None, log=None) -> dict:
+              progress=None, log=None, resume: dict | None = None, checkpoint=None, should_stop=None) -> dict:
     """ぷにぷに代行1件を実行する。例外は投げず、必ず結果を dict で返す。
 
     mode … "email"（メールアドレス）／"new"（新規アカウント作成）
-    戻り値 … {"ok", "error", "lines", "done", "account", "moved"}
+    resume … 前回の途中経過（下の checkpoint が渡した形）。済んだメニューは飛ばし、周回は続きから。
+    checkpoint(状態) … 進むたびに呼ぶ。状態は {"finished": [済んだメニュー], "menu": 実行中, "done": 周数, "elapsed": 秒}
+    should_stop() … True になったら、周回をその周で切り上げる（お客さんの「途中で終了」）
+    戻り値 … {"ok", "error", "lines", "done", "account", "moved", "delivered", "resumable", "stopped"}
       account … mode == "new" で作成したアカウント情報のリスト
       moved   … ゲームアカウントがこちらに移っているか（今は常に False）
+      delivered … 一部でも提供したか
+      resumable … 失敗したが、続きから安全にやり直せる（済んだ分は checkpoint に記録済み＝二重に提供しない）
     """
     log = log or (lambda _t: None)
+    checkpoint = checkpoint or (lambda _state: None)
+    resume = resume if isinstance(resume, dict) else {}
     prog = _Progress(progress)
     qty = qty or {}
     stages = stages or {}
     out = {"ok": False, "error": "", "lines": [], "done": 0,
-           "account": None, "moved": False, "delivered": False}
+           "account": None, "moved": False, "delivered": False, "resumable": False, "stopped": False}
     menus = sort_menus(menus)
     if not menus:
         out["error"] = "実行するメニューがありません。"
@@ -867,12 +912,31 @@ def run_order(mode: str, login_id: str, password: str,
         return out
 
     lines: list[str] = []
-    for menu in menus:
+    finished = [m for m in (resume.get("finished") or []) if m in menus]   # 前回までに済んだメニュー
+    current = {"menu": None, "done": 0, "elapsed": 0}
+
+    def save(menu=None, done=0, elapsed=0) -> None:
+        current.update(menu=menu, done=int(done), elapsed=int(elapsed))
         try:
-            line = _run_action(c_mod, client, menu, qty, stages, prog, log)
-        except _ActionPartial as exc:
-            # 途中まで提供済み。自動再実行させない（over-delivery 防止・P-02）
+            checkpoint({"finished": list(finished), **current})
+        except Exception:  # noqa: BLE001  記録に失敗しても実行は止めない
+            pass
+
+    for menu in menus:
+        if menu in finished:   # 前回の実行で済んでいる → もう一度はやらない（二重に提供しない）
+            lines.append(f"■ {menu_label(menu)}：前回までに完了")
+            out["done"] += 1
             out["delivered"] = True
+            continue
+        state = resume if resume.get("menu") == menu else {}
+        try:
+            line = _run_action(c_mod, client, menu, qty, stages, prog, log, state,
+                               lambda done, elapsed, _m=menu: save(_m, done, elapsed), should_stop)
+        except _ActionPartial as exc:
+            # 周回の途中まで提供済み。済んだ周数は記録してあるので、続きからやり直せる
+            # （最初からやり直すと提供しすぎになる・P-02。続きからなら、そうならない）。
+            out["delivered"] = True
+            out["resumable"] = True
             lines.append(f"■ {menu_label(menu)}：一部完了（{_safe_message(exc)}）")
             out["error"] = _safe_message(exc)
             out["lines"] = lines
@@ -882,12 +946,18 @@ def run_order(mode: str, login_id: str, password: str,
             lines.append(f"■ {menu_label(menu)}：失敗（{msg}）")
             out["error"] = msg
             out["lines"] = lines
-            # それまでのメニューで提供済みがあれば再実行しない
+            # それまでに済んだメニューは記録してあるので、やり直しではそこを飛ばして続きから実行できる
             out["delivered"] = out["delivered"] or out["done"] > 0
+            out["resumable"] = True
             return out
         lines.append(line)
         out["done"] += 1
         out["delivered"] = True
+        finished.append(menu)
+        save()
+        if "途中で終了" in line:   # お客さんが切り上げた → 残りのメニューも実行しない
+            out["stopped"] = True
+            break
 
     out["lines"] = lines
     out["ok"] = True

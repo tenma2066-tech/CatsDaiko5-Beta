@@ -233,9 +233,6 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .code div{flex:1;min-width:0}
 .code small{display:block;font-size:12px;color:var(--muted)}
 .code strong{display:block;font-size:22px;letter-spacing:.04em;word-break:break-all;font-variant-numeric:tabular-nums}
-.rvlock .code strong,.rvlock .hn b{filter:blur(7px);-webkit-user-select:none;user-select:none;pointer-events:none}
-.rvhint{display:none;margin:8px 0 0;padding:8px 10px;border-radius:10px;background:var(--soft);font-size:13px}
-.rvlock>.rvhint,.rvlock .rvhint{display:block}
 #reviewPanel{z-index:40}
 #reviewPanel .rvmsg p{margin:8px 0;line-height:1.7}
 .note{margin:10px 0 0;font-size:12px;color:var(--muted)}
@@ -632,7 +629,6 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <div class="fail" id="fail" hidden></div>
       <div class="result" id="res" hidden>
         <h3 id="res-title">完了しました</h3>
-        <p class="rvhint">🔒 コードは、評価と感想を送ると見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">評価を書く</button></p>
         <div id="res-single">
           <div class="code"><div><small>引継ぎコード</small><strong id="r-transfer"></strong></div><button class="btn" type="button" data-copy="r-transfer">コピー</button></div>
           <div class="code"><div><small>暗証番号</small><strong id="r-confirm"></strong></div><button class="btn" type="button" data-copy="r-confirm">コピー</button></div>
@@ -772,7 +768,6 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <h2 id="doneTitle">完了しました</h2>
     <p class="sub">下の<b>引継ぎコード</b>と<b>暗証番号</b>を、必ず今すぐ控えてください（スクリーンショットでもOK）。この表示は30分で消えます。</p>
     <div id="doneCodes"></div>
-    <p class="rvhint">🔒 コードは、評価と感想を送ると見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">評価を書く</button></p>
     <div id="doneCoupon" class="couponbox" hidden></div>
     <h3>ゲームでの引き継ぎ手順</h3>
     <ol class="howto">
@@ -796,7 +791,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
   <div class="mbox">
     <h2 id="reviewTitle">ご利用ありがとうございました！✨</h2>
     <div class="rvmsg">
-      <p><b>コードをお渡しする前に、評価と感想をお聞かせください。</b>🙇‍♂️<br>星を選んで、{{ review_min }}文字以上の感想を書いて送信すると、すぐに<b>引継ぎコードと暗証番号</b>が表示されます。</p>
+      <p><b>結果をお渡しする前に、評価と感想をお聞かせください。</b>🙇‍♂️<br>星を選んで、{{ review_min }}文字以上の感想を書いて送信すると、すぐに<b>結果（引継ぎコードと暗証番号など）</b>が表示されます。</p>
       <p class="sub">いただいた感想は「<a href="/reviews" target="_blank" rel="noopener">実績</a>」に掲載します（お名前・注文内容は出ません）。</p>
     </div>
     <div id="reviewForm"></div>
@@ -807,7 +802,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="/static/review.js?v=1"></script>
+<script src="/static/review.js?v=2"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAINT={{ maint|tojson }};
@@ -1329,54 +1324,27 @@ function clock(d){return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.get
 function uptime(s){const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h>0?h+'時間'+m+'分':m+'分'+pad(s%60)+'秒'}
 function pill(id,s,text){const e=$(id); e.dataset.s=s; e.lastElementChild.textContent=text;}
 /* ---------- コードを見る前のお知らせ（感想ポストのリンクを開くと、コードが見られるようになる） ---------- */
-/* ---------- 実績（評価と感想）：完了したら、星と感想を送ってもらってからコードを見せる ----------
-   入力欄は全画面共通の static/review.js。送信できたらその場で開く（X へ移動しないので、戻ってこられない事故が起きない）。
-   どの結果を見せたかは、コードそのものではなく目印（ハッシュ）で端末に覚えておく。 */
-const REVIEWS_ON={{ reviews_on|tojson }}&&PAYMENTS&&!IS_ADMIN;   /* 管理者の無料実行では聞かない */
-const RVKEY='nyanko-review-ok';
-function rvHash(t){ let h=5381; t=String(t||''); for(let i=0;i<t.length;i++) h=((h*33)^t.charCodeAt(i))>>>0; return h.toString(36); }   /* コードそのものは保存しない */
-function rvLoad(){ try{ return JSON.parse(localStorage.getItem(RVKEY)||'[]'); }catch(e){ return []; } }
-let rvOk=new Set(rvLoad()), rvWait=[], rvForm=null;
-function rvKeys(result){ return resultPairs(result).map(p=>rvHash(p[1].transfer)); }
-function rvSave(){ try{ localStorage.setItem(RVKEY,JSON.stringify([...rvOk].slice(-200))); }catch(e){} }
-function needReview(result){
-  if(!REVIEWS_ON||!result) return false;
-  return rvKeys(result).some(k=>!rvOk.has(k));
-}
-function rvOpen(result,then){
-  if(result) rvWait.push(result); if(then) rvThen.push(then);
+/* ---------- 実績（評価と感想）：結果は、評価を受け取ってからサーバーが渡す ----------
+   サーバーは、評価がまだの注文の結果を返さない（/status は result_locked、注文一覧は locked）。
+   ここでは入力欄（全画面共通の static/review.js）を出し、送信できたら結果を取り直すだけ。
+   画面側で隠しているわけではないので、この端末に残した履歴などを別に守る必要はない。 */
+const REVIEWS_ON={{ reviews_on|tojson }};
+let rvForm=null, rvTarget={order:'',job:''}, rvThen=[];
+/* target＝どの注文の評価か {order, job}。then＝送信できたあとにやること（結果の取り直し） */
+function rvOpen(target,then){
+  if(!REVIEWS_ON){ if(then) then(); return; }
+  rvTarget={order:(target&&target.order)||'',job:(target&&target.job)||''};
+  if(then) rvThen.push(then);
   if(!rvForm) rvForm=ReviewForm($('#reviewForm'),{min:{{ review_min }},max:{{ review_max }},pastUrl:{{ past_reviews_url|tojson }},
-    target:()=>({order:payOrder||'',job:curJob||''}),onDone:rvUnlock});
-  $('#reviewPanel').hidden=false; document.body.style.overflow='hidden';
-}
-let rvThen=[];
-/* コードの出ない完了：その注文がまだ実績を書いていなければ、入力欄を出す */
-async function rvAskAfter(job){
-  if(!REVIEWS_ON||!job) return;
-  for(let i=0;i<4;i++){
-    await sleep(1500);
-    try{ const m=await (await fetch('/api/orders/mine',{cache:'no-store'})).json();
-      const o=(m.orders||[]).find(x=>x.job===job&&x.state==='done');
-      if(o){ if(!o.reviewed) rvOpen(null); return; } }catch(e){}
-  }
-}
-function rvApply(){
-  [['#donePanel',window.__doneResult],['#res',window.__resResult]].forEach(([q,r])=>{ const e=$(q); if(e) e.classList.toggle('rvlock',needReview(r)); });
-  try{ renderHist(); }catch(e){}
+    target:()=>rvTarget,onDone:rvUnlock});
+  if($('#reviewPanel').hidden){ $('#reviewPanel').hidden=false; document.body.style.overflow='hidden'; rvForm.focus(); }
 }
 function rvUnlock(){
-  /* 送信できた（または送れない事情があった）→ 待っていた結果を見られるようにする */
-  rvWait.forEach(r=>rvKeys(r).forEach(k=>rvOk.add(k)));
-  [window.__doneResult,window.__resResult].forEach(r=>{ if(r) rvKeys(r).forEach(k=>rvOk.add(k)); });
-  rvWait=[];
-  rvSave(); rvForm=null;   /* 次の注文では、まっさらな入力欄から */
+  rvForm=null;   /* 次の注文では、まっさらな入力欄から */
   $('#reviewPanel').hidden=true; if($('#donePanel').hidden&&$('#payPanel').hidden&&$('#helpPanel').hidden) document.body.style.overflow='';
-  rvApply();
   const t=rvThen; rvThen=[]; setTimeout(()=>t.forEach(f=>{ try{ f(); }catch(e){} }),0);
 }
-document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-rvopen]'); if(b) rvOpen(); });
-/* コピーの前に確認：まだ評価と感想を送っていなければ、入力欄を出す */
-function rvGuard(result,fn){ if(needReview(result)) rvOpen(result); else fn(); }
+function rvGuard(result,fn){ fn(); }   /* 以前はここで評価を確かめていた。いまはサーバーが結果を渡す時点で確かめている */
 async function copyText(text){
   try{await navigator.clipboard.writeText(text); return true}catch(e){
     const a=document.createElement('textarea'); a.value=text; a.style.position='fixed'; a.style.opacity='0';
@@ -1385,7 +1353,6 @@ async function copyText(text){
   }
 }
 $$('[data-copy]').forEach(b=>b.addEventListener('click',async()=>{
-  if(/^r-/.test(b.dataset.copy)&&needReview(window.__resResult)){ rvOpen(window.__resResult); return; }
   const ok=await copyText($('#'+b.dataset.copy).textContent);
   toast(ok?'コピーしました':'コピーできませんでした。長押しで選択してください');
 }));
@@ -1508,7 +1475,6 @@ function renderJob(j){
   const showRes=!!j.result&&!j.dry;
   $('#res').hidden=!showRes;
   window.__resResult=showRes?j.result:null;
-  if(showRes){ $('#res').classList.toggle('rvlock',needReview(j.result)); if(needReview(j.result)) rvOpen(j.result); }
   if(showRes&&j.clone){
     $('#res-single').hidden=true; $('#res-clone').hidden=false;
     const o=j.result.original||{}, cp=j.result.copy||{};
@@ -1553,12 +1519,14 @@ async function poll(){
     }
     lastOk=Date.now(); fails=0;
     renderJob(j);
+    if(j.status==='done'&&j.result_locked){   /* 完了。結果は、評価と感想を送るとサーバーから届く → 送信後にもう一度取りに行く */
+      stopJob(); rvOpen({job:curJob},()=>poll()); return;
+    }
     if(j.status!=='running'&&j.status!=='queued'){
       stopJob(); setTimeout(loadResume,1500);
       document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
-      if(j.status==='done'&&!j.result&&!j.dry) rvAskAfter(curJob);   /* コードが出ない注文（バン保証の検査だけ等）でも、評価はお願いする */
       if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); if(PAYMENTS) fetchCoupon(curJob); $('#transfer').value=''; $('#confirm').value=''; refresh(); }
-      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① メニュー」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
+      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown&&!j.result){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① メニュー」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'バン保証の検査が完了しました'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
   }catch(e){fails++; renderState();} /* 一時的な通信エラーは次回に再試行 */
@@ -1574,7 +1542,6 @@ $('#download-result').addEventListener('click',async()=>{
     if(!response.ok) throw Error('expired');
     const job=await response.json();
     if(!job.result) throw Error('no result');
-    if(needReview(job.result)){ rvOpen(job.result); return; }   /* 保存も、評価と感想を送ってから */
     const url=URL.createObjectURL(new Blob([JSON.stringify(job.result,null,2)],{type:'application/json'}));
     const link=document.createElement('a'); link.href=url; link.download='nyanko-result.json'; link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -1610,7 +1577,6 @@ function renderHist(){
       info.append(el('b',null,r.transfer),el('span',null,'　暗証番号 '),el('b',null,r.confirm));
       const cp=el('button','btn','コピー'); cp.type='button';
       cp.addEventListener('click',()=>rvGuard(h.result,async()=>{ const ok=await copyText(r.transfer+' '+r.confirm); toast(ok?'コードと暗証番号をコピーしました':'コピーできませんでした'); }));
-      if(needReview(h.result)) row.classList.add('rvlock');
       row.append(info,cp); box.append(row);
     });
     const del=el('button','btn','この結果を削除'); del.type='button';
@@ -1910,8 +1876,6 @@ function openDone(j){
   $('#doneAck').checked=false; $('#doneClose').disabled=true;
   $('#donePanel').hidden=false; document.body.style.overflow='hidden';
   window.__doneResult=j.result;
-  $('#donePanel').classList.toggle('rvlock',needReview(j.result));
-  if(needReview(j.result)) rvOpen(j.result);
 }
 function showCoupon(code){
   const b=$('#doneCoupon'); if(!b) return; if(!code){ b.hidden=true; return; }
@@ -1929,7 +1893,7 @@ async function fetchCoupon(job){   /* 完了直後はクーポンの発行が少
   }
 }
 $('#doneAck').addEventListener('change',()=>{ $('#doneClose').disabled=!$('#doneAck').checked; });
-$('#doneClose').addEventListener('click',()=>{ if(needReview(window.__doneResult)){ rvOpen(window.__doneResult); return; } $('#donePanel').hidden=true; document.body.style.overflow=''; show('status'); });
+$('#doneClose').addEventListener('click',()=>{ $('#donePanel').hidden=true; document.body.style.overflow=''; show('status'); });
 window.addEventListener('beforeunload',e=>{ if(jobRunning){ e.preventDefault(); e.returnValue=''; } });
 function openHelp(){ $('#helpPanel').hidden=false; document.body.style.overflow='hidden'; }
 function closeHelp(){ $('#helpPanel').hidden=true; if($('#payPanel').hidden&&$('#donePanel').hidden) document.body.style.overflow=''; }
@@ -1987,8 +1951,6 @@ async function loadResume(quiet){
     const r=quiet?await fetch('/api/orders/mine',{cache:'no-store'}):await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
     const j=await r.json(); const list=(j.orders||[]).filter(o=>!o.tsum&&!o.puni&&!o.product);   /* ツム・ぷにの注文は各画面で扱う */
     let seen=[]; try{ seen=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); }catch(e){}
-    // すでに実績を書いた注文の結果は、この端末でもそのまま見られるようにする（別の端末で書いた場合など）
-    { let n=rvOk.size; list.forEach(o=>{ if(o.reviewed&&o.result) rvKeys(o.result).forEach(k=>rvOk.add(k)); }); if(rvOk.size!==n){ rvSave(); rvApply(); } }
     // いま見ている（見た）実行の注文は「結果を見せた」として記録する
     list.forEach(o=>{ if(o.job&&o.job===curJob&&o.state==='done') markShown(o.order); });
     // 1) 実行が始まった注文（管理者の承認・保留解除・別のタブで戻った など）→ 見ていなければ、その注文の状況画面へ（こちらを優先）
@@ -2022,7 +1984,11 @@ async function loadResume(quiet){
       if(o.coupon_issued&&o.state==='done') box.append(el('p','note','🎟 クーポン '+o.coupon_issued+'（次回'+COUPON_MIN+'円以上で10%引き・1回きり）'));
       const row=el('div','rrow'); const d=new Date(o.created*1000);
       row.append(el('span',null,(d.getMonth()+1)+'/'+d.getDate()+' '+clock(d)+'　'+Number(o.amount).toLocaleString('ja-JP')+'円　'+(STATE_JA[o.state]||o.state)));
-      if(o.state==='done'&&!o.job&&o.result){
+      if(o.state==='done'&&o.locked){   /* 完了。評価と感想を送ると、コードが届く */
+        const b=el('button','btn','評価を書いてコードを見る'); b.type='button';
+        b.addEventListener('click',()=>rvOpen({order:o.order,job:o.job||''},()=>loadResume()));
+        row.append(b); box.append(row);
+      }else if(o.state==='done'&&!o.job&&o.result){
         const b=el('button','btn','コードを見る'); b.type='button';
         b.addEventListener('click',()=>{ markShown(o.order); show('status'); openDone({result:o.result,clone:o.clone,coupon:o.coupon_issued}); });
         row.append(b); addDel(o,row); box.append(row);
@@ -2058,7 +2024,8 @@ $('#claimGo').addEventListener('click',async()=>{
       return;
     }
     closeHelp(); $('#claimNo').value=''; loadResume();
-    if(j.state==='done'&&j.result){ show('status'); openDone({result:j.result,clone:j.clone,coupon:j.coupon_issued}); }  /* 完了注文：コードを表示 */
+    if(j.state==='done'&&j.locked){ rvOpen({order:j.order},()=>loadResume()); }   /* 完了注文で、評価がまだ → 送るとコードが届く */
+    else if(j.state==='done'&&j.result){ show('status'); openDone({result:j.result,clone:j.clone,coupon:j.coupon_issued}); }  /* 完了注文：コードを表示 */
     else if(['unpaid','hold','paid'].includes(j.state)){ openPay(j.order,j.amount,j.breakdown,j.skipped,j.state); }  /* 支払い系だけ支払い画面 */
     else { toast('注文を呼び戻しました'); }   /* dead など：一覧に表示 */
   }catch(e){ toast('接続できませんでした'); }
@@ -2071,5 +2038,5 @@ openHelp(); /* 開くたびに確認と使い方を表示 */
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
 
-</script><script src="/static/qa.js?v=1" data-shop="nyanko" defer></script>
+</script><script src="/static/qa.js?v=2" data-shop="nyanko" defer></script>
 </body></html>

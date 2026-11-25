@@ -125,9 +125,9 @@ class ResultCodesNotMixedUp(unittest.TestCase):
 
 @unittest.skipIf(sync_playwright is None, "Playwright がない")
 class ReviewGate(ResultCodesNotMixedUp):
-    """完了したら、アプリの中で評価（星）と感想（20文字以上）を送ってもらってからコードを見せる。
-    以前は X へのリプライだったが、X に移ったまま戻れない・書いたのに見られない、が起きたので置き換えた。
-    送信したその場で開くこと、読み込み直しても開いたままなこと、サーバーが不調でもお客さんを止めないことを確かめる。"""
+    """完了したら、アプリの中で評価（星）と感想（20文字以上）を送ってもらってから結果を渡す。
+    渡すかどうかはサーバーが決める：評価がまだの注文は、/status も注文一覧も結果を返さない（result_locked / locked）。
+    画面は入力欄を出し、送信できたら結果を取り直す。ここではサーバーの返事を真似て、画面の動きを確かめる。"""
 
     GOOD = "注文から5分で完了しました。案内が分かりやすくて安心でした。"
 
@@ -137,31 +137,54 @@ class ReviewGate(ResultCodesNotMixedUp):
         p.start()
         self.addCleanup(p.stop)
         self.sent = []
+        self.reviewed = False          # サーバーが評価を受け取ったか（受け取ったら結果を返す）
 
-    def _review_page(self, status=200, body=None):
-        pg, _ = self._page(live=True)
+    def _review_page(self, status=200, body=None, accept=True):
+        ctx = self.browser.new_context(viewport={"width": 390, "height": 844})
+        self.addCleanup(ctx.close)
+        pg = ctx.new_page()
+        now = int(time.time())
 
-        def handle(route, *_):
+        def orders(route, *_):
+            o = dict(_orders(True, now)["orders"][0])
+            if not self.reviewed:
+                o.update(result=None, locked=True)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"orders": [o], "maint": {"on": False}}))
+
+        def job(route, *_):
+            st = dict(STATUS2)
+            if not self.reviewed:
+                st.update(result=None, result_locked=True)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(st))
+
+        def review(route, *_):
             self.sent.append(json.loads(route.request.post_data or "{}"))
+            if status == 200 and accept:
+                self.reviewed = True
             route.fulfill(status=status, content_type="application/json",
                           body=json.dumps(body if body is not None else {"ok": True, "saved": True}))
-        pg.route("**/api/reviews", handle)
+        pg.route("**/api/orders/mine", orders)
+        pg.route("**/status/J2", job)
+        pg.route("**/api/reviews", review)
         pg.goto(self.url + "nyanko")
         pg.wait_for_timeout(5000)
         return pg
 
-    def _locked(self, pg):
-        return pg.evaluate("()=>({panel: !document.querySelector('#donePanel').hidden, "
-                           "locked: document.querySelector('#donePanel').classList.contains('rvlock'), "
-                           "review: !document.querySelector('#reviewPanel').hidden})")
+    def _state(self, pg):
+        return pg.evaluate("()=>({review: !document.querySelector('#reviewPanel').hidden, "
+                           "done: !document.querySelector('#donePanel').hidden, "
+                           "codes: [...document.querySelectorAll('#doneCodes strong')].map(e=>e.textContent), "
+                           "page: document.body.innerText.includes('NEW222bbb')})")
 
     def _fill(self, pg, stars=5, text=None):
         pg.click(f"#reviewForm .rvf-stars button:nth-child({stars})")
         pg.fill("#reviewForm textarea", self.GOOD if text is None else text)
 
-    def test_codes_are_locked_until_a_review_is_sent(self):
+    def test_result_is_not_on_the_page_until_a_review_is_sent(self):
         pg = self._review_page()
-        self.assertEqual(self._locked(pg), {"panel": True, "locked": True, "review": True})
+        st = self._state(pg)
+        self.assertEqual((st["review"], st["done"], st["page"]), (True, False, False), st)   # 入力欄だけ。コードは画面のどこにも無い
+        self.assertNotIn("NEW222bbb", pg.content())
         self.assertTrue(pg.is_disabled("#reviewForm .rvf-send"))            # 星も感想もまだ
         pg.click("#reviewForm .rvf-stars button:nth-child(4)")
         self.assertTrue(pg.is_disabled("#reviewForm .rvf-send"))            # 星だけでは送れない
@@ -170,39 +193,48 @@ class ReviewGate(ResultCodesNotMixedUp):
         self.assertIn("あと 16 文字", pg.text_content("#reviewForm .rvf-count"))
         pg.fill("#reviewForm textarea", self.GOOD)
         self.assertFalse(pg.is_disabled("#reviewForm .rvf-send"))
+        pg.keyboard.press("Escape")                                         # 閉じる手段は無い
+        self.assertTrue(self._state(pg)["review"])
 
-    def test_sending_unlocks_at_once_and_stays_unlocked_after_reload(self):
+    def test_sending_brings_the_result_and_reload_does_not_ask_again(self):
         pg = self._review_page()
         self._fill(pg, stars=5)
         pg.click("#reviewForm .rvf-send")
-        pg.wait_for_timeout(1500)
-        st = self._locked(pg)
-        self.assertEqual((st["locked"], st["review"], st["panel"]), (False, False, True), st)
+        pg.wait_for_timeout(2500)
+        st = self._state(pg)
+        self.assertEqual((st["review"], st["done"], st["codes"]), (False, True, ["NEW222bbb", "2222"]), st)
         self.assertEqual((self.sent[0]["stars"], self.sent[0]["text"], self.sent[0]["job"]), (5, self.GOOD, "J2"))
         pg.reload()                                                         # 読み込み直しても、もう一度は聞かない
         pg.wait_for_timeout(5000)
-        st = self._locked(pg)
-        self.assertEqual((st["locked"], st["review"]), (False, False), st)
+        self.assertFalse(self._state(pg)["review"])
         self.assertEqual(len(self.sent), 1)
 
-    def test_validation_error_from_server_is_shown_and_keeps_locked(self):
-        pg = self._review_page(status=400, body={"error": "感想は20文字以上でお願いします。", "code": "too_short"})
+    def test_rejected_review_keeps_the_result_away(self):
+        pg = self._review_page(status=400, body={"error": "不適切な言葉が含まれています。言葉を変えて、もう一度お書きください。", "code": "bad_words"})
         self._fill(pg)
         pg.click("#reviewForm .rvf-send")
         pg.wait_for_timeout(1000)
-        self.assertIn("20文字以上", pg.text_content("#reviewForm .rvf-err"))
-        self.assertTrue(self._locked(pg)["locked"])
+        self.assertIn("不適切な言葉", pg.text_content("#reviewForm .rvf-err"))
+        st = self._state(pg)
+        self.assertEqual((st["review"], st["page"]), (True, False), st)
 
     def test_server_trouble_never_keeps_the_customer_from_the_codes(self):
+        # 保存の不調：1回目は 503。2回目でサーバーが免除（waived）して結果を渡す
         pg = self._review_page(status=503, body={"error": "保存できませんでした。もう一度お試しください。", "code": "save_failed"})
         self._fill(pg)
         pg.click("#reviewForm .rvf-send")
         pg.wait_for_timeout(1000)
-        self.assertTrue(self._locked(pg)["locked"])                         # 1回目：やり直しをお願いする
+        self.assertTrue(self._state(pg)["review"])                          # 1回目：やり直しをお願いする
+        pg.unroute("**/api/reviews")
+
+        def waive(route, *_):
+            self.reviewed = True
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "saved": False, "waived": True}))
+        pg.route("**/api/reviews", waive)
         pg.click("#reviewForm .rvf-send")
-        pg.wait_for_timeout(1500)
-        st = self._locked(pg)
-        self.assertEqual((st["locked"], st["review"]), (False, False), st)  # 2回続いたら、コードを見せる
+        pg.wait_for_timeout(2500)
+        st = self._state(pg)
+        self.assertEqual((st["review"], st["codes"]), (False, ["NEW222bbb", "2222"]), st)
 
     # 親クラスのテストはここでは繰り返さない
     test_new_tab_while_job_alive_shows_new_code = None

@@ -135,7 +135,8 @@
     panel.classList.remove("qa-open");
     fab.classList.remove("qa-hide");
     document.body.style.overflow = "";
-    setTimeout(function () { panel.hidden = true; }, 260);
+    /* 閉じる動きのあいだにもう一度開かれたら、隠さない（隠すと画面が動かせないまま残る） */
+    setTimeout(function () { if (!panel.classList.contains("qa-open")) panel.hidden = true; }, 260);
     fab.focus();
   }
 

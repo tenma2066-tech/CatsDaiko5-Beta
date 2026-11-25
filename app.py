@@ -195,7 +195,7 @@ def parse_cat_numbers(text: str):
     t = re.sub(r"[~〜～ー−―‐–—]", "-", t)
     nums: set[int] = set()
     for tok in [x for x in re.split(r"[\s,、，;；・]+", t) if x]:
-        m = re.fullmatch(r"(\d+)(?:-(\d+))?", tok)
+        m = re.fullmatch(r"(\d{1,6})(?:-(\d{1,6}))?", tok)   # 桁数を限る（巨大な数字の並びで固まらないように）
         if not m:
             return [], f"「{tok}」は読み取れません。"
         a = int(m.group(1))
@@ -459,10 +459,35 @@ _init_lock = threading.Lock()
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "4"))
 if MAX_CONCURRENT_JOBS < 1:
     raise ValueError("MAX_CONCURRENT_JOBS must be at least 1")
-_slots: list[str | None] = [None] * MAX_CONCURRENT_JOBS
+_slots: list[str | None] = [None] * MAX_CONCURRENT_JOBS      # ふつうの実行枠（にゃんこ・ツムツム・短いぷにぷに）
+# 長時間レーン：ぷにぷにの回し放題・長い周回（puni_service.is_long）だけが使う、別の実行枠。
+# 何時間も動く注文が、数分で終わる注文の枠を塞がないようにする。
+# 周回中はほとんどが待ち時間で、1件あたりのメモリは約70MB。0 にすると、長時間もふつうの枠を使う。
+LONG_JOB_SLOTS = max(0, int(os.environ.get("LONG_JOB_SLOTS", "3")))
+_long_slots: list[str | None] = [None] * LONG_JOB_SLOTS
+LONG_SLOT_BASE = 100   # 枠の番号：ふつうの枠は 0〜、長時間レーンは 100〜（作業フォルダやロックの名前に使う）
+
+
+def _free_slot_locked(long: bool):
+    """空いている枠の番号（無ければ None）。呼び出し側で _jobs_lock を持つこと。"""
+    lane, base = (_long_slots, LONG_SLOT_BASE) if long and _long_slots else (_slots, 0)
+    return next((base + i for i, value in enumerate(lane) if value is None), None)
+
+
+def _set_slot_locked(slot: int, value) -> None:
+    """枠を使用中にする（value＝実行の番号）／空ける（None）。呼び出し側で _jobs_lock を持つこと。"""
+    if slot >= LONG_SLOT_BASE:
+        _long_slots[slot - LONG_SLOT_BASE] = value
+    else:
+        _slots[slot] = value
+
+
+def _is_long(job_id: str) -> bool:
+    return bool((_jobs.get(job_id) or {}).get("long"))
 _active_transfers: set[bytes] = set()
 MAX_QUEUED_JOBS = 20
 QUEUE_TTL = 15 * 60
+LONG_QUEUE_TTL = 6 * 3600        # 長時間レーンの順番待ちは、前の人が終わるまで待てるよう長くする
 _pending_jobs = deque()  # Arguments stay in memory only while waiting.
 _cleanup_lock = threading.Lock()
 _cleanup_started = False
@@ -496,7 +521,10 @@ def _parallel_state_locked() -> dict:
     """
     states = []
     running = warmup = occupied = 0
-    for index, value in enumerate(_slots, 1):
+    normal = _slots
+    long_running = sum(1 for value in _long_slots if value is not None)
+    queued_long = sum(1 for entry in _pending_jobs if _is_long(entry[0]))
+    for index, value in enumerate(normal, 1):
         if value is None:
             state = "free"
         elif value == "warmup":
@@ -513,10 +541,12 @@ def _parallel_state_locked() -> dict:
         "running_jobs": running,
         "warmup_slots": warmup,
         "occupied_slots": occupied,
-        "available_slots": len(_slots) - occupied,
-        "max_concurrent_jobs": len(_slots),
+        "available_slots": len(normal) - occupied,
+        "max_concurrent_jobs": len(normal),
         "slot_states": states,
-        "queued_jobs": len(_pending_jobs),
+        # 順番待ちは、ふつうの枠の分だけ数える（長時間レーンの待ちで「混雑中」と見せない・デプロイも待たせない）
+        "queued_jobs": len(_pending_jobs) - queued_long,
+        "long_running_jobs": long_running, "long_slots": LONG_JOB_SLOTS, "long_queued_jobs": queued_long,
     }
 
 def _gc_jobs() -> None:
@@ -524,7 +554,7 @@ def _gc_jobs() -> None:
     with _jobs_lock:
         for entry in list(_pending_jobs):
             job_id, _, transfer_key = entry
-            if now - _jobs[job_id]["created"] >= QUEUE_TTL:
+            if now - _jobs[job_id]["created"] >= (LONG_QUEUE_TTL if _is_long(job_id) else QUEUE_TTL):
                 _pending_jobs.remove(entry)
                 if transfer_key is not None:
                     _active_transfers.discard(transfer_key)
@@ -795,11 +825,23 @@ def _run_puni_job(job: dict, payload: dict) -> None:
         job["step"] = max(0, min(int(step or 0), PUNI_TOTAL_STEPS))
         _log(job, str(text))
 
+    def checkpoint(state: dict) -> None:
+        # 途中経過（済んだメニュー・周数・使った時間）。親プロセスが注文に写して保存する＝止まっても続きから再開できる
+        job["checkpoint"] = state
+        _publish_job(job)
+
+    def should_stop() -> bool:
+        if _stop_requested() and not job.get("stopping"):
+            job["stopping"] = True
+            _log(job, "「途中で終了」を受け付けました。いまの1周が終わったら終了します。")
+        return bool(job.get("stopping"))
+
     try:
         out = puni_service.run_order(
             payload.get("mode", "email"), payload.get("login", ""), payload.get("password", ""),
             payload.get("menus") or [], payload.get("qty") or {}, payload.get("stages") or {},
             progress=progress, log=log,
+            resume=payload.get("resume"), checkpoint=checkpoint, should_stop=should_stop,
         )
     except Exception as exc:  # noqa: BLE001
         job.update(status="error", error=f"ぷにぷに代行の実行中にエラーが発生しました（{type(exc).__name__}）。"
@@ -818,9 +860,11 @@ def _run_puni_job(job: dict, payload: dict) -> None:
     else:
         job["status"] = "error"
         job["error"] = out["error"] or "ぷにぷに代行を実行できませんでした。"
-        # すでに一部でも提供できていれば「結果不明」扱いにして自動再実行を止める（over-delivery 防止・P-02）。
-        # 何も提供していない失敗（ログイン失敗など）だけ、払い直しなしの再実行に回す。
-        job["outcome_unknown"] = bool(out.get("delivered") or (out.get("moved") and not out.get("account")))
+        # 一部でも提供したあとの失敗は、最初からやり直すと提供しすぎになる（P-02）。
+        # 続きからやり直せるもの（済んだ分を checkpoint に記録してある）は、払い直しなしの再実行に回す。
+        # それ以外（アカウント作成の途中など）は「結果不明」にして、自動では再実行させない。
+        job["outcome_unknown"] = bool((out.get("delivered") and not out.get("resumable"))
+                                      or (out.get("moved") and not out.get("account")))
         _log(job, "エラー: " + job["error"])
     job["finished"] = time.time()
     _publish_job(job)
@@ -913,29 +957,36 @@ def _finish_job(job_id: str, slot: int, transfer_key: bytes | None) -> None:
             job.update(status="error", error=("コード発行中に処理プロセスが終了し、発行結果が不明です。再実行する前にゲーム側の状態を確認してください。"
                                                    if job.get("issuing_codes") else "処理プロセスが途中で終了しました。"),
                        outcome_unknown=bool(job.get("issuing_codes")), finished=time.time())
-        _slots[slot] = None
+        _set_slot_locked(slot, None)
         if transfer_key is not None:
             _active_transfers.discard(transfer_key)
         _start_queued_jobs_locked()
 
 
 def _start_queued_jobs_locked() -> None:
-    """Called with _jobs_lock held; never persist queued credentials."""
-    while _pending_jobs and None in _slots:
-        job_id, arguments, transfer_key = _pending_jobs.popleft()
+    """Called with _jobs_lock held; never persist queued credentials.
+    順番待ちは先頭から見て、その実行の種類（ふつう／長時間）の枠が空いていれば始める。
+    長時間レーンがいっぱいでも、うしろのふつうの注文は先に進める（逆も同じ）。"""
+    for entry in list(_pending_jobs):
+        job_id, arguments, transfer_key = entry
         job = _jobs[job_id]
-        if time.time() - job["created"] >= QUEUE_TTL:
+        long = bool(job.get("long"))
+        if time.time() - job["created"] >= (LONG_QUEUE_TTL if long else QUEUE_TTL):
+            _pending_jobs.remove(entry)
             job.update(status="error", error="待機時間が長いため処理を中止しました。", finished=time.time())
             if transfer_key is not None:
                 _active_transfers.discard(transfer_key)
             continue
-        slot = _slots.index(None)
-        _slots[slot] = job_id
+        slot = _free_slot_locked(long)
+        if slot is None:
+            continue
+        _pending_jobs.remove(entry)
+        _set_slot_locked(slot, job_id)
         job["status"] = "running"
         try:
             _launch_job(job_id, job, arguments, slot, transfer_key)
         except Exception:
-            _slots[slot] = None
+            _set_slot_locked(slot, None)
             if transfer_key is not None:
                 _active_transfers.discard(transfer_key)
             job.update(status="error", error="処理を開始できませんでした。", finished=time.time())
@@ -1447,6 +1498,8 @@ def _too_fast():
     return jsonify(error="操作が続いています。少し待ってからもう一度お試しください。", code="too_fast"), 429
 
 
+RUN_LIMIT = 300            # 1つの IP が10分に作れる注文の数（ふつうの使い方では届かない。連続で作り続けるのを止める）
+PAY_LIMIT = 120            # 1つの IP が10分に試せる支払い確認の数（1回ごとに PayPay へ問い合わせるため）
 MAX_UNPAID_PER_OWNER = 5   # 1人が同時に持てる未払いの注文（超えたら、入金リンクのない古いものから閉じる）
 
 
@@ -1761,10 +1814,11 @@ def _admin_post(token):
             _persist_orders()
     elif action in ("order_paid", "order_dead", "order_hold"):
         oid = request.form.get("order", "")
+        nothing_to_run = False
         with _orders_lock:
             o = _orders.get(oid)
-            if not o or o["state"] in ("started", "paying", "starting"):
-                msg = "その注文は変更できません（開始済み・確認中・期限切れ）。"
+            if not o or o["state"] in ("started", "paying", "starting", "done"):
+                msg = "その注文は変更できません（開始済み・確認中・完了・期限切れ）。"
             else:
                 if action == "order_paid":
                     o["state"] = "paid"
@@ -1777,7 +1831,10 @@ def _admin_post(token):
                 if action == "order_paid" and o.get("arguments") is None and not o.get("product"):
                     o["state"] = "done"
                     msg = "この注文は入力内容が残っていない（完了済み）ため、実行できません。"
+                    nothing_to_run = True
                 code_for_ledger = o.get("link_code") if action == "order_paid" else None
+        if nothing_to_run:
+            _persist_orders()
         if msg == "注文を更新しました。":
             if code_for_ledger:
                 try:
@@ -2001,7 +2058,7 @@ def _order_id_of(order: dict) -> str:
 
 
 def _order_keep(o: dict) -> float:
-    """この注文を残しておく秒数（作成から）。
+    """この注文を残しておく秒数（最後に状態が変わった時から。_expired）。
     - 個別に指定があればそれ（ソースコード購入は30日）
     - 送金リンクを受け付けたことのある注文は、支払い待ちでも7日
     - それ以外は状態ごと（ORDER_KEEP）。未払いは30分（ORDER_TTL）"""
@@ -2010,18 +2067,34 @@ def _order_keep(o: dict) -> float:
     return 7 * 86400 if o.get("link_code") else ORDER_KEEP.get(o["state"], ORDER_TTL)
 
 
+IN_MOTION = ("paying", "starting", "started")   # 確認中・開始処理中・実行中。掃除（期限切れの削除）の対象にしない
+
+
+def _expired(o: dict, now: float) -> bool:
+    """この注文を掃除してよいか。期限は「最後に状態が変わった時」から数える。
+    作成からの時間で数えると、何日か前の支払い済み注文を再実行したときに、動いている最中の注文を消してしまう。"""
+    if o["state"] in IN_MOTION:
+        return False
+    return now - float(o.get("touched") or o["created"]) > _order_keep(o)
+
+
 def _gc_orders() -> None:
     now = time.time()
     with _orders_lock:
+        for v in _orders.values():   # 状態が変わっていたら、その時刻を控える（ここが期限の起点）
+            if v.get("seen_state") != v["state"]:
+                if "seen_state" in v:
+                    v["touched"] = now
+                v["seen_state"] = v["state"]
         expiring = [(k, v.get("coupon")) for k, v in _orders.items()
-                    if v.get("coupon") and not v.get("coupon_used") and now - v["created"] > _order_keep(v)]
+                    if v.get("coupon") and not v.get("coupon_used") and _expired(v, now)]
     for k, c in expiring:   # 使われないまま消える注文（未払い・保留・要確認など）のクーポンは、使えるように戻す
         try:
             paypay_gateway.coupon_release(c, k)
         except Exception:
             pass
     with _orders_lock:
-        for k in [k for k, v in _orders.items() if now - v["created"] > _order_keep(v)]:
+        for k in [k for k, v in _orders.items() if _expired(v, now)]:
             del _orders[k]
 
 
@@ -2095,21 +2168,32 @@ def _reconcile_orders() -> None:
     - コード発行中に結果不明 → done 扱い（自動では再実行させない。管理画面で対応）"""
     changed = False
     issue_for = []
-    with _jobs_lock:
-        jobs = {k: (v.get("status"), v.get("error"), bool(v.get("outcome_unknown")), v.get("result") is not None) for k, v in _jobs.items()}
-        results = {k: (v.get("result"), bool(v.get("clone")), bool(v.get("dry"))) for k, v in _jobs.items() if v.get("result") is not None}
     stamp = time.strftime('%m/%d %H:%M')
+    progressed = False
     with _orders_lock:
-        for o in _orders.values():
+        # 実行の一覧は、注文のロックを持ったまま写す。先に写すと、その直後に始まった実行が写しに無く、
+        # 動いている注文を「中断」と見なして支払い済みに戻してしまう（＝同じ支払いで2回実行できてしまう）。
+        with _jobs_lock:
+            jobs = {k: (v.get("status"), v.get("error"), bool(v.get("outcome_unknown")), v.get("result") is not None) for k, v in _jobs.items()}
+            results = {k: (v.get("result"), bool(v.get("clone")), bool(v.get("dry"))) for k, v in _jobs.items() if v.get("result") is not None}
+            checkpoints = {k: v["checkpoint"] for k, v in _jobs.items() if v.get("checkpoint")}
+        for k_order, o in _orders.items():
             if o["state"] != "started":
                 continue
+            cp = checkpoints.get(o.get("job_id"))
+            if cp and cp != o.get("checkpoint"):   # 長い周回の途中経過を注文に写す（止まっても続きから再開できるように）
+                o["checkpoint"] = cp
+                progressed = True
             info = jobs.get(o.get("job_id"))
             if info and info[0] in ("running", "queued"):
                 continue
             if info and info[0] == "done":
                 o.update(state="done", arguments=None, transfer_key=None, diag=f"done {stamp}")
+                o.pop("checkpoint", None)
+                if not o.get("admin_free"):
+                    o["gate"] = True   # 結果は、評価と感想を受け取ってから渡す（_review_locked）
                 if not o.get("admin_free") and int(o.get("amount") or 0) >= COUPON_MIN and not o.get("coupon_issued"):
-                    issue_for.append(o)
+                    issue_for.append((k_order, o))
                 if o.get("job_id") in results:  # 発行されたコードを注文に残す（暗号化して保存。あとから開いても見られる）
                     o["result"], o["clone"], o["dry"] = results[o["job_id"]]
             elif info and (info[2] or info[3]):
@@ -2119,14 +2203,68 @@ def _reconcile_orders() -> None:
             else:
                 reason = str(info[1])[:80] if info else "中断（サーバー再起動など）"
                 o.update(state="paid", retry=True, job_id=None, diag=f"失敗→再実行可: {reason} {stamp}")
+                _carry_progress(o, interrupted=info is None)
             changed = True
-    for o in issue_for:   # 200円以上の購入にはクーポンを1枚発行（次回200円以上で10%引き・1回きり）
+    for k_order, o in issue_for:   # 200円以上の購入にはクーポンを1枚発行（次回200円以上で10%引き・1回きり）
         try:
-            o["coupon_issued"] = paypay_gateway.coupon_issue(_order_id_of(o), COUPON_DAYS)
+            o["coupon_issued"] = paypay_gateway.coupon_issue(k_order, COUPON_DAYS)
         except Exception:
             _log_orders.exception("coupon issue failed")
+    global _checkpoint_saved
     if changed:
         _persist_orders()
+    elif progressed and time.time() - _checkpoint_saved >= CHECKPOINT_SAVE_EVERY:
+        _checkpoint_saved = time.time()   # 途中経過だけの変化は、ときどきまとめて保存する（1周ごとには書かない）
+        _persist_orders()
+
+
+CHECKPOINT_SAVE_EVERY = 60     # 長い周回の途中経過をディスクに書く間隔（秒）。再起動で失うのは最大この時間ぶん
+AUTO_RESUME_MAX = 5            # 再起動で止まった長時間の注文を、自動で続きから始める回数の上限
+_checkpoint_saved = 0.0
+
+
+def _carry_progress(o: dict, interrupted: bool) -> None:
+    """実行が止まった注文に、次の実行のための「続き」を持たせる。呼び出し側で _orders_lock を持つこと。
+    - 途中経過（checkpoint）があれば、実行内容に resume として入れる（済んだメニュー・周回は繰り返さない）
+    - サーバーの再起動で止まった長時間の注文は、起動後に自動で続きから始める（お客さんの操作を待たない）"""
+    args = o.get("arguments")
+    if not _is_tsum_arguments(args) or (o.get("job") or {}).get("mode") != "puni":
+        return
+    if o.get("checkpoint"):
+        args[0]["resume"] = o["checkpoint"]
+    if interrupted and (o.get("job") or {}).get("long") and int(o.get("auto_resumed") or 0) < AUTO_RESUME_MAX:
+        o["auto_resume"] = True
+
+
+def _auto_resume_orders() -> None:
+    """起動のあと：再起動で止まった長時間の注文を、続きから始める。
+    デプロイは長時間の周回が終わるのを待たずに入れ替えるので、その続きをここで拾う。"""
+    time.sleep(8)   # ほかの準備（注文の読み込み・照合）が落ち着いてから
+    with _orders_lock:
+        targets = [o for o in _orders.values() if o.get("auto_resume") and o["state"] == "paid" and o.get("arguments") is not None]
+        for o in targets:
+            o.pop("auto_resume", None)
+            o["auto_resumed"] = int(o.get("auto_resumed") or 0) + 1
+    for o in targets:
+        try:
+            with app.app_context():
+                _start_paid_order(o)
+        except Exception:
+            _log_orders.exception("auto resume failed")
+    if targets:
+        _persist_orders()
+
+
+def _resume_note(o: dict):
+    """「続きから」のときに画面へ出す一言（例：120周まで完了）。途中経過が無ければ None。"""
+    cp = o.get("checkpoint") or {}
+    if cp.get("menu") == "puni_farm" and cp.get("done"):
+        return f"{int(cp['done'])}周まで完了"
+    if cp.get("menu") == "puni_unlimited" and cp.get("elapsed"):
+        return f"{int(cp['elapsed']) // 60}分ぶん完了"
+    if cp.get("finished"):
+        return f"{len(cp['finished'])}件のメニューが完了"
+    return None
 
 
 def _rescue_stranded_orders() -> None:
@@ -2185,6 +2323,7 @@ if _is_server_process():
     try:
         _reconcile_orders()  # 再起動で中断された実行を「支払い済み」に戻す
         _rescue_stranded_orders()
+        threading.Thread(target=_auto_resume_orders, daemon=True).start()   # 長時間の周回は、続きから自動で再開
     except Exception:
         _log_orders.exception("reconcile at startup failed")
 
@@ -2293,7 +2432,7 @@ def puni_page():
     menus = _service_menus(puni_service)
     return render_template_string(
         PUNI_HTML, menus=menus, modes=puni_service.MODE_LABELS, solo=list(puni_service.SOLO_MENUS),
-        stage_menus=list(puni_service.STAGE_MENUS),
+        stage_menus=list(puni_service.STAGE_MENUS), long_farm_laps=puni_service.LONG_FARM_LAPS,
         is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
         coupon_min=COUPON_MIN, uid=_uid(_owner()), version=APP_VERSION, total_steps=PUNI_TOTAL_STEPS, site=_site(),
     )
@@ -2413,6 +2552,15 @@ def api_cats_refresh():
 
 
 # ---------------------------------------------------------------- 9. 注文を作る
+def _json_body() -> dict:
+    """送られてきた JSON を辞書として受け取る。配列・文字列・数だけが送られてきても、空の辞書として扱う（500 にしない）。"""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+MAX_NUMBER_DIGITS = 12   # 数として受け付ける桁数。これより長い数字の並びは、変換せずに断る（巨大な数で固まらないように）
+
+
 def _clean_run_body(data):
     """/run に送られてきた内容の形をそろえる（画面以外から変な形で送られても、500 にしない）。"""
     if data is None:
@@ -2436,7 +2584,7 @@ def _clean_run_body(data):
 
 
 
-_PERIOD_BUSY = ("unpaid", "paying", "hold", "paid", "starting", "started")   # 期間チケットの注文が「進行中」とみなす状態
+_PERIOD_BUSY = ("paying", "starting", "started")   # 期間チケットの注文が「進行中」とみなす状態（失敗して止まったままの注文では塞がない）
 
 
 def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdown: list, summary: str,
@@ -2449,15 +2597,29 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
     base_amount = amount
     free_coupon = False
     coupon_kind = None
+    stale: list = []   # 同じクーポンを押さえている、この人の古い（まだ始まっていない）注文
+
+    def keep_old_orders() -> None:
+        """新しい注文でクーポンを使わないことになった → 古い注文がまたクーポンを使えるよう、押さえ直す。"""
+        for k in stale[:1]:
+            try:
+                paypay_gateway.coupon_reserve(coupon, k)
+            except Exception:  # noqa: BLE001
+                _log_orders.exception("coupon re-reserve failed")
+
+    def reject(body, status):
+        """注文を作らずに断る。古い注文は生かしたままにする（断ったのに前の注文まで消える、を防ぐ）。"""
+        keep_old_orders()
+        return body, status
+
     if coupon:
-        # 同じ人が支払う前に注文を作り直したとき：前の（未払いの）注文が押さえているクーポンを、新しい注文へ移す
+        # 同じ人が支払う前に注文を作り直したとき：前の（未払いの）注文が押さえているクーポンを、新しい注文へ移す。
+        # 先に押さえを外して確認し、新しい注文ができた時点で古い注文を閉じる（下の close_old_orders）。
         me0 = _owner()
         with _orders_lock:
             # 無料クーポン・期間チケットで開始に失敗したまま（お金は動いていない・一度も始まっていない）の注文も同じ扱い
-            stale = [k for k, o in _orders.items() if o["owner"] == me0 and o.get("coupon") == coupon and not o.get("coupon_used")
-                     and (o["state"] == "unpaid" or (o["state"] == "paid" and o.get("free_coupon") and not o.get("retry")))]
-            for k in stale:
-                _orders[k].update(state="dead", coupon=None, diag="superseded: クーポンを新しい注文へ移しました")
+            stale.extend(k for k, o in _orders.items() if o["owner"] == me0 and o.get("coupon") == coupon and not o.get("coupon_used")
+                         and (o["state"] == "unpaid" or (o["state"] == "paid" and o.get("free_coupon") and not o.get("retry"))))
         for k in stale:
             try:
                 paypay_gateway.coupon_release(coupon, k)
@@ -2467,7 +2629,7 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
         coupon_kind = paypay_gateway.coupon_kind(coupon) if ok else None
         if coupon_kind in ("free", "period"):
             if _draining():
-                return _updating_response()
+                return reject(*_updating_response())
             free_coupon = True
             amount = 0           # 1回無料（管理者発行・チケット）／期間無料チケット：金額に関係なく0円
             label = "期間無料チケット" if coupon_kind == "period" else "無料クーポン"
@@ -2476,25 +2638,25 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
             amount = base_amount * (100 - SUPPORT_COUPON_PCT) // 100   # 支援BOXのお礼：30%引き（最低金額なし）
             breakdown.append({"label": f"支援クーポン（{SUPPORT_COUPON_PCT}%引き）{coupon}", "count": 1, "unit": amount - base_amount, "coupon": True})
         else:
+            if not ok:   # 使えないコード（使用済み・期限切れ・見つからない）は、金額の条件より先に伝える
+                return reject(jsonify(error=why, code="coupon_invalid"), 400)
             if base_amount < COUPON_MIN:
-                return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
-            if not ok:
-                return jsonify(error=why, code="coupon_invalid"), 400
+                return reject(jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400)
             amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
             breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount, "coupon": True})
     me = _owner()
     trimmed_coupons = []
     with _orders_lock:
         # 期間チケットは1件ずつ順番に使う（使い回し・共有での同時大量注文を防ぐ）。確認と注文の作成を同じロックの中で行う
-        if coupon_kind == "period" and any(o.get("coupon") == coupon and o["state"] in _PERIOD_BUSY
-                                           and not (o["owner"] == me and o["state"] == "paid") for o in _orders.values()):
-            return jsonify(error="この期間チケットは、いま別のご注文で使用中です。その注文が終わると次の注文に使えます（1件ずつ順番に使えます）。",
-                           code="coupon_busy"), 409
+        if coupon_kind == "period" and any(o.get("coupon") == coupon and o["state"] in _PERIOD_BUSY for o in _orders.values()):
+            return reject(jsonify(error="この期間チケットは、いま別のご注文で使用中です。その注文が終わると次の注文に使えます（1件ずつ順番に使えます）。",
+                           code="coupon_busy"), 409)
         # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）。
         # 比べるのは「割引前の金額どうし」。今回のクーポンで安くなった金額と比べると、安い注文の支払いで
         # 高い注文が通ってしまう（しかもクーポンは使われずに残る）。
         credit = next((k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
                        if o["owner"] == me and o["state"] == "paid" and o.get("retry") and not o.get("product")
+                       and coupon_kind != "period"   # 期間チケットなら0円になる。以前の支払いは使わずに残す
                        and (int(o.get("base_amount") or o["amount"]) >= base_amount or o.get("free_coupon"))), None)
         if credit:
             o = _orders[credit]
@@ -2523,7 +2685,14 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
         if not paypay_gateway.coupon_reserve(coupon, order_id):   # 同時に2つの注文で使われないよう押さえる
             with _orders_lock:
                 _orders.pop(order_id, None)
-            return jsonify(error="このクーポンはすでに使われたか、ほかの注文で使用中です。", code="coupon_invalid"), 400
+            return reject(jsonify(error="このクーポンはすでに使われたか、ほかの注文で使用中です。", code="coupon_invalid"), 400)
+    if credit:
+        keep_old_orders()   # 以前の支払いを充てたので、今回のクーポンは使っていない
+    elif stale:
+        with _orders_lock:  # 新しい注文ができた → クーポンを移し終えた古い注文を閉じる
+            for k in stale:
+                if k in _orders and _orders[k]["state"] in ("unpaid", "paid"):
+                    _orders[k].update(state="dead", coupon=None, diag="superseded: クーポンを新しい注文へ移しました")
     if free_coupon and not credit:
         # 無料クーポン：支払いは無いので、そのまま「支払い済み」にして開始する（クーポンは開始時に使用済みになる）
         with _orders_lock:
@@ -2644,6 +2813,24 @@ def _new_puni_job(mode: str, menus: list) -> dict:
             "mode": "puni", "puni_mode": mode, "count": len(menus)}
 
 
+def _stop_requested() -> bool:
+    """実行中のプロセスの中で：お客さんが「途中で終了」を押したか（親プロセスからパイプで届く）。"""
+    global _stop_flag
+    if _stop_flag or _worker_pipe is None:
+        return _stop_flag
+    try:
+        while _worker_pipe.poll(0):
+            message = _worker_pipe.recv()
+            if isinstance(message, dict) and message.get("stop"):
+                _stop_flag = True
+    except (EOFError, OSError):
+        pass
+    return _stop_flag
+
+
+_stop_flag = False
+
+
 def _run_puni_order(data: dict, admin_free: bool):
     """ぷにぷに代行の注文を受け取る（/run のぷにぷに分）。支払い・実行枠はにゃんこ・ツムツムと共通。"""
     request_body = data.get("puni") or {}
@@ -2672,6 +2859,7 @@ def _run_puni_order(data: dict, admin_free: bool):
     payload = {"mode": mode, "login": login, "password": password,
                "menus": menus, "qty": qty, "stages": stages}
     job = _new_puni_job(mode, menus)
+    job["long"] = puni_service.is_long(menus, qty)   # 長時間の注文は専用の枠（長時間レーン）で動かす
     arguments = (payload,)
     transfer_key = hmac.new(app.secret_key.encode(), ("puni:" + login).encode(), hashlib.sha256).digest() if login else None
     if transfer_key is not None:
@@ -2695,6 +2883,9 @@ def run():
         return _run_tsum_order(data, admin_free)
     if isinstance(data.get("puni"), dict):
         return _run_puni_order(data, admin_free)
+    if not _rate_ok("run:" + _client_ip(), RUN_LIMIT, 600):   # 注文の作りすぎを止める（1件ごとに全注文を保存し直すため）
+        return _too_fast()
+    coupon_raw = data.get("coupon", "")   # 下で data を作り直す（バン保証・複製）前に控える。控えないと、クーポンが黙って無視される
     transfer = str(data.get("transfer", "")).strip()[:64]
     confirm = str(data.get("confirm", "")).strip()[:16]
     if bool(transfer) != bool(confirm):
@@ -2761,6 +2952,8 @@ def run():
     cat_settings = {}
     for raw_number, raw_setting in raw_cat_settings.items():
         try:
+            if len(str(raw_number)) > MAX_NUMBER_DIGITS:
+                raise ValueError
             number = int(raw_number)
         except (TypeError, ValueError):
             return jsonify(error="キャラ個別設定の番号が正しくありません。"), 400
@@ -2774,7 +2967,7 @@ def run():
             value = raw_setting.get(field)
             if value is None or str(value).strip() == "":
                 continue
-            if isinstance(value, bool) or not str(value).isascii() or not str(value).isdigit():
+            if isinstance(value, bool) or not str(value).isascii() or not str(value).isdigit() or len(str(value)) > MAX_NUMBER_DIGITS:
                 return jsonify(error=f"{number}番の{field}は整数で指定してください。"), 400
             value = int(value)
             if not low <= value <= high:
@@ -2795,7 +2988,7 @@ def run():
             sv = str(v).strip()
             if sv == "":
                 continue
-            if not (sv.isascii() and sv.isdigit()):
+            if not (sv.isascii() and sv.isdigit()) or len(sv) > MAX_NUMBER_DIGITS:
                 return jsonify(error=f"「{engine.type_label(k)}」の数量は0以上の整数で入力してください。"), 400
             n = int(sv)
             lim = engine.QUANTITY_ITEM_LIMITS.get(typed[0] if typed else k, 999)
@@ -2805,7 +2998,7 @@ def run():
     raw_pt = data.get("playtime_add_min")
     if not clone and not integrity_only and raw_pt not in (None, "", 0, "0"):
         sv = str(raw_pt).strip()
-        if not (sv.isascii() and sv.isdigit()):
+        if not (sv.isascii() and sv.isdigit()) or len(sv) > MAX_NUMBER_DIGITS:
             return jsonify(error="プレイ時間は半角の数字（分）で指定してください。"), 400
         pt = int(sv)
         if pt < PT_MIN_MINUTES:
@@ -2842,7 +3035,7 @@ def run():
     summary = _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))
     return _checkout(job, arguments, transfer_key, summary, skipped,
                      lambda: compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings),
-                     data.get("coupon", ""), admin_free)
+                     coupon_raw, admin_free)
 
 
 def _start_job(job: dict, arguments: tuple, transfer_key):
@@ -2856,9 +3049,8 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
     with _jobs_lock:
         if transfer_key is not None and transfer_key in _active_transfers:
             return jsonify(error="この引継ぎコードの処理はすでに実行中です。完了までお待ちください。"), 409
-        try:
-            slot = _slots.index(None)
-        except ValueError:
+        slot = _free_slot_locked(bool(job.get("long")))
+        if slot is None:
             if len(_pending_jobs) >= MAX_QUEUED_JOBS:
                 return jsonify(error="待機枠がいっぱいです。しばらくしてからもう一度お試しください。"), 429
             job["status"] = "queued"
@@ -2867,14 +3059,14 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
                 _active_transfers.add(transfer_key)
             _pending_jobs.append((job_id, arguments, transfer_key))
             return jsonify(job=job_id)
-        _slots[slot] = job_id
+        _set_slot_locked(slot, job_id)
         if transfer_key is not None:
             _active_transfers.add(transfer_key)
         _jobs[job_id] = job
         try:
             _launch_job(job_id, job, arguments, slot, transfer_key)
         except Exception:
-            _slots[slot] = None
+            _set_slot_locked(slot, None)
             _active_transfers.discard(transfer_key)
             del _jobs[job_id]
             return jsonify(error="処理を開始できませんでした。もう一度お試しください。"), 503
@@ -2902,7 +3094,11 @@ def _public_order(order_id: str, o: dict) -> dict:
             "puni": (o.get("job") or {}).get("mode") == "puni",   # ぷにぷに代行の注文
             "product": (o.get("product") or {}).get("type"),       # チケット・支援BOX（代行ではない買い物）
             "reviewed": bool(o.get("reviewed")),                    # 実績（星と感想）を書いたか
-            "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
+            "long": bool((o.get("job") or {}).get("long")),         # 長時間の周回（専用の枠で動く）
+            "resume": _resume_note(o) if o["state"] == "paid" else None,   # 続きから始められるときの一言
+            "result": o.get("result") if o["state"] == "done" and not o.get("dry") and not _review_locked(o) else None,
+            "locked": _review_locked(o),                            # 評価と感想を送ると、結果を渡す
+            "clone": bool(o.get("clone")),
             "coupon_issued": o.get("coupon_issued"),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
 
@@ -3051,6 +3247,10 @@ def _deliver_product(order: dict):
         order["state"] = "starting"
     order_id = _order_id_of(order)
     p = order["product"]
+    if not order_id:   # 注文が一覧から消えている（期限切れなど）。番号なしで発行すると、ほかの人と同じコードになってしまう
+        with _orders_lock:
+            order["state"] = "paid"
+        return jsonify(error="注文が見つかりません。画面を開き直してください。", code="order_missing"), 404
     if p["type"] == "source":   # クーポンではなく、ダウンロードの権利を渡す（購入から30日は番号で呼び戻せる）
         result = {"product": "source", "download": True, "version": APP_VERSION,
                   "expires": int(order["created"] + SOURCE_KEEP_DAYS * 86400)}
@@ -3125,7 +3325,7 @@ def _typical_order_price() -> int:
 
 @app.post("/api/ticket/order")
 def ticket_order():
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     plan = str(data.get("plan", ""))
     if plan == "once":
         return _create_product_order({"type": "ticket_once"}, int(PRICES["ticket_once"]), PRODUCT_LABELS["ticket_once"])
@@ -3183,7 +3383,7 @@ def source_download(order_id: str):
 
 @app.post("/api/support/order")
 def support_order():
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     try:
         amount = int(data.get("amount"))
     except (TypeError, ValueError, OverflowError):
@@ -3227,6 +3427,29 @@ def _save_review_words(raw: str) -> int:
     return len(words)
 
 
+def _review_locked(o: dict) -> bool:
+    """この注文の結果を、まだ渡さないか（評価と感想を待っている）。
+    - 対象は、ふつうに完了した代行の注文だけ（o["gate"]。途中で止まって結果が出た注文・チケット等・管理者の無料実行は対象外）
+    - 実績を書いた（reviewed）か、保存の不調が続いて免除した（review_waived）ら渡す
+    画面で隠すのではなく、サーバーが結果を返さない＝開発者ツールを使っても先には読めない。"""
+    return bool(site_config.REVIEWS_ENABLED and o.get("gate") and o["state"] == "done"
+                and o.get("result") is not None and not o.get("dry")   # 渡す結果があるときだけ
+                and not o.get("reviewed") and not o.get("review_waived"))
+
+
+def _job_review_locked(job_id: str, job: dict) -> bool:
+    """実行（/status）の結果を、まだ渡さないか。完了が注文に反映される前の一瞬も含めて、注文から判断する。"""
+    if not site_config.REVIEWS_ENABLED or job.get("status") != "done" or job.get("dry"):
+        return False
+    with _orders_lock:
+        o = next((v for v in _orders.values() if v.get("job_id") == job_id), None)
+        return bool(o and not o.get("admin_free") and not o.get("product")
+                    and not o.get("reviewed") and not o.get("review_waived"))
+
+
+REVIEW_SAVE_TRIES = 2   # 実績の保存にこの回数続けて失敗したら、書けなかった人にも結果を渡す（お店側の不調で止めない）
+
+
 def _order_shop(o: dict) -> str:
     """その注文がどの部門のものか（nyanko / tsum / puni）。"""
     mode = (o.get("job") or {}).get("mode")
@@ -3263,7 +3486,7 @@ def review_post():
     戻り値の saved は「保存したか」。対象の注文が無い・すでに書いた場合も ok（画面はコードの表示へ進める）。"""
     if not site_config.REVIEWS_ENABLED:
         return jsonify(error="not found"), 404
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     stars = data.get("stars")
     if type(stars) is not int or not 1 <= stars <= 5:
         return jsonify(error="星を1〜5で選んでください。", code="bad_stars"), 400
@@ -3290,11 +3513,20 @@ def review_post():
         return jsonify(ok=True, saved=False)
     try:
         saved = paypay_gateway.review_add(oid, shop, stars, text)
-    except Exception:  # noqa: BLE001  保存に失敗しても、お客さんのコード表示は止めない
+    except Exception:  # noqa: BLE001
         _log_orders.exception("review save failed")
         with _orders_lock:
+            waived = False
             if oid in _orders:
-                _orders[oid].pop("reviewed", None)
+                o = _orders[oid]
+                o.pop("reviewed", None)
+                o["review_fails"] = int(o.get("review_fails") or 0) + 1
+                waived = o["review_fails"] >= REVIEW_SAVE_TRIES
+                if waived:   # お店側の不調が続いた → 書けなかったお客さんにも結果を渡す
+                    o["review_waived"] = True
+        if waived:
+            _persist_orders()
+            return jsonify(ok=True, saved=False, waived=True)
         return jsonify(error="保存できませんでした。もう一度お試しください。", code="save_failed"), 503
     _persist_orders()
     return jsonify(ok=True, saved=saved)
@@ -3351,7 +3583,7 @@ def reviews_page():
 def qa():
     """FAQ Q&A チャット。各Shopの FAQ と、このお客様自身の注文状況だけを根拠に答える。
     鍵（ANTHROPIC_API_KEY）が無ければ固定文で案内する。"""
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     shop = str(data.get("shop", "")).strip()
     if shop not in ("nyanko", "tsum", "puni"):
         shop = "nyanko"
@@ -3386,7 +3618,8 @@ def my_orders():
                 continue
             if v["owner"] == me and v["state"] == "started" and v.get("job_id") in live:
                 items.append(dict(_public_order(k, v), job=v["job_id"]))
-            elif v["owner"] == me and v["state"] == "done" and (v.get("job_id") in live or (v.get("result") and not v.get("dry"))):
+            elif v["owner"] == me and v["state"] == "done" and (v.get("job_id") in live or (v.get("result") and not v.get("dry"))
+                                                               or _review_locked(v)):
                 items.append(dict(_public_order(k, v), job=v.get("job_id") if v.get("job_id") in live else None))
     items.sort(key=lambda x: -x["created"])
     return jsonify(orders=items, maint=_maint())
@@ -3448,12 +3681,21 @@ def _adopt_existing_link(order_id: str, order: dict) -> None:
         others = [(k, o) for k, o in _orders.items() if k != order_id and o.get("link_code") == code]
         if any(o["state"] in ("started", "paying", "starting", "done") for _, o in others):
             raise paypay_gateway.PayPayError("duplicate", "このリンクはすでに別の注文で使用されています。新しい送金リンクを作ってください。")
-    paypay_gateway.adopt_link(code, order_id, order["amount"])
-    with _orders_lock:  # 付け替えに成功したら、古い注文は無効にする（二重に実行させない）
-        for k, o in others:
-            o["state"] = "dead"
+        # 古い注文は、付け替える前に無効にする（確認と付け替えのあいだに古い注文が開始されると、同じ支払いで2回実行になる）
+        before = [(o, o["state"], o.get("diag")) for _, o in others]
+        for _, o in others:
+            o.update(state="dead", diag=f"superseded {time.strftime('%m/%d %H:%M')}")
+    try:
+        paypay_gateway.adopt_link(code, order_id, order["amount"])
+    except Exception:
+        with _orders_lock:   # 付け替えできなかった → 古い注文を元に戻す
+            for o, state, diag in before:
+                o["state"] = state
+                o["diag"] = diag
+        raise
+    with _orders_lock:
+        for _, o in others:
             o["link_code"] = None
-            o["diag"] = f"superseded {time.strftime('%m/%d %H:%M')}"
 
 
 RECHECK_WAIT = ("temporary_hold", "accept_uncertain", "accept_unconfirmed", "still_pending", "link_network", "link_check",
@@ -3517,9 +3759,11 @@ def _hold_watcher() -> None:
 
 def _pay_order(order_id: str):
     """PayPay送金リンクを受け取り、確認できたら実行を開始する。支払い済みなら再送不要で開始だけ再試行。"""
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     if _draining():
         return _updating_response()
+    if not _rate_ok("pay:" + _client_ip(), PAY_LIMIT, 600):
+        return _too_fast()
     with _orders_lock:
         order = _orders.get(order_id)
         if not order or order["owner"] != _owner():
@@ -3573,6 +3817,13 @@ def _pay_order(order_id: str):
             dead = mode == "recheck" and not hold
             with _orders_lock:
                 order["state"] = "dead" if dead else ("hold" if hold else "unpaid")
+                if order["state"] == "unpaid" and mode == "link" and exc.code != "duplicate":
+                    # 受け付けなかったリンクは注文に残さない（残すと、でたらめなリンク1つで注文が7日残り、クーポンも押さえ続ける）
+                    try:
+                        if paypay_gateway.link_order_id(order.get("link_code") or "") != order_id:
+                            order["link_code"] = None
+                    except Exception:  # noqa: BLE001
+                        pass
                 order["diag"] = f"{exc.code} {time.strftime('%m/%d %H:%M')}"
             return jsonify(error=exc.message, code=exc.code, hold=hold, uncertain=hold), 402
         except Exception:
@@ -3611,6 +3862,8 @@ def _start_paid_order(order: dict):
     if code != 200:
         with _orders_lock:
             order["state"] = "paid"  # 支払いは有効のまま。もう一度押せば再送金なしで開始できる
+            if order.get("coupon_used"):
+                order["retry"] = True   # クーポンは使用済みにしたあと。入力し直した注文にも、この支払いを充てられるようにする
     if code == 200:
         with _orders_lock:
             order["state"] = "started"
@@ -3633,8 +3886,9 @@ def status(job_id: str):
     _gc_jobs()
     with _jobs_lock:
         job = _jobs.get(job_id)
-        position = next((i for i, entry in enumerate(_pending_jobs, 1) if entry[0] == job_id), None)
-        slot_number = next((i for i, value in enumerate(_slots, 1) if value == job_id), None)
+        same_lane = [entry[0] for entry in _pending_jobs if _is_long(entry[0]) == _is_long(job_id)]
+        position = same_lane.index(job_id) + 1 if job_id in same_lane else None   # 同じ種類の待ちの中で何番目か
+        slot_number = next((i for i, value in enumerate(_slots + _long_slots, 1) if value == job_id), None)
         parallel = _parallel_state_locked()
         # Copy the mutable fields used below while holding the same lock as
         # worker updates and slot transitions.
@@ -3642,6 +3896,7 @@ def status(job_id: str):
     if not job or job.get("owner") != _owner():
         return jsonify(error="見つかりません（時間切れ、またはサーバーが再起動した可能性）"), 404
     end = job["finished"] or time.time()
+    locked = _job_review_locked(job_id, job)   # 完了したが、評価と感想がまだ → 結果は渡さない
     # 段取りの総数はメニューの種類で変わる（にゃんこ=4・ツムツム=6・ぷにぷに=10）。
     # 画面は自分の total_steps 定数で進捗バーを計算するが、API もモードに合った total を返す（P-16）。
     total_steps = {"tsum": TSUM_TOTAL_STEPS, "puni": PUNI_TOTAL_STEPS}.get(job.get("mode"), TOTAL_STEPS)
@@ -3655,17 +3910,19 @@ def status(job_id: str):
         elapsed=round(end - job["created"], 1),
         log=job["log"], warn=job["warn"], report=job["report"], dry=job["dry"], clone=job["clone"],
         outcome_unknown=job.get("outcome_unknown", False),
-        result=job["result"], error=job["error"], integrity=job.get("integrity"), integrity_only=job.get("integrity_only", False),
+        result=None if locked else job["result"], result_locked=locked,
+        error=job["error"], integrity=job.get("integrity"), integrity_only=job.get("integrity_only", False),
         audit=job.get("audit"),
         repair=job.get("repair"), post_audit=job.get("post_audit"),
-        tsum=job.get("tsum"), captcha=job.get("captcha"), puni=job.get("puni"),
+        tsum=None if locked else job.get("tsum"), captcha=job.get("captcha"), puni=None if locked else job.get("puni"),
+        long=bool(job.get("long")), stopping=bool(job.get("stopping")),
     )
 
 
 @app.post("/api/jobs/<job_id>/captcha")
 def job_captcha(job_id: str):
     """ツムツム代行の画像認証（CAPTCHA）の答えを、実行中のプロセスへ渡す。"""
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     text = str(data.get("text", "")).strip()[:32]
     if not text:
         return jsonify(error="画像に出ている文字を入力してください。"), 400
@@ -3687,6 +3944,30 @@ def job_captcha(job_id: str):
         pipe.send({"captcha": text, "id": asked.get("id")})
     except (BrokenPipeError, EOFError, OSError):
         return jsonify(error="処理とつながっていません。もう一度実行してください。"), 409
+    return jsonify(ok=True)
+
+
+@app.post("/api/jobs/<job_id>/stop")
+def job_stop(job_id: str):
+    """長い周回を、お客さんが自分で途中で終わらせる。いまの1周が終わったところで正常に終了する。
+    順番待ちの実行は /cancel で取り消す（まだ何も始まっていない）。"""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        ok = bool(job and job.get("owner") == _owner())
+        status = job.get("status") if ok else None
+        mode = job.get("mode") if ok else None
+    if not ok:
+        return jsonify(error="処理が見つかりません。"), 404
+    if status != "running" or mode != "puni":
+        return jsonify(error="いまは途中で終了できません。", code="not_running"), 409
+    with _job_pipes_lock:
+        pipe = _job_pipes.get(job_id)
+    try:
+        if pipe is None:
+            raise OSError
+        pipe.send({"stop": True})
+    except (BrokenPipeError, EOFError, OSError):
+        return jsonify(error="処理とつながっていません。少し待ってからもう一度お試しください。"), 409
     return jsonify(ok=True)
 
 

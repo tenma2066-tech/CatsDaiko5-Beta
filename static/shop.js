@@ -134,16 +134,21 @@
       try { list = await myOrders(); } catch (e) { return; }
       /* 実行が始まった注文（保留の解除・別タブ・開き直し）→ まだ見ていなければ状況を開く */
       var live = list.find(function (o) { return o.job && o.state === "started" && !seenJobs().includes(o.job); });
-      if (live && !cfg.isBusy()) { if (!$("#payPanel").hidden && payOrder === live.order) { $("#payPanel").hidden = true; document.body.style.overflow = ""; } cfg.watch(live.job); }
+      if (live && !cfg.isBusy() && !($("#reviewPanel") && !$("#reviewPanel").hidden)) {   /* 評価の入力中は、画面を切り替えない */ if (!$("#payPanel").hidden && payOrder === live.order) { $("#payPanel").hidden = true; document.body.style.overflow = ""; } cfg.watch(live.job); }
       var box = $("#resumeList"); box.textContent = "";
       $("#s-resume").hidden = !list.length;
       list.forEach(function (o) {
         var d = el("div", "code"), t = el("div");
         t.append(el("small", null, STATE_JA[o.state] || o.state), el("strong", null, yen(o.amount) + "（注文 " + o.order + "）"));
-        if (o.state === "paid" && o.retry) t.append(el("small", null, "前回は実行できませんでした。お支払いは有効です（再送金は不要）。"));
+        if (o.state === "paid" && o.retry) t.append(el("small", null, o.resume
+          ? "途中で止まりました（" + o.resume + "）。お支払いは有効です。続きから実行できます（再送金は不要）。"
+          : "前回は実行できませんでした。お支払いは有効です（再送金は不要）。"));
         d.append(t);
         var b = el("button", "btn primary"); b.type = "button";
-        if (o.state === "done" && cfg.result.has(o)) {
+        if (o.state === "done" && o.locked && gateOn) {
+          b.textContent = "評価を書いて結果を見る";
+          b.addEventListener("click", function () { reviewThenShow(o); }); d.append(b);
+        } else if (o.state === "done" && cfg.result.has(o)) {
           b.textContent = cfg.result.label;
           b.addEventListener("click", function () { showResult(o); }); d.append(b);
         } else if (o.job && (o.state === "started" || o.state === "done")) {
@@ -154,7 +159,7 @@
           b.addEventListener("click", async function () { b.textContent = (await copyText(o.order)) ? "コピーしました。管理者に伝えてください" : "コピーできません"; });
           d.append(b);
         } else if (["unpaid", "hold", "paid"].includes(o.state)) {
-          b.textContent = o.state === "paid" ? "実行を開始する" : o.state === "hold" ? "状況を確認する" : "支払い画面を開く";
+          b.textContent = o.state === "paid" ? (o.resume ? "続きから実行する" : "実行を開始する") : o.state === "hold" ? "状況を確認する" : "支払い画面を開く";
           b.addEventListener("click", function () { openPay(o.order, o.amount, o.state); });
           d.append(b);
         }
@@ -221,38 +226,38 @@
       }
     }
 
-    /* ---------- 実績（評価と感想）：完了した注文は、送ってもらってから結果を見せる（全部門共通の決まり） ----------
-       入力欄は static/review.js。書いたかどうかはサーバーが注文ごとに覚えている（o.reviewed）ので、
-       画面を開き直しても・別の端末でも、まだなら同じように聞く。管理者の無料実行では聞かない。 */
-    var gateOn = !!(cfg.review && cfg.payments && !cfg.isAdmin && window.ReviewForm && $("#reviewPanel"));
-    function lockResult(on) {
-      $("#s-status").classList.toggle("rvlock", on);
-      ["#codes", "#resultLines"].forEach(function (q) { var e = $(q); if (e) e.inert = on; });   /* 読めない・コピーできない */
-    }
-    function openReview(order, job) {
-      window.ReviewForm($("#reviewForm"), { min: cfg.review.min, max: cfg.review.max, pastUrl: cfg.review.pastUrl,
+    /* ---------- 実績（評価と感想）：完了した注文の結果は、評価を受け取ってからサーバーが渡す ----------
+       サーバーは、評価がまだの注文の結果を返さない（/status は result_locked、注文一覧は locked）。
+       ここでは入力欄（static/review.js）を出し、送信できたら結果を取り直すだけ。画面側で隠しているわけではない。 */
+    var gateOn = !!(cfg.review && window.ReviewForm && $("#reviewPanel"));
+    function openReview(order, job, then) {
+      var form = window.ReviewForm($("#reviewForm"), { min: cfg.review.min, max: cfg.review.max, pastUrl: cfg.review.pastUrl,
         target: function () { return { order: order, job: job }; },
-        onDone: function () { $("#reviewPanel").hidden = true; document.body.style.overflow = ""; lockResult(false); loadResume(); } });
+        onDone: function () { resetReview(); if (then) then(); else loadResume(); } });
       $("#reviewPanel").hidden = false; document.body.style.overflow = "hidden";
+      form.focus();
     }
-    /* 実行が完了したときに呼ぶ。先に結果を隠し、その注文がまだ実績を書いていなければ入力欄を出す。 */
-    async function requireReview(job) {
-      if (!gateOn || !job) return;
-      lockResult(true);
-      var o = null;
-      for (var i = 0; i < 5 && !o; i++) {   /* 完了が注文に反映されるまで数秒かかることがある */
-        try { o = (await myOrders()).find(function (x) { return x.job === job && x.state === "done"; }); } catch (e) {}
-        if (!o) await new Promise(function (ok) { setTimeout(ok, 1500); });
-      }
-      if (!o || o.reviewed) { lockResult(false); return; }   /* 注文が見つからない（支払いなしの実行など）・もう書いてある */
-      openReview(o.order, job);
+    /* 実行が完了したが、結果が「評価待ち」で届かなかったとき。then＝送信後に結果を取り直す処理 */
+    function requireReview(job, then) { if (gateOn && job) openReview("", job, then); }
+    function resetReview() {
+      if ($("#reviewPanel")) $("#reviewPanel").hidden = true;
+      if ($("#payPanel").hidden) document.body.style.overflow = "";
     }
-    /* 一覧から完了注文の結果を開くとき */
+    /* 一覧の「評価を書いて結果を見る」：送信できたら、届くようになった結果をそのまま開く */
+    function reviewThenShow(o) {
+      openReview(o.order, o.job || "", async function () {
+        await loadResume();
+        try {
+          var fresh = (await myOrders()).find(function (x) { return x.order === o.order; });
+          if (fresh && cfg.result.has(fresh)) cfg.result.show(fresh);
+        } catch (e) {}
+      });
+    }
+    /* 一覧から完了注文の結果を開く。実行中の画面があるときは、取り違えないよう先にそちらを終わらせてもらう */
     function showResult(o) {
+      if (cfg.isBusy()) { alert("いま実行中の注文があります。完了してから、もう一度開いてください。"); return; }
       cfg.result.show(o);
-      if (gateOn && !o.reviewed) { lockResult(true); openReview(o.order, o.job || ""); }
     }
-    function resetReview() { if ($("#reviewPanel")) $("#reviewPanel").hidden = true; lockResult(false); }
 
     return { api: api, postJson: postJson, copyText: copyText, seenJobs: seenJobs, markSeen: markSeen,
              begin: begin, loadResume: loadResume, loadCoupon: loadCoupon,

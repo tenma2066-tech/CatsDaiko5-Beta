@@ -185,7 +185,7 @@ class RunOrderDispatch(unittest.TestCase):
         client = object()
         calls = []
 
-        def fake_action(c_mod, cli, menu, qty, stages, prog, log):
+        def fake_action(c_mod, cli, menu, qty, stages, prog, log, *more):
             calls.append(menu)
             return f"■ {puni_service.menu_label(menu)}：完了"
 

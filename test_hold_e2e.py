@@ -136,6 +136,11 @@ class HoldEndToEnd(unittest.TestCase):
         A._reconcile_orders()
         del A._jobs["JOB1"]  # 表示期限切れ・再起動
         mine = self.c.get("/api/orders/mine").get_json()["orders"]
+        # 完了した。結果は、評価と感想を送るまで渡さない（locked）→ 送ると届く
+        self.assertEqual((mine[0]["state"], mine[0]["locked"], mine[0]["result"]), ("done", True, None))
+        with patch.object(G, "review_add", return_value=True):
+            self.c.post("/api/reviews", json={"stars": 5, "text": "すぐに完了しました。案内も分かりやすくて安心でした。", "order": self.oid})
+        mine = self.c.get("/api/orders/mine").get_json()["orders"]
         self.assertEqual((mine[0]["state"], mine[0]["result"]["transfer"]), ("done", "NEWcode99"))
         self.assertEqual(self.pay(link=None)[0], 409)  # 完了後に同じ注文をもう一度は実行できない
 

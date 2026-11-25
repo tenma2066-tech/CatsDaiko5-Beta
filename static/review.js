@@ -60,7 +60,8 @@
       if (focus) btns[n - 1].focus();
       refresh();
     }
-    function length() { return area.value.replace(/[ \t　]{2,}/g, " ").trim().length; }
+    /* 絵文字なども1文字として数える（サーバーと同じ数え方） */
+    function length() { return Array.from(area.value.replace(/[ \t\u3000]{2,}/g, " ").trim()).length; }
     function refresh() {
       var n = length();
       left.className = n >= min ? "ok" : "";

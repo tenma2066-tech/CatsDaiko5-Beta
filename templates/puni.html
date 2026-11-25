@@ -102,11 +102,13 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .logbox{margin-top:10px;font-size:13px}
 .logbox summary{cursor:pointer;color:var(--muted);font-weight:700}
 .logbox pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10px;border-radius:10px;font-size:12.5px;line-height:1.6}
+#resumeList .code{flex-wrap:wrap}
+#resumeList .code>div{flex:1 1 100%;min-width:0}
 .code{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:2px solid var(--line);
   border-radius:12px;background:var(--soft);margin:8px 0}
 .code small{display:block;font-size:12px;color:var(--muted)}
 .code strong{font-size:17px;letter-spacing:.04em;word-break:break-all}
-.panel{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:9}
+.panel{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .panel[hidden]{display:none}
 .panel .inner{background:var(--panel);border:2px solid var(--line);border-radius:18px 18px 0 0;padding:16px;
   width:100%;max-width:640px;max-height:92vh;overflow:auto;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
@@ -116,8 +118,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .lines{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.75;margin:0 0 8px}
 .maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
 .foot{margin:24px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}
-/* 評価と感想を送るまで、結果は読めないようにする（static/shop.js の lockResult） */
-.rvlock #codes .code strong,.rvlock #resultLines{filter:blur(7px);-webkit-user-select:none;user-select:none;pointer-events:none}
+.longbox{margin:10px 0 0;padding:10px 12px;border:2px dashed var(--line);border-radius:12px}
 [hidden]{display:none!important}
 </style><link rel="stylesheet" href="/static/qa.css?v=2">
 </head><body>
@@ -138,7 +139,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
       <input type="checkbox" value="{{ m.key }}">
       <span>
         <b>{{ m.label }} <em>{{ m.amount }}円</em></b>
-        <small>{{ m.desc }}</small>
+        <small>{{ m.desc }}{% if m.key == 'puni_unlimited' %} <b>専用の枠で実行・画面を閉じてOK</b>{% elif m.key == 'puni_farm' %} <b>{{ long_farm_laps }}周以上は長時間メニュー（専用の枠・画面を閉じてOK）</b>{% endif %}</small>
         {% if m.value %}<span class="qty" hidden>
           <input type="text" inputmode="numeric" pattern="[0-9]*" placeholder="{{ m.value[0] }}〜{{ m.value[1] }}" data-min="{{ m.value[0] }}" data-max="{{ m.value[1] }}" aria-label="{{ m.label }}の数量">
           <button type="button" class="qmax">最大</button>
@@ -192,6 +193,10 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <h2>状況</h2>
   <p class="nowmsg" id="now">準備しています…</p>
   <div class="pbar"><i id="pbar"></i></div>
+  <div class="longbox" id="longBox" hidden>
+    <p class="note" style="margin:0 0 8px">⏳ 長時間メニューです。<b>この画面は閉じても大丈夫</b>です（専用の枠で動き続けます）。あとで「このブラウザの注文」か注文番号から、状況と結果を見られます。サーバーの更新で一時的に止まっても、<b>続きから自動で再開</b>します。</p>
+    <button class="btn" id="stopLong" type="button">ここで終了する</button>
+  </div>
   <p class="lines" id="resultLines"></p>
   <div id="codes"></div>
   <p class="okbox" id="coupBox" hidden></p>
@@ -248,8 +253,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="note" id="payOrderNo"></p>
 </div></div>
 
-<script src="/static/review.js?v=1"></script>
-<script src="/static/shop.js?v=3"></script>
+<script src="/static/review.js?v=2"></script>
+<script src="/static/shop.js?v=5"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
@@ -427,7 +432,17 @@ $('#go').addEventListener('click',async()=>{
 });
 
 /* ---------- 状況 ---------- */
-let pollFails=0;
+let pollFails=0, pollEvery=1500, isLong=false;
+$('#stopLong').addEventListener('click',async()=>{
+  if(!curJob) return;
+  if(!confirm('ここで終了しますか？\nいまの1周が終わったところで止まります。残りの周回ぶんの返金はありません。')) return;
+  $('#stopLong').disabled=true;
+  try{
+    const r=await fetch('/api/jobs/'+curJob+'/stop',{method:'POST'}); const j=await r.json().catch(()=>({}));
+    if(!r.ok){ alert(j.error||'終了できませんでした。'); $('#stopLong').disabled=false; return; }
+    $('#stopLong').textContent='終了を受け付けました（いまの1周が終わると止まります）';
+  }catch(e){ alert('通信できませんでした。'); $('#stopLong').disabled=false; }
+});
 function watch(job){
   if(!job) return;
   curJob=job; pollFails=0; markSeen(job);
@@ -438,13 +453,17 @@ function watch(job){
   $('#s-status').hidden=false; renderCart();
   $('#s-status').scrollIntoView({behavior:'smooth',block:'start'});
   if(timer) clearInterval(timer);
-  poll(); timer=setInterval(poll,1500);
+  pollEvery=1500; isLong=false; $('#longBox').hidden=true; $('#stopLong').disabled=false; $('#stopLong').textContent='ここで終了する';
+  poll(); timer=setInterval(poll,pollEvery);
 }
 function stopWatch(){ clearInterval(timer); timer=null; curJob=null; renderCart(); }
 async function poll(){
   if(!curJob) return;
   let j;
-  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json(); if(!r.ok) throw new Error(j.error||'not found'); pollFails=0; }
+  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json();
+    if(r.status===404){   /* 実行の記録はもう無い（完了から30分以上など）。待っても戻らないので、すぐ注文の一覧へ */
+      stopWatch(); $('#now').dataset.s='error'; $('#now').textContent='この実行の表示期限が過ぎました。下の「このブラウザの注文」から結果を確認できます。'; orders.loadResume(); return; }
+    if(!r.ok) throw new Error(j.error||'error'); pollFails=0; }
   catch(e){
     if(++pollFails>=20){
       stopWatch(); $('#now').dataset.s='error';
@@ -454,16 +473,24 @@ async function poll(){
   }
   const st=j.status;
   $('#now').dataset.s=st;
-  $('#now').textContent=st==='queued'?('順番待ちです（'+(j.queue_position||1)+'番目）。そのままお待ちください'):
-    st==='done'?'完了しました':st==='error'?('エラー：'+(j.error||'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
+  isLong=!!j.long;
+  $('#now').textContent=st==='queued'?(isLong?('長時間メニューの順番待ちです（'+(j.queue_position||1)+'番目）。前の方の周回が終わると自動で始まります。画面は閉じても大丈夫です')
+                                              :('順番待ちです（'+(j.queue_position||1)+'番目）。そのままお待ちください')):
+    st==='done'?'完了しました':st==='error'?('エラー：'+(j.error||'')+(PAYMENTS&&!j.outcome_unknown?'　※お支払いは有効です。下の「このブラウザの注文」から、続きを実行できます（再送金は不要）。':'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
+  $('#longBox').hidden=!(isLong&&(st==='running'||st==='queued'));
+  $('#stopLong').hidden=st!=='running';
+  $('#stopLong').disabled=!!j.stopping; if(j.stopping) $('#stopLong').textContent='終了を受け付けました（いまの1周が終わると止まります）';
+  /* 長時間の実行は、状況の確認をゆっくりに（何時間も1.5秒おきに問い合わせない） */
+  if(isLong&&st==='running'&&pollEvery!==6000){ pollEvery=6000; clearInterval(timer); timer=setInterval(poll,pollEvery); }
   const pct=st==='done'?100:Math.round(Math.min(1,(j.step||0)/TOTAL_STEPS)*100);
   $('#pbar').style.width=pct+'%'; $('#pbar').dataset.s=st;
   $('#log').textContent=(j.log||[]).join('\n');
   if(j.puni&&j.puni.lines&&j.puni.lines.length) $('#resultLines').textContent=j.puni.lines.join('\n');
+  if(st==='done'||st==='error') delete $('#codes').dataset.done;   /* 前に開いた別の注文の結果が残っていても、この実行の結果で描き直す */
   if(j.result&&j.result.puni_account) showAccounts(j.result.puni_account, st==='error');
   if(st==='done'||st==='error'){
     const job=curJob; stopWatch(); orders.loadCoupon(job); orders.loadResume();
-    if(st==='done') orders.requireReview(job);   /* 評価と感想を送ってもらってから、結果を見せる */
+    if(st==='done'&&j.result_locked) orders.requireReview(job,()=>watch(job));   /* 評価を送ると、サーバーが結果を渡す → 取り直して表示 */
     if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }
 }
@@ -495,10 +522,10 @@ function showAccounts(accounts, failed){
     });
   });
 }
-window.addEventListener('beforeunload',e=>{ if(curJob){ e.preventDefault(); e.returnValue=''; } });
+window.addEventListener('beforeunload',e=>{ if(curJob&&!isLong){ e.preventDefault(); e.returnValue=''; } });   /* 長時間メニューは閉じてよい */
 
 syncMode(); renderCart(); orders.loadResume();
 
 </script>
-<script src="/static/qa.js?v=1" data-shop="puni" defer></script>
+<script src="/static/qa.js?v=2" data-shop="puni" defer></script>
 </body></html>

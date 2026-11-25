@@ -91,11 +91,13 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .logbox{margin-top:10px;font-size:13px}
 .logbox summary{cursor:pointer;color:var(--muted);font-weight:700}
 .logbox pre{white-space:pre-wrap;word-break:break-word;background:var(--soft);padding:10px;border-radius:10px;font-size:12.5px;line-height:1.6}
+#resumeList .code{flex-wrap:wrap}
+#resumeList .code>div{flex:1 1 100%;min-width:0}
 .code{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:2px solid var(--line);
   border-radius:12px;background:var(--soft);margin:8px 0}
 .code small{display:block;font-size:12px;color:var(--muted)}
 .code strong{font-size:17px;letter-spacing:.04em;word-break:break-all}
-.panel{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:9}
+.panel{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .panel[hidden]{display:none}
 .panel .inner{background:var(--panel);border:2px solid var(--line);border-radius:18px 18px 0 0;padding:16px;
   width:100%;max-width:640px;max-height:92vh;overflow:auto;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
@@ -109,8 +111,6 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .flowbox{padding:12px 14px}.flowbox summary{cursor:pointer;font-size:15px}
 .flowbox img{display:block;width:100%;height:auto;margin-top:10px;border-radius:12px}
 .foot{margin:24px 0 8px;text-align:center;font-size:12.5px;color:var(--muted);line-height:1.9}
-/* 評価と感想を送るまで、結果は読めないようにする（static/shop.js の lockResult） */
-.rvlock #codes .code strong,.rvlock #resultLines{filter:blur(7px);-webkit-user-select:none;user-select:none;pointer-events:none}
 [hidden]{display:none!important}
 </style><link rel="stylesheet" href="/static/qa.css?v=2">
 </head><body>
@@ -242,8 +242,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <div class="row"><button class="btn primary" id="capGo" type="button">送信する</button></div>
 </div></div>
 
-<script src="/static/review.js?v=1"></script>
-<script src="/static/shop.js?v=3"></script>
+<script src="/static/review.js?v=2"></script>
+<script src="/static/shop.js?v=5"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
@@ -402,7 +402,10 @@ function stopWatch(){ clearInterval(timer); timer=null; curJob=null; closeCaptch
 async function poll(){
   if(!curJob) return;
   let j;
-  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json(); if(!r.ok) throw new Error(j.error||'not found'); pollFails=0; }
+  try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json();
+    if(r.status===404){   /* 実行の記録はもう無い（完了から30分以上など）。待っても戻らないので、すぐ注文の一覧へ */
+      stopWatch(); $('#now').dataset.s='error'; $('#now').textContent='この実行の表示期限が過ぎました。下の「このブラウザの注文」から結果を確認できます。'; orders.loadResume(); return; }
+    if(!r.ok) throw new Error(j.error||'error'); pollFails=0; }
   catch(e){
     if(++pollFails>=20){   /* 30秒つながらない（再起動など）→ 注文一覧から結果を拾い直す */
       stopWatch(); $('#now').dataset.s='error';
@@ -419,10 +422,11 @@ async function poll(){
   $('#log').textContent=(j.log||[]).join('\n');
   if(j.tsum&&j.tsum.lines&&j.tsum.lines.length) $('#resultLines').textContent=j.tsum.lines.join('\n');
   if(j.captcha&&j.captcha.image) openCaptcha(j.captcha); else closeCaptcha();
+  if(st==='done'||st==='error') delete $('#codes').dataset.done;   /* 前に開いた別の注文の結果が残っていても、この実行の結果で描き直す */
   if(j.result) showCodes(j.result, st==='error');
   if(st==='done'||st==='error'){
     const job=curJob; stopWatch(); orders.loadCoupon(job); orders.loadResume();
-    if(st==='done') orders.requireReview(job);   /* 評価と感想を送ってもらってから、結果を見せる */
+    if(st==='done'&&j.result_locked) orders.requireReview(job,()=>watch(job));   /* 評価を送ると、サーバーが結果を渡す → 取り直して表示 */
     if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }
 }
@@ -487,5 +491,5 @@ $('#capGo').addEventListener('click',async()=>{
 syncMode(); renderCart(); orders.loadResume();
 
 </script>
-<script src="/static/qa.js?v=1" data-shop="tsum" defer></script>
+<script src="/static/qa.js?v=2" data-shop="tsum" defer></script>
 </body></html>

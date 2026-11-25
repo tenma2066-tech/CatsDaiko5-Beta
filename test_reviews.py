@@ -217,7 +217,7 @@ class PublicPage(Base):
             self.assertEqual(self.c.post("/api/reviews", json={"stars": 5, "text": GOOD}).status_code, 404)
             self.assertNotIn("rvbar\" href", self.c.get("/").get_data(as_text=True))
             self.assertNotIn("/reviews", self.c.get("/sitemap.xml").get_data(as_text=True))
-            self.assertIn("const REVIEWS_ON=false&&", self.c.get("/nyanko").get_data(as_text=True))
+            self.assertIn("const REVIEWS_ON=false;", self.c.get("/nyanko").get_data(as_text=True))
         self.assertIn("/reviews", self.c.get("/sitemap.xml").get_data(as_text=True))
 
 

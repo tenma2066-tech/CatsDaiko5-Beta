@@ -431,6 +431,11 @@ class OrderFlow(unittest.TestCase):
         del self.jobs["JK"]  # 30分たってサーバーの表示から消えた（または再起動した）
         mine = self.c.get("/api/orders/mine").get_json()["orders"]
         self.assertEqual(mine[0]["state"], "done")
+        # 結果は、評価と感想を送るまで渡さない（locked）→ 送ると届く
+        self.assertEqual((mine[0]["locked"], mine[0]["result"]), (True, None))
+        with patch.object(G, "review_add", return_value=True):
+            self.c.post("/api/reviews", json={"stars": 5, "text": "すぐに完了しました。案内も分かりやすくて安心でした。", "order": j["order"]})
+        mine = self.c.get("/api/orders/mine").get_json()["orders"]
         self.assertEqual(mine[0]["result"]["transfer"], "KEEPcode1")
         self.assertIsNone(mine[0]["job"])
         self.assertEqual(A.app.test_client().get("/api/orders/mine").get_json()["orders"], [])  # 他人には見えない
