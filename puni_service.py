@@ -148,6 +148,21 @@ MENUS = {
     "puni_coin_gacha":  {"label": "コインガチャ回し切り", "price": "puni_coin_gacha",
                          "desc": "開催中の「まわし放題ガチャ」を回し切り。",
                          "order": 60},
+    "puni_coin_gacha_normal": {"label": "通常コインガチャ回し切り", "price": "puni_coin_gacha_normal",
+                               "desc": "手持ちコインで通常ガチャを引き切り。",
+                               "order": 61},
+    "puni_missions":    {"label": "ミッション報酬まとめ受取", "price": "puni_missions",
+                         "desc": "受け取れるミッション報酬をまとめて受け取り。",
+                         "order": 62},
+    "puni_presents":    {"label": "プレゼント（郵便）まとめ受取", "price": "puni_presents",
+                         "desc": "受け取れる郵便をまとめて受け取り。",
+                         "order": 63},
+    "puni_deck":        {"label": "最強編成にする", "price": "puni_deck",
+                         "desc": "手持ちの攻撃力が高い5体に編成し直し。",
+                         "order": 64},
+    "puni_level_open":  {"label": "編成妖怪のレベル上限解放", "price": "puni_level_open",
+                         "desc": "編成中の妖怪のレベル上限を Yマネーで解放。",
+                         "order": 65},
     "puni_stage_clear": {"label": "ステージクリア（単発）", "price": "puni_stage_clear",
                          "desc": "指定ステージを1回クリア。",
                          "order": 70},
@@ -693,7 +708,56 @@ def _run_action(c_mod, client, menu: str, qty: dict, stages: dict,
         except c_mod.VipUnavailable as exc:
             raise RuntimeError(str(exc))
         return f"■ {label}：完了（{name} を {cnt} 連・妖怪 {len(ids)} 体）"
+    if menu == "puni_coin_gacha_normal":
+        prog.update(5, "通常コインガチャを回し中…", force=True)
+        got = client.pull_coin_gachas()
+        pulls = sum(len(ids) for _coin, _gid, ids in got)
+        return f"■ {label}：完了（{len(got)} 回・妖怪 {pulls} 体）"
+    if menu == "puni_missions":
+        prog.update(5, "ミッション報酬を受け取り中…", force=True)
+        got = client.receive_missions()
+        return f"■ {label}：完了（{len(got)} 件 受け取り）"
+    if menu == "puni_presents":
+        prog.update(5, "プレゼント（郵便）を受け取り中…", force=True)
+        got = client.receive_presents()
+        return f"■ {label}：完了（{len(got)} 件 受け取り）"
+    if menu == "puni_deck":
+        prog.update(5, "最強編成に組み直し中…", force=True)
+        result, _old, new = client.sort_deck()
+        if result == "same":
+            return f"■ {label}：完了（すでに最強編成）"
+        if result != 0:
+            raise RuntimeError(f"編成の変更に失敗しました（rc={result}）")
+        return f"■ {label}：完了（{len(new)} 体を編成）"
+    if menu == "puni_level_open":
+        prog.update(5, "編成妖怪のレベル上限を解放中…", force=True)
+        opened, spent = _open_deck_levels(client)
+        if opened == 0:
+            return f"■ {label}：完了（解放できる段はありませんでした）"
+        return f"■ {label}：完了（{opened} 体解放・Yマネー {spent:,} 消費）"
     raise RuntimeError(f"未知のメニュー: {menu}")
+
+
+def _open_deck_levels(client) -> tuple[int, int]:
+    """編成中（デッキ1）の妖怪について、Yマネーで払えるレベル上限解放を試みる。
+    戻り値は (解放できた体数, 使ったYマネー合計)。
+    妖怪の現在レベルはセーブの ywp_user_youkai（行: 妖怪ID|レベル|…）から読む。"""
+    deck, _hp = client.current_deck()
+    levels = {}
+    for y in client.youkai():
+        raw = y.get("raw") or []
+        if len(raw) > 1 and str(raw[1]).isdigit():
+            levels[str(y.get("id"))] = int(raw[1])
+    opened, spent = 0, 0
+    for yid in deck:
+        lvl = levels.get(str(yid))
+        if lvl is None:
+            continue
+        result, paid = client.open_level(int(yid), lvl)
+        if result == "ok":
+            opened += 1
+            spent += int(paid or 0)
+    return opened, spent
 
 
 def _create_accounts(c_mod, menu: str, count: int, prog: _Progress, log) -> tuple[list, str]:

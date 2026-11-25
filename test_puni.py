@@ -322,6 +322,69 @@ class BattleCodes(unittest.TestCase):
         client.buy_hitodama.assert_called_once()
 
 
+class NewMenus(unittest.TestCase):
+    """追加メニュー（通常ガチャ・ミッション・プレゼント・最強編成・レベル解放）の実行分岐。"""
+
+    def _run(self, menu, client):
+        prog = puni_service._Progress(None)
+        return puni_service._run_action(mock.MagicMock(), client, menu, {}, {}, prog, lambda _t: None)
+
+    def test_normal_coin_gacha(self):
+        c = mock.MagicMock()
+        c.pull_coin_gachas.return_value = [("c1", "g1", [1, 2]), ("c1", "g1", [3])]
+        line = self._run("puni_coin_gacha_normal", c)
+        self.assertIn("完了", line)
+        self.assertIn("3 体", line)   # 2+1 体
+
+    def test_missions(self):
+        c = mock.MagicMock()
+        c.receive_missions.return_value = [1, 2, 3, 4]
+        self.assertIn("4 件", self._run("puni_missions", c))
+
+    def test_presents(self):
+        c = mock.MagicMock()
+        c.receive_presents.return_value = [{"seq": 1}, {"seq": 2}]
+        self.assertIn("2 件", self._run("puni_presents", c))
+
+    def test_deck_already_strongest(self):
+        c = mock.MagicMock()
+        c.sort_deck.return_value = ("same", ["1", "2"], ["1", "2"])
+        self.assertIn("すでに最強", self._run("puni_deck", c))
+
+    def test_deck_changed(self):
+        c = mock.MagicMock()
+        c.sort_deck.return_value = (0, ["1"], ["9", "8", "7"])
+        self.assertIn("3 体を編成", self._run("puni_deck", c))
+
+    def test_deck_failure_raises(self):
+        c = mock.MagicMock()
+        c.sort_deck.return_value = (4, ["1"], ["2"])
+        with self.assertRaises(RuntimeError):
+            self._run("puni_deck", c)
+
+    def test_level_open(self):
+        c = mock.MagicMock()
+        c.current_deck.return_value = (["10", "20"], {})
+        c.youkai.return_value = [{"id": 10, "raw": ["10", "9"]}, {"id": 20, "raw": ["20", "50"]}]
+        c.open_level.side_effect = [("ok", 10), ("skip:上限", 0)]
+        line = self._run("puni_level_open", c)
+        self.assertIn("1 体解放", line)
+        self.assertIn("10", line)
+
+    def test_level_open_none(self):
+        c = mock.MagicMock()
+        c.current_deck.return_value = (["10"], {})
+        c.youkai.return_value = [{"id": 10, "raw": ["10", "50"]}]
+        c.open_level.return_value = ("skip:上限", 0)
+        self.assertIn("解放できる段はありません", self._run("puni_level_open", c))
+
+    def test_all_new_menus_priced(self):
+        import pricing
+        for k in ("puni_coin_gacha_normal", "puni_missions", "puni_presents", "puni_deck", "puni_level_open"):
+            self.assertIn(k, puni_service.MENUS)
+            self.assertIn(puni_service.MENUS[k]["price"], pricing.PRICES)
+
+
 class StageExistence(unittest.TestCase):
     """P-08：ステージIDのマスタ照合。"""
 

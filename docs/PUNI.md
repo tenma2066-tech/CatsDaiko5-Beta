@@ -60,6 +60,20 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
 - `test_puni.py` 30 passed
 - 回帰：`test_puni test_seo test_order_flow test_price_parity test_tsum test_ui_results` → 155 passed / 14 skipped（capture off）。にゃんこ・ツムツム無傷
 
+### 2026-11-26（追加）ぷにメニュー5種を追加
+
+ライブAPIでプレイヤー操作を自動化する自己完結メニュー（値の直接セットは不可の方針）。
+エンジン関数に1対1で対応：
+- 通常コインガチャ回し切り（`pull_coin_gachas`・50円）
+- ミッション報酬まとめ受取（`receive_missions`・30円）
+- プレゼント（郵便）まとめ受取（`receive_presents`・30円）
+- 最強編成にする（`sort_deck`・30円）
+- 編成妖怪のレベル上限解放（`open_level`×デッキ・50円／`_open_deck_levels` ヘルパー）
+
+いずれも email ログイン・追加入力なし。UI はトークン共通なので MENUS 追加で自動表示。
+テスト9件追加（`NewMenus`）。料金はブラウザとサーバ一致を確認（missions+presents+deck=90円）。
+にゃんこ・ツムは無変更（pricing は追加キーのみ）。
+
 ### 2026-11-26 注文の復旧と保存の信頼性
 
 **復旧契約（claim/forget）の整合**

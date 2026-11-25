@@ -13,7 +13,9 @@ PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other":
           "tsum_nickname": 50, "tsum_box": 100, "tsum_premium": 100, "tsum_guest_create": 30,
           # ぷにぷに代行（3つ目の大メニュー）
           "puni_account": 50, "puni_aged": 100, "puni_farm_10": 50, "puni_hour": 100,
-          "puni_hitodama": 50, "puni_coin_gacha": 60, "puni_stage_clear": 50}
+          "puni_hitodama": 50, "puni_coin_gacha": 60, "puni_stage_clear": 50,
+          "puni_coin_gacha_normal": 50, "puni_missions": 30, "puni_presents": 30,
+          "puni_deck": 30, "puni_level_open": 50}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
                 "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
                 "restart": "初期垢作成（リスタートパック・基本料金）",
@@ -27,7 +29,9 @@ PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "
                 "puni_account": "ぷに：アカウント作成（1件）", "puni_aged": "ぷに：久垢作成（1件）",
                 "puni_farm_10": "ぷに：自動周回（10周ごと）", "puni_hour": "ぷに：回し放題（1時間ごと）",
                 "puni_hitodama": "ぷに：ひとだま補充", "puni_coin_gacha": "ぷに：コインガチャ回し切り",
-                "puni_stage_clear": "ぷに：ステージクリア（1マップ単発）"}
+                "puni_stage_clear": "ぷに：ステージクリア（1マップ単発）",
+                "puni_coin_gacha_normal": "ぷに：通常コインガチャ回し切り", "puni_missions": "ぷに：ミッション報酬受取",
+                "puni_presents": "ぷに：プレゼント受取", "puni_deck": "ぷに：最強編成", "puni_level_open": "ぷに：レベル上限解放"}
 PT_KEY = "プレイ時間+分"          # qty に入れる「プレイ時間を増やす（分）」の特別なキー
 PT_MIN_MINUTES = 60
 PT_MAX_MINUTES = 2147483647 // (30 * 60)   # セーブの上限（1/30秒単位の int）を超えない
