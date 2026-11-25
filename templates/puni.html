@@ -79,6 +79,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .warnbox{margin:8px 0 0;padding:9px 11px;border:2px solid var(--warn);border-radius:10px;background:var(--badbg);font-size:13px;line-height:1.7}
 .esthint{display:block;margin-top:4px;font-size:12px;color:var(--warn);font-weight:700}
 .acctnote{margin:0;padding:11px 13px;border:2px solid var(--line);border-radius:12px;background:var(--okbg);font-size:13px;line-height:1.75}
+.faq{margin-top:10px}.faq p{margin:0 0 12px;font-size:13.5px;line-height:1.7}.faq p:last-child{margin-bottom:0}.faq b{color:var(--ink)}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:2px solid var(--line);
   padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));z-index:5}
 .bar .in{max-width:640px;margin:0 auto;display:flex;gap:10px;align-items:center}
@@ -123,7 +124,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 
 <section id="s-menu" class="card">
   <h2>何をしますか？</h2>
-  <p class="note">メニューは複数まとめて選べます。アカウント作成・久垢作成はほかのメニューと同時に選べません。料金はメニュー1件ごと（周回は10周ごと／回し放題は1時間ごと）です。</p>
+  <p class="note">複数選べます（作成系は単独）。料金は周回10周ごと・回し放題1時間ごと。</p>
   <div class="menu" id="menuList">
   {% for m in menus %}
     <label data-key="{{ m.key }}">
@@ -148,24 +149,24 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 </section>
 
 <details class="card" id="s-notes">
-  <summary><b>⚠️ ご利用前の注意（タップで開く）</b></summary>
+  <summary><b>⚠️ ご利用前の注意（タップ）</b></summary>
   <div class="notice" style="margin-top:10px">
     <ul>
-      <li><b>アカウント停止のおそれ：</b>自動周回・自動作成はゲームの規約上、アカウントが停止される可能性があります。大切なアカウントでのご利用はお控えください。</li>
-      <li><b>アカウント作成のメールは受信できません：</b>「アカウント作成」「久垢作成」で発行するメールアドレスは使い捨てのため、<b>パスワードの再発行や確認メールの受信はできません</b>。お渡しするメールとパスワードは必ず控えてください。</li>
-      <li><b>周回・回し放題は時間がかかります：</b>周回数や指定時間に応じて、完了まで数分〜数時間かかります。画面は閉じても、注文番号から続きを確認できます。</li>
+      <li><b>アカウント停止のおそれ</b>：自動操作は規約上、停止の可能性があります。大切な垢での利用はお控えください。</li>
+      <li><b>作成メールは受信不可</b>：使い捨てのため再発行できません。お渡しするメール・パスワードは必ず控えてください。</li>
+      <li><b>周回・回し放題は時間がかかります</b>：画面を閉じても注文番号から続きを確認できます。</li>
     </ul>
   </div>
 </details>
 
 <section id="s-acct" class="card">
   <h2>アカウント</h2>
-  <p class="note" id="acctIntro">入力されたメールアドレス・パスワードは、代行の実行にだけ使い、画面やログには出しません。</p>
+  <p class="note" id="acctIntro">入力情報は実行にだけ使い、画面・ログには出しません。</p>
   <div class="modes" id="modeList">
-    <label><input type="radio" name="mode" value="email" checked><span><b>メールアドレスでログイン</b><small>LEVEL5 ID のメールアドレスとパスワードを入力してください。</small></span></label>
-    <label><input type="radio" name="mode" value="new"><span><b>新しいアカウントを作る</b><small>「アカウント作成」「久垢作成」を選んだときはこちらになります。作成後のメール・パスワードをお渡しします。</small></span></label>
+    <label><input type="radio" name="mode" value="email" checked><span><b>メールでログイン</b><small>LEVEL5 ID のメール・パスワード。</small></span></label>
+    <label><input type="radio" name="mode" value="new"><span><b>新しい垢を作る</b><small>作成系メニュー用。作成後の情報をお渡し。</small></span></label>
   </div>
-  <p class="acctnote" id="acctCreateNote" hidden>新しいアカウントを作成します。入力は不要です。完了後に<b>メールアドレスとパスワード</b>をこの画面でお渡しします（使い捨てメールのため再発行はできません。必ず控えてください）。</p>
+  <p class="acctnote" id="acctCreateNote" hidden>新しいアカウントを作成します（入力不要）。完了後に<b>メール・パスワード</b>をお渡しします。使い捨てメールのため再発行不可、必ず控えてください。</p>
   <label class="field" id="f-login"><span id="loginLabel">メールアドレス</span><input id="login" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"></label>
   <label class="field" id="f-pw"><span>パスワード</span><input id="password" type="password" autocomplete="off"></label>
   {% if payments and not is_admin %}<label class="field"><span>クーポン（任意・{{ coupon_min }}円以上のご注文で10%引き）</span><input id="coupon" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>{% endif %}
@@ -200,6 +201,18 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <label class="field"><span>注文番号</span><input id="claimNo" type="text" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="注文番号"></label>
   <p class="err" id="claimErr"></p>
   <div class="row"><button class="btn primary" id="claimGo" type="button">再開</button></div>
+</details>
+
+<details class="card" id="s-faq">
+  <summary><b>❓ よくある質問</b></summary>
+  <div class="faq">
+    <p><b>支払い方法は？</b><br>PayPayの送金リンクのみです。金額ちょうどのリンクを作って貼り付けてください。</p>
+    <p><b>どれくらいで終わる？</b><br>ガチャ・ひとだまは数分、周回・回し放題は内容により数分〜数時間です。画面を閉じても注文番号から続きを確認できます。</p>
+    <p><b>結果が消えた／見られない</b><br>「このブラウザの注文」か、控えた<b>注文番号</b>で再開できます。別の端末でも番号で確認できます。</p>
+    <p><b>注文を消したい</b><br>完了・停止・未払いの注文は「削除」で一覧から消せます（進行中・支払い済みは完了後に）。</p>
+    <p><b>返金は？</b><br>提供できなかった分は個別対応します。注文番号を添えてお問い合わせください。</p>
+    <p><b>アカウントは安全？</b><br>自動操作は規約上リスクがあります。大切なアカウントでの利用はお控えください。</p>
+  </div>
 </details>
 
 <div class="foot"><p>TN SHOP ／ お問い合わせ：X <b>@paysms1212</b></p><p>v{{ version }} ／ あなたの番号 {{ uid }}</p></div>
