@@ -1990,8 +1990,8 @@ function addDel(o,row){
 }
 async function forgetOrder(o){
   const msg=(o.state==='done'&&o.result)
-    ? 'この完了注文を一覧から削除します。コード（引継ぎコードなど）も見られなくなります。よろしいですか？'
-    : 'この注文を一覧から削除します。よろしいですか？';
+    ? 'この完了注文を一覧から消します。あとで注文番号を入れれば、コードをもう一度表示できます（完了から3日間）。よろしいですか？'
+    : 'この注文を一覧から消します（注文番号で元に戻せます）。よろしいですか？';
   if(!confirm(msg)) return;
   try{
     const r=await api('/api/orders/'+encodeURIComponent(o.order)+'/forget',{method:'POST'});
@@ -2065,7 +2065,10 @@ $('#claimGo').addEventListener('click',async()=>{
   try{
     const r=await api('/api/orders/'+encodeURIComponent(no)+'/claim',{method:'POST'}); const j=await r.json();
     if(!r.ok){ toast(j.error||'再開できませんでした'); return; }
-    closeHelp(); $('#claimNo').value=''; loadResume(); openPay(j.order,j.amount,j.breakdown,j.skipped,j.state);
+    closeHelp(); $('#claimNo').value=''; loadResume();
+    if(j.state==='done'&&j.result){ show('status'); openDone({result:j.result,clone:j.clone,coupon:j.coupon_issued}); }  /* 完了注文：コードを表示 */
+    else if(['unpaid','hold','paid'].includes(j.state)){ openPay(j.order,j.amount,j.breakdown,j.skipped,j.state); }  /* 支払い系だけ支払い画面 */
+    else { toast('注文を呼び戻しました'); }   /* dead など：一覧に表示 */
   }catch(e){ toast('接続できませんでした'); }
 });
 const draft0=restoreDraft();

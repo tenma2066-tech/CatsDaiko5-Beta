@@ -111,8 +111,92 @@ class OrderFlow(unittest.TestCase):
              patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JX")):
             self.assertEqual(self.c.post(f"/api/orders/{j['order']}/pay", json={"link": "x"}).status_code, 404)  # 元のブラウザは使えない
             self.assertEqual(other.post(f"/api/orders/{j['order']}/pay", json={"link": "x"}).get_json()["job"], "JX")
-        # 開始済みは再開対象外
+        # 実行中（started）は番号でも呼び戻せない
         self.assertEqual(other.post(f"/api/orders/{j['order']}/claim").status_code, 404)
+        # 完了（done）した注文は、結果の再表示のために番号で呼び戻せる。ただし再実行・再決済はできない。
+        A._orders[j["order"]].update(state="done", result={"transfer": "T1", "confirm": "1111"},
+                                     job_id=None, arguments=None)
+        third = A.app.test_client()
+        r2 = third.post(f"/api/orders/{j['order']}/claim")
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.get_json()["state"], "done")
+        self.assertEqual(r2.get_json()["result"]["transfer"], "T1")   # 別ブラウザで結果を再表示できる
+        self.assertEqual(third.post(f"/api/orders/{j['order']}/pay", json={"link": "x"}).status_code, 409)  # 完了済みは再決済不可
+
+    def test_forget_then_claim_recovers_done_result(self):
+        """一覧から消した完了注文も、注文番号で結果（引き継ぎ情報）を呼び戻せる。"""
+        j = self.order()
+        A._orders[j["order"]].update(state="done", result={"transfer": "R1", "confirm": "9"},
+                                     job_id=None, arguments=None)
+        self.assertEqual(self.c.post(f"/api/orders/{j['order']}/forget").status_code, 200)
+        self.assertTrue(A._orders[j["order"]]["hidden_by_owner"])
+        self.assertEqual(self.c.get("/api/orders/mine").get_json()["orders"], [])  # 消えた
+        other = A.app.test_client()
+        r = other.post(f"/api/orders/{j['order']}/claim")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["result"]["transfer"], "R1")                 # 結果が戻る
+        self.assertFalse(A._orders[j["order"]].get("hidden_by_owner"))             # 表示復活
+        self.assertEqual(other.get("/api/orders/mine").get_json()["orders"][0]["result"]["transfer"], "R1")
+
+    def test_in_flight_order_not_claimable(self):
+        """実行中・確認中（started/starting/paying）は番号でも呼び戻せない。"""
+        j = self.order()
+        other = A.app.test_client()
+        for st in ("started", "starting", "paying"):
+            A._orders[j["order"]]["state"] = st
+            self.assertEqual(other.post(f"/api/orders/{j['order']}/claim").status_code, 404, st)
+
+    def test_forget_blocks_active_orders(self):
+        """進行中・支払い済みは本人でも削除できない（お金が動くため）。"""
+        j = self.order()
+        for st in ("paid", "hold", "paying", "starting", "started"):
+            A._orders[j["order"]]["state"] = st
+            self.assertEqual(self.c.post(f"/api/orders/{j['order']}/forget").status_code, 409, st)
+
+    def test_persist_failure_keeps_state_and_flags(self):
+        """暗号化保存に失敗しても、状態は失われず、未保存の目印が立つ。次の成功で消える。"""
+        j = self.order()
+        A._orders[j["order"]].update(state="done", result={"transfer": "X"})
+        A._orders_unsaved = False
+        with patch.object(G, "save_orders", side_effect=G.PayPayError("missing_key", "no key")):
+            A._persist_orders()
+        self.assertTrue(A._orders_unsaved)
+        self.assertEqual(A._orders[j["order"]]["state"], "done")   # 状態は失われない
+        with patch.object(G, "save_orders"):
+            A._persist_orders()
+        self.assertFalse(A._orders_unsaved)
+
+    def test_persist_is_serialized(self):
+        """複数スレッドの保存が直列化され、重ならない（古い状態が新しい状態を上書きしない）。"""
+        import threading
+        import time
+        marks = []
+        lock = threading.Lock()
+
+        def slow_save(_snap):
+            with lock:
+                marks.append(("s", time.time()))
+            time.sleep(0.03)
+            with lock:
+                marks.append(("e", time.time()))
+
+        with patch.object(G, "save_orders", side_effect=slow_save), patch.object(G, "history_upsert"):
+            ts = [threading.Thread(target=A._persist_orders) for _ in range(4)]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+        # s/e が交互に並ぶ（直列）＝ 入れ子になっていない
+        kinds = [m[0] for m in marks]
+        self.assertEqual(kinds, ["s", "e"] * 4)
+
+    def test_interrupted_states_remap_on_load(self):
+        """再起動時の読み込みで、確認中/開始処理中の注文を安全な状態へ戻す。"""
+        self.assertEqual(A._order_from_json({"state": "paying", "link_code": "c"})["state"], "hold")
+        self.assertEqual(A._order_from_json({"state": "paying"})["state"], "unpaid")
+        s = A._order_from_json({"state": "starting"})
+        self.assertEqual(s["state"], "paid")
+        self.assertTrue(s["retry"])
 
     def test_admin_can_rescue_dead_order(self):
         j = self.order()

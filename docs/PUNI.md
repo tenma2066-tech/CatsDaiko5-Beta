@@ -60,6 +60,41 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
 - `test_puni.py` 30 passed
 - 回帰：`test_puni test_seo test_order_flow test_price_parity test_tsum test_ui_results` → 155 passed / 14 skipped（capture off）。にゃんこ・ツムツム無傷
 
+### 2026-11-26 注文の復旧と保存の信頼性
+
+**復旧契約（claim/forget）の整合**
+- 課題：`forget` の説明は「注文番号で戻せる」だが、`claim` は `VISIBLE`（unpaid/hold/paid/dead）
+  のみ対象で **done を呼び戻せなかった**。完了結果（引き継ぎ情報・アカウント）は done にあるため、
+  一覧から消すと二度と見られない矛盾があった。
+- 修正：`CLAIMABLE = VISIBLE + ("done",)`。完了注文も番号で呼び戻して結果を再表示できる。
+  `started/starting/paying`（実行・確認の最中）は引き続き呼び戻し不可。
+  - 認可：注文番号＝128bitの秘密（本人にしか表示されない）の所持を認可とする既存モデルを踏襲。
+    done の呼び戻しは「結果の閲覧」だけで、再実行・再決済は 409（paid 呼び戻しより低リスク）。
+  - 期限：done は `ORDER_KEEP["done"]`=3日で GC。呼び戻しは3日以内。
+  - 他人：`forget` は所有者のみ（他人は404）。`claim` は番号で所有権が移る既存挙動。
+  - `claim` は `hidden_by_owner` を解除（消しても番号で復活）。done の `job` が無い場合も安全にガード。
+  - UI：3Shop の削除確認を「注文番号で戻せます（完了から3日間）」に、claim 案内も結果再表示に言及。
+    にゃんこの claim は done のとき支払い画面でなく結果（コード）を開くよう修正。
+
+**保存の信頼性**
+- `save_orders` は既に原子的（mkstemp+fsync+os.replace）＝破損なし。問題は `_persist_orders` が
+  snapshot をロック外で保存し、**競合で古い snapshot が新しいものを上書き**しうる点（lost update）。
+- 修正：`_persist_lock` で snapshot→保存を直列化（後発の保存ほど新しい状態を書く）。保存は毎回
+  「全注文の最新スナップショット」なので、1回の失敗は次の状態変化でまとめて書き直される（自己修復）。
+  失敗時は `_orders_unsaved` フラグを立てる。支払いの正は PayPay 台帳（sqlite）側にあり、
+  orders.enc が落ちてもリンク・入金は台帳から復元できる。
+  - 注意：保存にスリープ付きリトライを入れると、1秒間隔の背景 `cleanup_loop`（reconcile）と競合して
+    started→paid の巻き戻しレースを誘発したため、スリープは入れない（単発保存＋自己修復）。
+- 二重実行・境界：`_start_paid_order` は `state=="paid"` をロック内で1回だけ掴む（同時押しでも二重起動
+  しない）。再起動時は `starting→paid(retry)`・`paying→hold/unpaid` に remap（`_order_from_json`）。
+  worker は親と一緒に死ぬので、中断ジョブの再実行＝二重実行にはならない。
+
+**テスト／CI**
+- `test_puni.py` を CI（ci.yml の Unit tests）に追加。
+- `test_order_flow.py` に復旧・保存の回帰を追加：forget→claim で done 結果を復旧／実行中は呼び戻し不可／
+  active は forget 不可／保存失敗で状態保持＋`_orders_unsaved`／`_persist_orders` の直列化／
+  再起動 remap。全体 392 passed・ruff clean・3画面コンソールエラーなし。
+
 ### 2026-11-25（追加2）全Shop共通の改善
 
 - **履歴削除**：`POST /api/orders/<id>/forget`（終端状態のみ・`hidden_by_owner`・管理台帳は保持）。

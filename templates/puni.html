@@ -197,7 +197,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 
 <details id="s-claim" class="card">
   <summary><b>画面を閉じた・別の端末で続けたい方へ</b></summary>
-  <p class="note">お支払い済みで止まってしまった注文は、<b>再送金なし</b>でもう一度実行できます。控えた<b>注文番号</b>を入れて「再開」を押してください。同じブラウザなら、上の「このブラウザの注文」に出ます。</p>
+  <p class="note">控えた<b>注文番号</b>で、支払い済み注文の<b>再実行（再送金なし）</b>や、<b>完了注文の結果（アカウント情報）の再表示</b>ができます（別の端末・一覧から消したあとでも）。</p>
   <label class="field"><span>注文番号</span><input id="claimNo" type="text" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="注文番号"></label>
   <p class="err" id="claimErr"></p>
   <div class="row"><button class="btn primary" id="claimGo" type="button">再開</button></div>
@@ -585,8 +585,8 @@ async function loadResume(){
 }
 async function forgetOrder(o,row){
   const msg=(o.state==='done'&&o.result)
-    ? 'この完了注文を一覧から削除します。結果（アカウント情報など）も見られなくなります。よろしいですか？'
-    : 'この注文を一覧から削除します。よろしいですか？';
+    ? 'この完了注文を一覧から消します。あとで注文番号を入れれば、結果（アカウント情報）をもう一度表示できます（完了から3日間）。よろしいですか？'
+    : 'この注文を一覧から消します（注文番号で元に戻せます）。よろしいですか？';
   if(!confirm(msg)) return;
   try{
     const r=await api('/api/orders/'+encodeURIComponent(o.order)+'/forget',{method:'POST'});

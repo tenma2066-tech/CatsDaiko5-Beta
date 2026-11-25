@@ -1928,6 +1928,9 @@ def _admin_page(msg):
 # ---------------------------------------------------------------- 注文（決済してから実行）
 _orders: dict[str, dict] = {}
 _orders_lock = threading.Lock()
+# 保存（暗号化してディスクへ）を直列化する。snapshot と書き込みを1つの単位にして、
+# 2スレッドの保存が競合して「古いスナップショットが新しいものを上書きする」のを防ぐ。
+_persist_lock = threading.Lock()
 
 
 ORDER_KEEP = {"hold": 7 * 86400, "paid": 7 * 86400, "paying": 7 * 86400, "starting": 7 * 86400, "dead": 7 * 86400, "started": 86400, "done": 3 * 86400}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
@@ -1991,16 +1994,29 @@ def _order_from_json(o: dict) -> dict:
     return out
 
 
+_orders_unsaved = False   # 直近の保存が失敗して未保存の変更が残っているか（監視用）
+
+
 def _persist_orders() -> None:
-    """注文を暗号化して保存する。失敗してもサービスは止めない（ログのみ）。"""
+    """注文を暗号化して保存する。失敗してもサービスは止めない（ログのみ）。
+
+    _persist_lock で直列化し、ロックの中で snapshot→保存まで行う。こうすると、
+    後から始まった保存ほど新しい状態を書くので、競合で古い状態に巻き戻らない（S2）。
+    保存は毎回「全注文の最新スナップショット」を書くので、1回失敗しても次の状態変化で
+    まとめて書き直される（自己修復）。支払いの正は PayPay 台帳（payments.sqlite3）側に
+    あるので、ここが落ちても入金・リンクは台帳から復元できる。"""
+    global _orders_unsaved
     if not PAYMENTS_ENABLED:
         return
-    with _orders_lock:
-        snapshot = {k: _order_to_json(v) for k, v in _orders.items()}
-    try:
-        paypay_gateway.save_orders(snapshot)
-    except Exception:
-        _log_orders.exception("order persistence failed")
+    with _persist_lock:
+        with _orders_lock:
+            snapshot = {k: _order_to_json(v) for k, v in _orders.items()}
+        try:
+            paypay_gateway.save_orders(snapshot)
+            _orders_unsaved = False
+        except Exception:
+            _orders_unsaved = True
+            _log_orders.exception("order persistence failed")
     try:
         paypay_gateway.history_upsert(_history_rows())
     except Exception:
@@ -2798,8 +2814,12 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
 
 RESUMABLE = ("unpaid", "hold", "paid")
 VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号を管理者に伝えられるよう表示する
+# 注文番号で呼び戻せる状態。完了（done）も含める＝一覧から消した／別のブラウザでも、
+# 番号を知っていれば完了注文の結果（引き継ぎ情報・アカウント）をもう一度表示できる。
+# started/starting/paying（実行・確認の最中）は呼び戻せない（番号の持ち主＝本人なので安全）。
+CLAIMABLE = VISIBLE + ("done",)
 # 利用者が自分の一覧から消せる状態（お金が動いていない・進行中でないものだけ）。
-# 管理台帳（PayPay）には残すので、消えるのは利用者の画面上の表示だけ。
+# 管理台帳（PayPay）には残すので、消えるのは利用者の画面上の表示だけ。消しても番号で呼び戻せる。
 FORGETTABLE = ("done", "dead", "unpaid")
 
 
@@ -2837,19 +2857,22 @@ def my_orders():
 
 @app.post("/api/orders/<order_id>/claim")
 def claim_order(order_id: str):
-    """注文番号で再開（別のブラウザ・Cookie消去後でも）。注文番号は推測できない長さの秘密の値。"""
+    """注文番号で呼び戻す（別のブラウザ・Cookie消去後・一覧から消したあとでも）。
+    完了注文なら結果（引き継ぎ情報・アカウント）をもう一度見られる。
+    注文番号は推測できない長さ（128bit）の秘密の値で、本人にしか表示されない。"""
     ip = _client_ip()
     if _too_many_fails("claim:" + ip):
         return jsonify(error="失敗が続いたので、10分ほど待ってください。", code="too_many_fails"), 429
     order_id = (order_id or "").strip()
     with _orders_lock:
         o = _orders.get(order_id)
-        if not o or o["state"] not in VISIBLE:
+        if not o or o["state"] not in CLAIMABLE:
             _fail.setdefault("claim:" + ip, []).append(time.time())
-            return jsonify(error="再開できる注文が見つかりません。番号を確認してください（実行開始済み・期限切れの注文は再開できません）。", code="order_missing"), 404
+            return jsonify(error="見つかりません。番号を確認してください（実行中・確認中・期限切れの注文は呼び戻せません）。", code="order_missing"), 404
         o["owner"] = _owner()
         o["uid"] = _uid(o["owner"])
-        o["job"]["owner"] = o["owner"]
+        if o.get("job"):
+            o["job"]["owner"] = o["owner"]
         o.pop("hidden_by_owner", None)   # 番号で呼び戻したら表示を復活させる
         out = _public_order(order_id, o)
     _persist_orders()
