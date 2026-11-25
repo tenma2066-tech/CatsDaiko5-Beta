@@ -79,7 +79,9 @@ TN SHOP は現在3部門：**にゃんこ**（`/nyanko`）・**ツムツム**（
 
 ## 7. 設定・デプロイ
 - `requirements.txt`：エンジンが要る依存だけ追記（重複は足さない）。
-- `fly.toml [env]`：`<DEPT>_DATA_DIR = "/data/<dept>"`（ツム・ぷにと同じく明示）。
+- 本番（VPS）：`deploy/vps/docker-compose.yml` の `environment:` に `<DEPT>_DATA_DIR: /data/<dept>`
+  （ツム・ぷにと同じく明示）。必要な鍵は `/opt/catsdaiko/.env` に書いて `${VAR}` で渡す。
+  ※本番は国内VPS（Caddy＋Docker）。`fly.toml` は移行済みの遺構。
 - 任意：`<DEPT>_SOCKS_URL`（送信元秘匿）・`<DEPT>_TOR_GAME_API`。
 
 ## 8. テスト `test_<dept>.py`（`test_puni.py` を複製）

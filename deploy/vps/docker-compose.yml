@@ -12,6 +12,10 @@ services:
       PAYPAY_DATA_DIR: /data/paypay
       PAYPAY_LEDGER_PATH: /data/paypay/payments.sqlite3
       TSUM_DATA_DIR: /data/tsum       # ツムツム代行の作業用（引き継ぎ情報の控え・バージョンのキャッシュ）
+      PUNI_DATA_DIR: /data/puni       # ぷにぷに代行の作業用（udkey・ログ・マスタのキャッシュ）
+      # Q&Aチャットの AI回答を使うなら、/opt/catsdaiko/.env に ANTHROPIC_API_KEY=sk-ant-... を書く。
+      # 未設定（空）なら AI は呼ばれず、固定のFAQ案内にフォールバックする。
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # LINEログインのIPローテーション。固定IPだと画像認証/reCAPTCHA が繰り返し出てログインできないことがある。
       # ホスト(Ubuntu)に入れた Tor を host.docker.internal（＝docker のホストゲートウェイ。この環境では
       # 192.168.0.1。remote-setup.sh が 0.0.0.0:9050 で待ち受けるのでゲートウェイIPに依存しない）:9050 経由で使い、

@@ -93,8 +93,9 @@ class EnabledPath(unittest.TestCase):
             r = qa_bot.answer("tsum", "支払いは？", [])
         self.assertTrue(r["enabled"])
         self.assertEqual(r["answer"], "PayPayのみ。")
-        self.assertEqual(cap["model"], "claude-haiku-5-5")
-        self.assertIn("FAQ", cap["system"])
+        self.assertEqual(cap["model"], "claude-haiku-5-5")       # Haiku 5.5
+        self.assertIn("サービスの仕組み", cap["system"])            # 仕組みの説明が根拠に入る
+        self.assertIn("選べるメニュー", cap["system"])             # 部門のメニュー一覧も入る
         self.assertEqual(cap["messages"][0]["role"], "user")
         self.assertEqual(cap["messages"][0]["content"], "支払いは？")
 

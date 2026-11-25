@@ -76,8 +76,11 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
 - レート制限：IPごと 10分で12問。
 - テスト `test_qa.py` 12件（SDKモック・無効時フォールバック・注入文の存在・例外時
   フォールバック・エンドポイント・他人注文の除外）を CI に追加。
-- この環境は Anthropic に到達不可（proxy は fly.io のみ）のため、**実APIの疎通は本番側**。
-  本番で `ANTHROPIC_API_KEY` を Fly secret に設定すると AI 回答が有効になる。
+- 開発環境は Anthropic に到達不可のため、**実APIの疎通は本番側**。
+  本番（国内VPS）で AI 回答を有効にするには、`/opt/catsdaiko/.env` に
+  `ANTHROPIC_API_KEY=sk-ant-...` を書く（`deploy/vps/docker-compose.yml` の
+  `environment:` に `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` を追加済み）。
+  未設定なら AI は呼ばれず固定FAQ案内のまま。※本番は **Fly.io ではなく VPS**（Fly は移行済み・手動のみ）。
 
 ### 2026-11-26（追加）ぷにメニュー5種を追加
 
@@ -161,9 +164,10 @@ TN SHOP の3つ目の大メニュー（妖怪ウォッチ ぷにぷに）の実�
 - **タイムアウト**：捨てメール/LEVEL5 登録は `requests timeout=30`。ゲームAPIはエンジンの
   `post_nhn`（timeout=30・retry）。HTTPは gunicorn `--timeout 120`。長時間ジョブは worker 別プロセスで
   走るため gunicorn のHTTPタイムアウトには当たらない。
-- **TLS/DNS**：Fly が TLS 終端（`force_https=true`）。送信元の秘匿は SOCKS 設定時のみ。未設定なら
+- **TLS/DNS**：本番は VPS（Caddy が TLS 終端・自動HTTPS）。送信元の秘匿は SOCKS 設定時のみ。未設定なら
   サーバーの固定IPで直結（tsum と同じ）。意図しない経路変更は無し（プロキシは明示設定のときだけ）。
-- **データ保全**：`PUNI_DATA_DIR=/data/puni`（Fly 永続ボリューム）。`fly.toml [env]` に明示追加。
+- **データ保全**：`PUNI_DATA_DIR=/data/puni`（VPS の `./data:/data` ボリューム）。本番は
+  `deploy/vps/docker-compose.yml` の `environment:` に明示（`fly.toml` は移行済みの遺構）。
   udkey/ログ/マスタはリポジトリ外。注文 payload（email/パスワード）は `orders.enc`（暗号化）。
   完了時に `_reconcile_orders` が `arguments=None` にしてパスワードを消す（P-01 最小化）。
 
