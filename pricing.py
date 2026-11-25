@@ -15,7 +15,9 @@ PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other":
           "puni_account": 50, "puni_aged": 100, "puni_farm_10": 50, "puni_hour": 100,
           "puni_hitodama": 50, "puni_coin_gacha": 60, "puni_stage_clear": 50,
           "puni_coin_gacha_normal": 50, "puni_missions": 30, "puni_presents": 30,
-          "puni_deck": 30, "puni_level_open": 50}
+          "puni_deck": 30, "puni_level_open": 50,
+          # チケット（クーポンコード式。全部門で使える）
+          "ticket_once": 1000, "ticket_day": 500, "ticket_unlimited": 9800}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
                 "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
                 "restart": "初期垢作成（リスタートパック・基本料金）",
@@ -31,13 +33,37 @@ PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "
                 "puni_hitodama": "ぷに：ひとだま補充", "puni_coin_gacha": "ぷに：コインガチャ回し切り",
                 "puni_stage_clear": "ぷに：ステージクリア（1マップ単発）",
                 "puni_coin_gacha_normal": "ぷに：通常コインガチャ回し切り", "puni_missions": "ぷに：ミッション報酬受取",
-                "puni_presents": "ぷに：プレゼント受取", "puni_deck": "ぷに：最強編成", "puni_level_open": "ぷに：レベル上限解放"}
+                "puni_presents": "ぷに：プレゼント受取", "puni_deck": "ぷに：最強編成", "puni_level_open": "ぷに：レベル上限解放",
+                "ticket_once": "チケット：1回なんでも無料", "ticket_day": "チケット：期間無料（1日・長いほど割安になる基準）",
+                "ticket_unlimited": "チケット：期間無料（無制限）"}
 PT_KEY = "プレイ時間+分"          # qty に入れる「プレイ時間を増やす（分）」の特別なキー
 PT_MIN_MINUTES = 60
 PT_MAX_MINUTES = 2147483647 // (30 * 60)   # セーブの上限（1/30秒単位の int）を超えない
 RESTART_KEY = "初期垢作成（リスタートパック）"   # others に入れる特別な項目
 COUPON_MIN = 200                  # 200円以上の購入で発行・利用
 COUPON_DAYS = 30
+
+# ---- チケット・支援BOX（docs/TICKETS.md）
+TICKET_MAX_DAYS = 30             # 期間チケットは 1〜30日。その上は「無制限」
+TICKET_CURVE = 0.7               # 期間の料金 = 1日の料金 × 日数^0.7（長いほど1日あたりが安い）
+TICKET_ONCE_DAYS = 180           # 1回無料チケットの有効期限
+SUPPORT_MIN = 100                # 支援BOX：100円から
+SUPPORT_MAX = 100000
+SUPPORT_COUPON_PCT = 30          # 1回の支援ごとに 30%引きクーポン
+SUPPORT_COUPON_DAYS = 90
+
+
+def ticket_period_price(days: int) -> int:
+    """期間チケットの料金。days=0 は無制限。10円単位に切り上げ、無制限の料金を超えない。"""
+    import math
+    unlimited = int(PRICES.get("ticket_unlimited", 0))
+    days = int(days)
+    if days == 0:
+        return unlimited
+    if not 1 <= days <= TICKET_MAX_DAYS:
+        raise ValueError("days")
+    raw = math.ceil(PRICES.get("ticket_day", 0) * days ** TICKET_CURVE / 10) * 10
+    return min(raw, unlimited) if unlimited else raw
 
 CRASH_ITEMS = ("ガマトトのクラッシュ修正", "オトート砲台のクラッシュ修正")
 

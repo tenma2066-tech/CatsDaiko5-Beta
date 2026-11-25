@@ -170,7 +170,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="acctnote" id="acctCreateNote" hidden>新しいアカウントを作成します（入力不要）。完了後に<b>メール・パスワード</b>をお渡しします。使い捨てメールのため再発行不可、必ず控えてください。</p>
   <label class="field" id="f-login"><span id="loginLabel">メールアドレス</span><input id="login" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"></label>
   <label class="field" id="f-pw"><span>パスワード</span><input id="password" type="password" autocomplete="off"></label>
-  {% if payments and not is_admin %}<label class="field"><span>クーポン（任意・{{ coupon_min }}円以上のご注文で10%引き）</span><input id="coupon" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>{% endif %}
+  {% if payments and not is_admin %}<label class="field"><span>クーポン・チケットコード（任意）</span><input id="coupon" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+  <p class="note" style="margin:-4px 0 8px;font-size:12.5px">NK-：{{ coupon_min }}円以上で10%引き／SP-（<a href="/support">支援BOX</a>のお礼）：30%引き／FR-・PS-（<a href="/ticket">チケット</a>）：0円</p>{% endif %}
   <p class="err" id="acctErr"></p>
 </section>
 

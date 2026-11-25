@@ -190,7 +190,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <label for="fcd">有効期限（日）</label><input id="fcd" name="days" inputmode="numeric" maxlength="3" value="30">
 <label for="fcn">メモ（任意・自分用。例：誰に渡したか）</label><input id="fcn" name="note" maxlength="60" placeholder="例：お詫び用">
 <button class="btn pri full" onclick="return confirm('1回だけ無料で使えるクーポンを発行します。よろしいですか？')">発行する</button></form>
-{% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code>{% if c.free %}<span class="chip ok">無料</span>{% endif %}<span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div>
+{% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code>{% if c.kind_ja %}<span class="chip ok">{{ c.kind_ja }}</span>{% endif %}<span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div>
 {% if c.free and c.note %}<div class="sub" style="font-size:12px">メモ：{{ c.note }}</div>{% endif %}
 {% if c.free and c.state_ja=='未使用' %}<form method="post" style="margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_revoke"><input type="hidden" name="code" value="{{ c.code }}"><button class="btn" style="padding:4px 10px;font-size:12px" onclick="return confirm('このクーポンを取り消します。よろしいですか？')">取り消す</button></form>{% endif %}</div>
 {% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div>

@@ -1,0 +1,458 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+{% if mode == 'ticket' %}
+<title>チケット購入｜何度でも無料・1回無料チケット｜TN SHOP</title>
+<meta name="description" content="TN SHOP の代行が1回まるごと無料になるチケットと、期間中ずっと無料になるチケット。クーポンコード式で全部門に使えます。">
+<link rel="canonical" href="{{ site }}/ticket">
+{% else %}
+<title>支援BOX｜TN SHOP の開発を応援する</title>
+<meta name="description" content="TN SHOP の開発・サーバー代を100円から支援できます。1回の支援ごとに30%引きクーポンをお送りします。">
+<link rel="canonical" href="{{ site }}/support">
+{% endif %}
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<meta name="theme-color" content="#ffd400">
+<style>
+:root{
+  --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
+  --accent:#ffc42e;--ok:#12a05c;--warn:#e08a00;--bad:#d93636;--okbg:#e6f6ee;--badbg:#fdebeb;
+  --hit:rgba(255,196,46,.24);--pay:#e8590c;--grid:#d5dbe3;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;
+  --okbg:#14291f;--badbg:#321a1a;--hit:rgba(255,196,46,.16);--pay:#ff8a4c;--grid:#333943;
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;
+  font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+.wrap{max-width:600px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top,0px)) 14px calc(32px + env(safe-area-inset-bottom,0px))}
+button,input{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+[hidden]{display:none!important}
+.top{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px}
+.top a{font-size:14px;color:var(--muted);text-decoration:none;font-weight:700}
+h1{margin:0 0 4px;font-size:24px;font-weight:800}
+.lead{margin:0 0 16px;font-size:14px;color:var(--muted)}
+.maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px;margin:0 0 16px;box-shadow:0 4px 0 var(--line)}
+.card h2{margin:0 0 2px;font-size:18px}
+.card .sub{margin:0 0 10px;font-size:13px;color:var(--muted)}
+.price{font-size:30px;font-weight:800;letter-spacing:.01em}
+.price small{font-size:14px;font-weight:700;color:var(--muted);margin-left:4px}
+ul.pts{margin:8px 0 12px;padding-left:1.2em;font-size:13.5px}
+ul.pts li{margin:2px 0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:48px;padding:10px 18px;border:2px solid var(--line);
+  border-radius:14px;background:var(--panel);font-weight:800;cursor:pointer;box-shadow:0 3px 0 var(--line)}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
+.btn.primary{background:var(--accent);color:#17181c;width:100%}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;border:2px solid var(--line);font-size:12px;font-weight:800;background:var(--hit)}
+.tag.ok{background:var(--okbg);color:var(--ok);border-color:var(--ok)}
+
+/* 期間メーター */
+.meter{margin:6px 0 4px}
+.meter output{display:block;text-align:center}
+.meter .days{font-size:34px;font-weight:800;line-height:1.1}
+.meter .per{font-size:13px;color:var(--muted);margin-top:2px}
+input[type=range]{width:100%;height:36px;margin:8px 0 0;accent-color:var(--pay);background:transparent;cursor:pointer}
+.ticks{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);font-weight:700;margin:-2px 2px 0}
+.save{display:flex;gap:8px;align-items:center;margin:10px 0 0;padding:10px 12px;border-radius:12px;background:var(--okbg);font-size:13.5px;font-weight:700}
+.save b{font-size:17px;color:var(--ok)}
+.bars{display:flex;align-items:flex-end;gap:3px;height:46px;margin:12px 0 0}
+.bars i{flex:1;border-radius:3px 3px 0 0;background:var(--grid);transition:background .15s,height .15s}
+.bars i.on{background:var(--pay)}
+.bars i.cur{background:var(--ok)}
+.barcap{font-size:11.5px;color:var(--muted);margin:3px 0 0;text-align:center}
+
+/* 比較グラフ */
+.cmp{margin:14px 0 0;padding:12px;border:2px dashed var(--line);border-radius:14px}
+.cmp h3{margin:0 0 2px;font-size:15px}
+.cmp .sub{margin:0 0 6px}
+.ctl{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:center;font-size:13.5px;font-weight:700}
+.ctl output{font-size:15px;font-weight:800;text-align:right;min-width:5.5em}
+.ctl input{grid-column:1/-1;margin:0 0 6px}
+svg.chart{display:block;width:100%;height:auto;margin:6px 0 0;overflow:visible}
+svg.chart text{font-size:11px;fill:var(--muted);font-family:inherit}
+svg.chart .lbl{font-weight:800}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;font-weight:700;margin:4px 0 0}
+.legend span::before{content:"";display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:5px;vertical-align:middle;background:currentColor}
+.verdict{margin:8px 0 0;padding:10px 12px;border-radius:12px;font-size:14px;font-weight:700;background:var(--soft)}
+.verdict.good{background:var(--okbg)}
+.verdict b{font-size:16px}
+
+/* 支援 */
+.story{font-size:14.5px;line-height:1.85}
+.story p{margin:0 0 10px}
+.amts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.amts button{min-height:52px;border:2px solid var(--line);border-radius:14px;background:var(--panel);font-weight:800;font-size:16px;cursor:pointer}
+.amts button[aria-pressed=true]{background:var(--accent);color:#17181c}
+.custom{display:flex;align-items:center;gap:8px;margin:4px 0 10px;font-size:14px;font-weight:700}
+.custom input{flex:1;min-width:0;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-size:16px;text-align:right}
+.gift{display:flex;align-items:center;gap:12px;margin:10px 0 12px;padding:12px;border:2px solid var(--line);border-radius:14px;background:var(--hit)}
+.gift .big{font-size:30px}
+.gift b{display:block;font-size:16px}
+.gift small{font-size:12.5px;color:var(--muted)}
+
+/* 支払い（下から出るパネル） */
+.panel{position:fixed;inset:0;z-index:10;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5)}
+.panel .inner{width:100%;max-width:560px;max-height:92vh;overflow:auto;background:var(--panel);border:2px solid var(--line);border-bottom:0;
+  border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px))}
+.panel h2{margin:0 0 6px;font-size:18px}
+.note{font-size:13px;color:var(--muted);margin:6px 0}
+.field{display:block;margin:10px 0}
+.field span{display:block;font-size:13px;font-weight:700;margin:0 0 4px}
+.field input{width:100%;padding:12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-size:16px}
+.err{color:var(--bad);font-size:13.5px;font-weight:700;min-height:1.2em;margin:6px 0}
+.row{display:flex;gap:8px}
+.row .btn{flex:1}
+.steps{margin:6px 0;padding-left:1.3em;font-size:13px}
+
+/* 発行されたコード */
+.code{display:flex;align-items:center;gap:8px;margin:8px 0;padding:12px;border:2px solid var(--line);border-radius:14px;background:var(--soft)}
+.code code{flex:1;font-size:20px;font-weight:800;letter-spacing:.06em;word-break:break-all}
+.code button{flex:none;min-height:40px;padding:6px 12px;border:2px solid var(--line);border-radius:10px;background:var(--accent);color:#17181c;font-weight:800;cursor:pointer}
+.mine .item{padding:10px 0;border-top:1px dashed var(--line)}
+.mine .item:first-of-type{border-top:0}
+.mine .meta{font-size:12.5px;color:var(--muted)}
+.mine .act{margin-top:6px}
+.mine .act .btn{min-height:40px;padding:6px 12px;font-size:13.5px}
+.claim{display:flex;gap:8px;margin-top:8px}
+.claim input{flex:1;min-width:0;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-size:15px}
+.claim .btn{min-height:44px;padding:6px 14px}
+.foot{margin:24px 0 0;text-align:center;font-size:12.5px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.bars i{transition:none}}
+</style></head><body>
+<main class="wrap">
+  <div class="top"><a href="/">← メニューへ</a><span class="tag">PayPay 払い</span></div>
+  {% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}{% if maint.url %}<br><a href="{{ maint.url }}">お知らせ</a>{% endif %}</div>{% endif %}
+
+{% if mode == 'ticket' %}
+  <h1>チケット購入🎫</h1>
+  <p class="lead">買うと<b>チケットコード</b>が届きます。にゃんこ・ツムツム・ぷにぷに、どの代行でも注文画面の<b>「クーポンコード」</b>欄に入れるだけで <b>0円</b> になります。</p>
+
+  <section class="card" aria-labelledby="h-once">
+    <h2 id="h-once">1回なんでも無料チケット</h2>
+    <p class="sub">いちばん高い注文に使うとおトク</p>
+    <div class="price">{{ "{:,}".format(prices.ticket_once) }}円<small>／1枚</small></div>
+    <ul class="pts">
+      <li>どの部門・どのメニューでも、<b>1回の注文がまるごと0円</b>（金額の上限なし）</li>
+      <li>有効期限は買った日から<b>{{ once_days }}日</b></li>
+      <li>プレゼントにも使えます（コードを渡すだけ）</li>
+    </ul>
+    <button class="btn primary" id="buyOnce" type="button">このチケットを買う</button>
+  </section>
+
+  <section class="card" aria-labelledby="h-period">
+    <h2 id="h-period">期間無料チケット</h2>
+    <p class="sub">期間中は何度注文しても0円。長くするほど1日あたりが安くなります</p>
+    <div class="meter">
+      <output id="pDays" for="days"><span class="days" id="pDaysTxt">1日間</span></output>
+      <div class="price" style="text-align:center" id="pPrice">0円</div>
+      <div class="per" style="text-align:center" id="pPer"></div>
+      <input type="range" id="days" min="1" max="{{ periods|length }}" step="1" value="14" aria-label="期間（日数）">
+      <div class="ticks" aria-hidden="true"><span>1日</span><span>7日</span><span>14日</span><span>21日</span><span>30日</span><span>無制限</span></div>
+    </div>
+    <div class="bars" id="bars" aria-hidden="true"></div>
+    <p class="barcap">棒の高さ＝1日あたりの料金（右ほど安い）</p>
+    <div class="save" id="pSave"></div>
+
+    <div class="cmp" aria-labelledby="h-cmp">
+      <h3 id="h-cmp">📈 いちいち頼む場合と比べる</h3>
+      <p class="sub">あなたの使い方に合わせて動かしてみてください。料金はいまの料金表から計算しています。</p>
+      <div class="ctl"><label for="perDay">1日に頼む回数</label><output id="perDayOut"></output>
+        <input type="range" id="perDay" min="1" max="20" step="1" value="5"></div>
+      <div class="ctl"><label for="avg">1回あたりの金額</label><output id="avgOut"></output>
+        <input type="range" id="avg" min="10" max="1000" step="10" value="{{ avg }}"></div>
+      <svg class="chart" id="chart" viewBox="0 0 340 200" role="img" aria-label="毎回払う場合とチケットの累計金額の比較グラフ"></svg>
+      <div class="legend"><span style="color:var(--pay)">毎回払う（累計）</span><span style="color:var(--ok)">期間無料チケット</span></div>
+      <div class="verdict" id="verdict" aria-live="polite"></div>
+    </div>
+
+    <ul class="pts" style="margin-top:12px">
+      <li>期間は<b>お支払いが確認できた時</b>から数えます</li>
+      <li>使えるのは<b>1件ずつ順番に</b>（実行中の注文が終わると次に使えます）</li>
+      <li>コードを知っている人は誰でも使えるので、人に教えないでください</li>
+    </ul>
+    <button class="btn primary" id="buyPeriod" type="button">このチケットを買う</button>
+  </section>
+{% else %}
+  <h1>支援BOX💝</h1>
+  <p class="lead">TN SHOP の開発を、100円から応援できます。</p>
+
+  <section class="card story">
+    <p>TN SHOP は、<b>ひとりで開発・運営</b>しています。代行の仕組みづくり、ゲームのアップデートへの対応、サーバー代、夜中の不具合修正…ぜんぶ手づくりです。</p>
+    <p>いただいた支援は、<b>サーバーの増強</b>・<b>新しい代行メニューの開発</b>・<b>より速く・安全に動かすための改良</b>に、大切に使わせていただきます。</p>
+    <p style="margin:0">「いつも使ってるよ」「これからも続けてほしい」——そんな気持ちを、気軽に届けてもらえたらうれしいです。</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-sup">
+    <h2 id="h-sup">支援する金額</h2>
+    <p class="sub">{{ support_min }}円から、お好きな金額で</p>
+    <div class="amts" id="amts">
+      {% for a in [100, 300, 500, 1000, 3000, 5000] %}<button type="button" data-a="{{ a }}" aria-pressed="false">{{ "{:,}".format(a) }}円</button>{% endfor %}
+    </div>
+    <label class="custom"><span>金額を入力</span><input id="supAmt" type="number" inputmode="numeric" min="{{ support_min }}" max="{{ support_max }}" step="1" value="300" aria-label="支援する金額（円）"><span>円</span></label>
+    <div class="gift">
+      <div class="big" aria-hidden="true">🎟️</div>
+      <div><b>お礼：{{ support_pct }}%引きクーポン 1枚</b>
+        <small>1回の支援ごとに1枚。全部門の代行に使えて、金額の下限なし（{{ support_days }}日間・1回）。</small></div>
+    </div>
+    <p class="err" id="supErr"></p>
+    <button class="btn primary" id="buySupport" type="button">支援する</button>
+    <p class="note">支援は代行の代金ではないため、返金はできません。クーポンは入金を確認できたらすぐ表示されます。</p>
+  </section>
+{% endif %}
+
+  <section class="card mine" id="mine" aria-labelledby="h-mine" hidden>
+    <h2 id="h-mine">{{ 'あなたのチケット' if mode == 'ticket' else 'あなたの支援とクーポン' }}</h2>
+    <div id="mineList"></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-claim">
+    <h2 id="h-claim" style="font-size:15px">別の端末で買った・画面を閉じた</h2>
+    <p class="note" style="margin:2px 0 0">控えた<b>注文番号</b>で、支払い済みの注文の続きや、発行されたコードの再表示ができます（完了から3日間）。</p>
+    <div class="claim"><input id="claimNo" type="text" autocapitalize="off" spellcheck="false" placeholder="注文番号" aria-label="注文番号"><button class="btn" id="claimGo" type="button">呼び戻す</button></div>
+    <p class="err" id="claimErr"></p>
+  </section>
+
+  <div class="foot">TN SHOP ／ お問い合わせ：X <b>@paysms1212</b> ／ v{{ version }}</div>
+</main>
+
+<div class="panel" id="payPanel" hidden role="dialog" aria-modal="true" aria-labelledby="payTtl"><div class="inner">
+  <h2 id="payTtl">お支払い</h2>
+  <p id="payWhat" style="margin:0;font-weight:800"></p>
+  <p class="note" id="payInfo">PayPayアプリで <b id="payYen">0円</b> ちょうどの送金リンクを作って、下に貼り付けてください（パスコードなし）。</p>
+  <ol class="steps" id="paySteps"><li>PayPay の「送る」→「リンクを作成」</li><li>金額を <b id="payYen2">0円</b> ちょうどにして、パスコードはなし</li><li>できたリンクをコピーして、ここに貼り付け</li></ol>
+  <label class="field" id="payLinkField"><span>PayPay送金リンク</span><input id="payLink" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://pay.paypay.ne.jp/..."></label>
+  <p class="err" id="payErr" aria-live="polite"></p>
+  <div class="row"><button class="btn" id="payCancel" type="button">閉じる</button><button class="btn primary" id="payGo" type="button">支払う</button></div>
+  <p class="note" id="payOrderNo"></p>
+</div></div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const MODE={{ mode|tojson }}, PAYMENTS={{ payments|tojson }};
+const PERIODS={{ periods|tojson }};
+const yen=n=>Number(n||0).toLocaleString('ja-JP')+'円';
+const KEY='tn-codes';   // 発行されたコードをこの端末にも残す（サーバーの表示は完了から3日で消えるため）
+
+async function api(url,opts,tries){
+  tries=tries||40;
+  for(let i=0;;i++){
+    const r=await fetch(url,Object.assign({cache:'no-store'},opts||{}));
+    if(r.status!==503||i>=tries-1) return r;
+    let j={}; try{ j=await r.clone().json(); }catch(e){}
+    if(j.code!=='updating') return r;
+    await new Promise(ok=>setTimeout(ok,5000));
+  }
+}
+async function post(url,body){ return api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); }
+async function copyText(val){
+  try{ await navigator.clipboard.writeText(val); return true; }catch(e){}
+  try{ const t=document.createElement('textarea'); t.value=val; t.setAttribute('readonly',''); t.style.position='fixed'; t.style.opacity='0';
+       document.body.append(t); t.select(); const ok=document.execCommand('copy'); t.remove(); return ok; }catch(e){ return false; }
+}
+function el(tag,cls,text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
+function loadCodes(){ try{ const v=JSON.parse(localStorage.getItem(KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function keepCode(r){ try{ const v=loadCodes().filter(x=>x.coupon!==r.coupon); v.unshift(r); localStorage.setItem(KEY,JSON.stringify(v.slice(0,20))); }catch(e){} }
+
+/* ---------------- 期間チケット：メーター・グラフ ---------------- */
+if(MODE==='ticket'){
+  const days=$('#days'), perDay=$('#perDay'), avg=$('#avg');
+  const dayPrice=PERIODS[0].price;
+  const bars=$('#bars');
+  const maxPer=Math.max(...PERIODS.map(p=>p.days?p.price/p.days:0));
+  PERIODS.forEach(p=>{ const i=el('i'); const per=p.days?p.price/p.days:p.price/90; i.style.height=Math.max(6,Math.round(per/maxPer*100))+'%'; bars.append(i); });
+  const cur=()=>PERIODS[Number(days.value)-1];
+  const label=p=>p.days?p.days+'日間':'無制限';
+
+  function renderMeter(){
+    const p=cur(), n=Number(days.value);
+    $('#pDaysTxt').textContent=label(p);
+    $('#pPrice').textContent=yen(p.price);
+    if(p.days){
+      const per=Math.round(p.price/p.days), full=dayPrice*p.days, off=full>0?Math.round((1-p.price/full)*100):0;
+      $('#pPer').textContent='1日あたり 約'+yen(per);
+      $('#pSave').innerHTML='';
+      $('#pSave').append(off>0?Object.assign(el('span'),{innerHTML:'1日券を'+p.days+'回買うより <b>'+off+'%</b> おトク（'+yen(full-p.price)+'安い）'}):el('span',null,'まずは1日だけ試せます'));
+    }else{
+      $('#pPer').textContent='ずっと使える（期限なし）';
+      const p30=PERIODS[PERIODS.length-2];
+      $('#pSave').innerHTML='';
+      $('#pSave').append(Object.assign(el('span'),{innerHTML:'30日券 '+yen(p30.price)+' の約 <b>'+(p.price/p30.price).toFixed(1)+'か月分</b> で、期限なし'}));
+    }
+    [...bars.children].forEach((b,i)=>{ b.className=i===n-1?'cur':(i<n-1?'on':''); });
+    renderChart();
+  }
+
+  function niceStep(v){ const e=Math.pow(10,Math.floor(Math.log10(v))); const m=v/e; return (m<=2?1:m<=5?2:5)*e/2; }
+
+  function renderChart(){
+    const p=cur(), k=Number(perDay.value), a=Number(avg.value);
+    $('#perDayOut').textContent=k+'回';
+    $('#avgOut').textContent=yen(a);
+    const D=p.days||90;                    /* 無制限は90日目まで表示 */
+    const daily=k*a, pay=d=>daily*d, tk=p.price;
+    const W=340,H=200,L=44,R=8,T=10,B=24, w=W-L-R, h=H-T-B;
+    const yMax=Math.max(pay(D),tk)*1.08||1;
+    const X=d=>L+d/D*w, Y=v=>T+h-v/yMax*h;
+    const s=[];
+    const step=niceStep(yMax);
+    for(let v=0;v<=yMax;v+=step){ s.push(`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)" stroke-width="1"/>`,
+      `<text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v>=10000?(v/10000).toFixed(v%10000?1:0)+'万':v.toLocaleString('ja-JP')}</text>`); }
+    const xt=D<=7?1:D<=14?2:D<=30?5:15;
+    for(let d=0;d<=D;d+=xt) s.push(`<text x="${X(d)}" y="${H-6}" text-anchor="middle">${d}${d===D?'日':''}</text>`);
+    /* 毎回払う：1日ごとに増える階段 */
+    let path=`M${X(0)},${Y(0)}`; for(let d=1;d<=D;d++) path+=`L${X(d-1)},${Y(pay(d))}L${X(d)},${Y(pay(d))}`;
+    s.push(`<path d="${path}" fill="none" stroke="var(--pay)" stroke-width="2.5" stroke-linejoin="round"/>`);
+    s.push(`<line x1="${X(0)}" x2="${X(D)}" y1="${Y(tk)}" y2="${Y(tk)}" stroke="var(--ok)" stroke-width="3"/>`);
+    s.push(`<text class="lbl" x="${X(D)}" y="${Y(tk)-6}" text-anchor="end" style="fill:var(--ok)">チケット ${yen(tk)}</text>`);
+    const be=daily>0?Math.ceil(tk/daily):Infinity;   /* 何日目で元が取れるか */
+    if(be<=D){
+      s.push(`<line x1="${X(be)}" x2="${X(be)}" y1="${T}" y2="${T+h}" stroke="var(--ok)" stroke-dasharray="4 3" stroke-width="1.5"/>`,
+             `<circle cx="${X(be)}" cy="${Y(tk)}" r="5" fill="var(--ok)" stroke="var(--panel)" stroke-width="2"/>`,
+             `<text class="lbl" x="${Math.min(X(be)+6,W-R-60)}" y="${T+12}" style="fill:var(--ok)">${be}日目で元が取れる</text>`);
+    }
+    $('#chart').innerHTML=s.join('');
+    const total=pay(D), diff=total-tk, v=$('#verdict');
+    v.className='verdict'+(diff>0?' good':'');
+    const span=p.days?p.days+'日間':'90日間';
+    v.innerHTML=diff>0
+      ? `この使い方だと${span}で毎回払うと <b>${yen(total)}</b>。チケットなら <b>${yen(diff)}おトク</b>`+(p.days?'':'（その後もずっと0円）')+'。'
+      : `この使い方だと${span}で毎回払っても ${yen(total)}。いまは<b>毎回払うほうが ${yen(-diff)}安い</b>ので、期間を短くするか、たくさん頼む日に使うのがおすすめです。`;
+  }
+  [days,perDay,avg].forEach(x=>x.addEventListener('input',x===days?renderMeter:renderChart));
+  renderMeter();
+  $('#buyOnce').addEventListener('click',()=>buy('/api/ticket/order',{plan:'once'},'1回なんでも無料チケット'));
+  $('#buyPeriod').addEventListener('click',()=>{ const p=cur(); buy('/api/ticket/order',{plan:'period',days:p.days},'期間無料チケット（'+label(p)+'）'); });
+}
+
+/* ---------------- 支援BOX ---------------- */
+if(MODE==='support'){
+  const amt=$('#supAmt');
+  const sync=()=>{ document.querySelectorAll('#amts button').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.a)===Number(amt.value)))); };
+  document.querySelectorAll('#amts button').forEach(b=>b.addEventListener('click',()=>{ amt.value=b.dataset.a; sync(); $('#supErr').textContent=''; }));
+  amt.addEventListener('input',sync); sync();
+  $('#buySupport').addEventListener('click',()=>{
+    const a=Math.floor(Number(amt.value));
+    if(!(a>={{ support_min }}&&a<={{ support_max }})){ $('#supErr').textContent='{{ support_min }}円〜{{ "{:,}".format(support_max) }}円で入力してください。'; return; }
+    $('#supErr').textContent='';
+    buy('/api/support/order',{amount:a},'支援BOX（'+yen(a)+'）');
+  });
+}
+
+/* ---------------- 購入〜支払い〜コード表示（全部共通） ---------------- */
+let payOrder=null, watchTimer=null;
+async function buy(url,body,what){
+  try{
+    const r=await post(url,body); const j=await r.json();
+    if(!r.ok){ alert(j.error||'注文を作れませんでした。'); return; }
+    openPay(j.order,j.amount,what,'unpaid');
+  }catch(e){ alert('通信エラーです。もう一度お試しください。'); }
+}
+function openPay(order,amount,what,state){
+  payOrder=order;
+  $('#payWhat').textContent=what||'';
+  $('#payYen').textContent=yen(amount); $('#payYen2').textContent=yen(amount);
+  $('#payOrderNo').textContent='注文番号：'+order+'（控えておくと、別の端末からも続きを見られます）';
+  const fresh=state==='unpaid';
+  $('#payLinkField').hidden=!fresh; $('#paySteps').hidden=!fresh; $('#payInfo').hidden=!fresh;
+  $('#payGo').textContent=fresh?'支払う':(state==='paid'?'コードを発行する（再送金なし）':'今すぐ確認する');
+  $('#payErr').textContent=state==='hold'?HOLD_MSG:''; $('#payGo').disabled=false; $('#payLink').value='';
+  $('#payPanel').hidden=false; document.body.style.overflow='hidden';
+  if(fresh) $('#payLink').focus();
+}
+function closePay(){ $('#payPanel').hidden=true; document.body.style.overflow=''; loadMine(); }
+const HOLD_MSG='保留中です。送金した方がPayPayアプリで保留を解除すると、自動で確認してコードを発行します。同じリンクを送り直したり、再送金したりしないでください。この画面は閉じても大丈夫です。';
+$('#payCancel').addEventListener('click',closePay);
+$('#payPanel').addEventListener('click',e=>{ if(e.target===$('#payPanel')) closePay(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#payPanel').hidden) closePay(); });
+$('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
+$('#payGo').addEventListener('click',()=>{
+  const link=$('#payLink').value.trim();
+  if(!$('#payLinkField').hidden&&!/pay\.paypay\.ne\.jp\//i.test(link)){ $('#payErr').textContent='PayPayの送金リンク（https://pay.paypay.ne.jp/…）を貼り付けてください。'; return; }
+  payNow(link);
+});
+async function payNow(link){
+  const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…（画面を閉じずにお待ちください）';
+  try{
+    const r=await post('/api/orders/'+payOrder+'/pay',{link:link}); const j=await r.json();
+    if(!r.ok){
+      $('#payErr').textContent=j.error||'決済を確認できませんでした。';
+      if(j.hold){ $('#payLinkField').hidden=true; $('#paySteps').hidden=true; $('#payInfo').hidden=true; btn.textContent='今すぐ確認する'; btn.disabled=false;
+                  $('#payErr').textContent=HOLD_MSG; startWatch(); return; }
+      if(j.paid){ $('#payLinkField').hidden=true; $('#paySteps').hidden=true; btn.textContent='コードを発行する（再送金なし）'; }
+      btn.disabled=['dead','order_missing','done'].includes(j.code);
+      return;
+    }
+    if(j.result){ showDone(j.result); }
+  }catch(e){ $('#payErr').textContent='通信エラーです。もう一度お試しください（同じリンクのままで大丈夫です）。'; btn.disabled=false; }
+}
+function startWatch(){
+  clearInterval(watchTimer);
+  watchTimer=setInterval(async()=>{
+    const list=await fetchMine(); const o=list.find(x=>x.order===payOrder);
+    if(o&&o.state==='done'&&o.result){ clearInterval(watchTimer); showDone(o.result); }
+  },6000);
+}
+function showDone(res){
+  clearInterval(watchTimer); keepCode(res);
+  $('#payPanel').hidden=true; document.body.style.overflow='';
+  loadMine(res.coupon);
+}
+async function fetchMine(){ try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); return r.ok?((await r.json()).orders||[]):[]; }catch(e){ return []; } }
+
+const PLAN_JA={ticket_once:'1回なんでも無料チケット',ticket_period:'期間無料チケット',support:'支援BOXのお礼（{{ support_pct }}%引き）'};
+const STATE_JA={unpaid:'お支払い待ち',hold:'保留中（自動で確認しています）',paid:'お支払い済み・発行待ち',dead:'確認が必要です'};
+function untilText(r){
+  if(r.unlimited) return '期限なし（無制限）';
+  const d=new Date((r.expires||0)*1000); return d.toLocaleDateString('ja-JP')+' まで';
+}
+function codeRow(r,hl){
+  const box=el('div','item');
+  box.append(el('div',null,PLAN_JA[r.product]||'クーポン'));
+  const c=el('div','code'); const code=el('code',null,r.coupon); const b=el('button',null,'コピー'); b.type='button';
+  b.addEventListener('click',async()=>{ b.textContent=(await copyText(r.coupon))?'コピーしました':'長押しでコピー'; setTimeout(()=>b.textContent='コピー',1800); });
+  c.append(code,b); box.append(c);
+  box.append(el('div','meta',untilText(r)+'　／　各代行の注文画面の「クーポンコード」欄に入れて使います'));
+  if(hl) box.scrollIntoView && setTimeout(()=>box.scrollIntoView({behavior:'smooth',block:'center'}),50);
+  return box;
+}
+async function loadMine(highlight){
+  const want=MODE==='ticket'?['ticket_once','ticket_period']:['support'];
+  const list=(await fetchMine()).filter(o=>want.includes(o.product));
+  const root=$('#mineList'); root.textContent='';
+  const shown=new Set();
+  list.forEach(o=>{
+    if(o.state==='done'&&o.result){ shown.add(o.result.coupon); root.append(codeRow(o.result,o.result.coupon===highlight)); return; }
+    const box=el('div','item');
+    box.append(el('div',null,(o.breakdown[0]||{}).label||'ご注文'), el('div','meta',yen(o.amount)+'　／　'+(STATE_JA[o.state]||o.state)));
+    if(['unpaid','hold','paid'].includes(o.state)){
+      const a=el('div','act'); const b=el('button','btn',o.state==='unpaid'?'支払いへ進む':o.state==='hold'?'状況を確認する':'コードを発行する'); b.type='button';
+      b.addEventListener('click',()=>{ openPay(o.order,o.amount,(o.breakdown[0]||{}).label,o.state); if(o.state==='hold') startWatch(); });
+      a.append(b); box.append(a);
+    }
+    if(o.state==='dead') box.append(el('div','meta','お支払い済みの場合は、注文番号 '+o.order+' を X @paysms1212 へお知らせください（再送金は不要です）。'));
+    root.append(box);
+  });
+  loadCodes().filter(r=>want.includes(r.product)&&!shown.has(r.coupon)).forEach(r=>root.append(codeRow(r,r.coupon===highlight)));
+  $('#mine').hidden=!root.children.length;
+  if(list.some(o=>o.state==='hold')) startWatch();
+}
+$('#claimGo').addEventListener('click',async()=>{
+  const no=$('#claimNo').value.trim(); if(!no) return;
+  $('#claimErr').textContent='';
+  try{
+    const r=await post('/api/orders/'+encodeURIComponent(no)+'/claim'); const j=await r.json();
+    if(!r.ok){ $('#claimErr').textContent=j.error||'見つかりませんでした。'; return; }
+    if(j.result) keepCode(j.result);
+    $('#claimNo').value=''; loadMine(j.result&&j.result.coupon);
+  }catch(e){ $('#claimErr').textContent='通信エラーです。'; }
+});
+loadMine();
+</script>
+</body></html>

@@ -1,6 +1,6 @@
 # 代行部門の追加ガイド（新しいゲームのShopを足すとき）
 
-TN SHOP は現在3部門：**にゃんこ**（`/nyanko`）・**ツムツム**（`/tsum`）・**ぷにぷに**（`/puni`）。
+TN SHOP は現在3部門（＋チケット購入・支援BOX。docs/TICKETS.md）：**にゃんこ**（`/nyanko`）・**ツムツム**（`/tsum`）・**ぷにぷに**（`/puni`）。
 注文・支払い（PayPay）・実行枠（同時4・待機20）・注文台帳・クーポン・履歴削除は**全部門で共通**。
 4つ目を足すときは、**ぷにぷに（`puni_service.py` + `templates/puni.html`）を雛形**にすると速い。
 ぷには「ゲームサーバに直接ログインして操作する」型。セーブ編集型（にゃんこ）とは別系統。
@@ -73,8 +73,10 @@ TN SHOP は現在3部門：**にゃんこ**（`/nyanko`）・**ツムツム**（
   `!o.tsum` だけに絞っていてぷにが混ざった回帰があったので注意）。
 
 ## 6. トップと導線
-- `templates/home.html`：ゲームカードを1枚追加、「このブラウザの注文」に `mine<Dept>` 行、
-  判定スクリプトの振り分けに `o.<dept>` を追加（にゃんこは `!o.tsum && !o.puni && ...`）。
+- `templates/home.html`：正方形カードのグリッド（`.grid` の中）に1枚追加、「このブラウザの注文」に `mine<Dept>` 行、
+  判定スクリプトの振り分けに `o.<dept>` を追加（にゃんこは `!o.tsum && !o.puni && !o.product && ...`）。
+  画像が無いうちは `<span class="art">絵文字</span>` のタイルで代用できる。
+- チケット・支援BOX（`o.product`）は代行ではない注文。部門の一覧・Q&Aの注文には混ぜない（docs/TICKETS.md）。
 - 画像 `static/game-<dept>.{webp,jpg}` と `static/ogp-<dept>.jpg`。
 
 ## 7. 設定・デプロイ

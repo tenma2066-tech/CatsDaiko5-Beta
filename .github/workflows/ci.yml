@@ -50,6 +50,7 @@ jobs:
           python -m unittest -v test_order_flow.py
           python -m unittest -v test_puni.py
           python -m unittest -v test_qa.py
+          python -m unittest -v test_tickets.py
           python -m unittest -v test_hold_e2e.py
           python -m unittest -v test_paypay_hold.py
           python -m unittest -v test_paypay_gateway.py

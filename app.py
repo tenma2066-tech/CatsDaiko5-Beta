@@ -41,6 +41,7 @@ import tsum_service
 import puni_service
 import qa_bot
 from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py からも同じ名前で使えるようにしている
+    SUPPORT_COUPON_DAYS, SUPPORT_COUPON_PCT, SUPPORT_MAX, SUPPORT_MIN, TICKET_MAX_DAYS, TICKET_ONCE_DAYS, ticket_period_price,
     COUPON_DAYS, COUPON_MIN, CRASH_ITEMS, DB_OFFSET, EV_PREFIX, EVENT_BY_ID, EVENT_MAPS, EVENT_SELECTABLE, PRICE_LABELS, PRICES,
     PT_KEY, PT_MAX_MINUTES, PT_MIN_MINUTES, RESTART_KEY, _ALL_EVENT_MAPS, _event_ids, _legend_kinds, _load_event_maps,
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
@@ -1745,7 +1746,7 @@ def _admin_post(token):
                         o["state"] = "hold" if o.get("link_code") else "unpaid"
                     o["diag"] = f"admin:{action} {time.strftime('%m/%d %H:%M')}"
                     msg = "注文を更新しました。"
-                    if action == "order_paid" and o.get("arguments") is None:
+                    if action == "order_paid" and o.get("arguments") is None and not o.get("product"):
                         o["state"] = "done"
                         msg = "この注文は入力内容が残っていない（完了済み）ため、実行できません。"
                     code_for_ledger = o.get("link_code") if action == "order_paid" else None
@@ -1910,7 +1911,10 @@ def _admin_page(msg):
                 c["when"] = time.strftime("%m/%d %H:%M", time.localtime(c["created"]))
                 c["until"] = time.strftime("%m/%d", time.localtime(c["expires"]))
                 c["state_ja"] = {"active": "未使用", "reserved": "使用中（支払い待ち）", "used": "使用済み"}.get(c["state"], c["state"])
-                c["free"] = c.get("kind") == "free"
+                c["free"] = c.get("kind") in ("free", "period", "pct30")   # 取り消せる種類
+                c["kind_ja"] = {"free": "1回無料", "period": "期間無料", "pct30": "支援30%引き"}.get(c.get("kind"), "")
+                if c.get("kind") == "period" and c["expires"] - c["created"] > 3650 * 86400:
+                    c["until"] = "無制限"
                 if c["state"] == "used" and c.get("used_order") == "revoked":
                     c["state_ja"] = "取り消し"
                 if c["state"] == "active" and time.time() > c["expires"]:
@@ -2181,7 +2185,7 @@ def robots_txt():
 @app.get("/sitemap.xml")
 def sitemap_xml():
     urls = "".join(f"<url><loc>{xml_escape(_site() + path)}</loc></url>"
-                   for path in ("/", "/nyanko", "/tsum", "/puni"))
+                   for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support"))
     return Response(
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -2357,6 +2361,9 @@ def _clean_run_body(data):
 
 
 
+_PERIOD_BUSY = ("unpaid", "paying", "hold", "paid", "starting", "started")   # 期間チケットの注文が「進行中」とみなす状態
+
+
 def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdown: list, summary: str,
                  skipped: list, coupon_raw: str):
     """注文を作る（支払い待ち）。クーポン・未払い注文の整理・支払い済みの充当は、にゃんこ代行と
@@ -2366,12 +2373,14 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
     coupon = unicodedata.normalize("NFKC", str(coupon_raw or "")).strip().upper().replace(" ", "")[:20]
     base_amount = amount
     free_coupon = False
+    coupon_kind = None
     if coupon:
         # 同じ人が支払う前に注文を作り直したとき：前の（未払いの）注文が押さえているクーポンを、新しい注文へ移す
         me0 = _owner()
         with _orders_lock:
-            stale = [k for k, o in _orders.items() if o["owner"] == me0 and o["state"] == "unpaid"
-                     and o.get("coupon") == coupon and not o.get("coupon_used")]
+            # 無料クーポン・期間チケットで開始に失敗したまま（お金は動いていない・一度も始まっていない）の注文も同じ扱い
+            stale = [k for k, o in _orders.items() if o["owner"] == me0 and o.get("coupon") == coupon and not o.get("coupon_used")
+                     and (o["state"] == "unpaid" or (o["state"] == "paid" and o.get("free_coupon") and not o.get("retry")))]
             for k in stale:
                 _orders[k].update(state="dead", coupon=None, diag="superseded: クーポンを新しい注文へ移しました")
         for k in stale:
@@ -2380,12 +2389,17 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
             except Exception:  # noqa: BLE001
                 _log_orders.exception("coupon release failed")
         ok, why = paypay_gateway.coupon_check(coupon)
-        if ok and paypay_gateway.coupon_kind(coupon) == "free":
+        coupon_kind = paypay_gateway.coupon_kind(coupon) if ok else None
+        if coupon_kind in ("free", "period"):
             if _draining():
                 return _updating_response()
             free_coupon = True
-            amount = 0           # 管理者が発行した無料クーポン：金額に関係なく1回だけ0円
-            breakdown.append({"label": f"無料クーポン {coupon}", "count": 1, "unit": -base_amount})
+            amount = 0           # 1回無料（管理者発行・チケット）／期間無料チケット：金額に関係なく0円
+            label = "期間無料チケット" if coupon_kind == "period" else "無料クーポン"
+            breakdown.append({"label": f"{label} {coupon}", "count": 1, "unit": -base_amount})
+        elif coupon_kind == "pct30":
+            amount = base_amount * (100 - SUPPORT_COUPON_PCT) // 100   # 支援BOXのお礼：30%引き（最低金額なし）
+            breakdown.append({"label": f"支援クーポン（{SUPPORT_COUPON_PCT}%引き）{coupon}", "count": 1, "unit": amount - base_amount})
         else:
             if base_amount < COUPON_MIN:
                 return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
@@ -2396,6 +2410,11 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
     me = _owner()
     trimmed_coupons = []
     with _orders_lock:
+        # 期間チケットは1件ずつ順番に使う（使い回し・共有での同時大量注文を防ぐ）。確認と注文の作成を同じロックの中で行う
+        if coupon_kind == "period" and any(o.get("coupon") == coupon and o["state"] in _PERIOD_BUSY
+                                           and not (o["owner"] == me and o["state"] == "paid") for o in _orders.values()):
+            return jsonify(error="この期間チケットは、いま別のご注文で使用中です。その注文が終わると次の注文に使えます（1件ずつ順番に使えます）。",
+                           code="coupon_busy"), 409
         # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）
         credit = next((k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
                        if o["owner"] == me and o["state"] == "paid" and o.get("retry")
@@ -2423,7 +2442,7 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
             paypay_gateway.coupon_release(c, k)
         except Exception:  # noqa: BLE001
             _log_orders.exception("coupon release failed")
-    if coupon and not credit:
+    if coupon and not credit and coupon_kind != "period":   # 期間チケットは何度も使うので押さえない（上で1件ずつに制限）
         if not paypay_gateway.coupon_reserve(coupon, order_id):   # 同時に2つの注文で使われないよう押さえる
             with _orders_lock:
                 _orders.pop(order_id, None)
@@ -2432,7 +2451,8 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
         # 無料クーポン：支払いは無いので、そのまま「支払い済み」にして開始する（クーポンは開始時に使用済みになる）
         with _orders_lock:
             o = _orders[order_id]
-            o.update(state="paid", free_coupon=True, summary="【無料クーポン】" + summary)
+            o.update(state="paid", free_coupon=True, coupon_kind=coupon_kind,
+                     summary=("【期間チケット】" if coupon_kind == "period" else "【無料クーポン】") + summary)
         resp = _start_paid_order(o)
         _persist_orders()
         return resp
@@ -2828,6 +2848,7 @@ def _public_order(order_id: str, o: dict) -> dict:
     return {"order": order_id, "amount": o["amount"], "state": o["state"], "created": int(o["created"]), "retry": bool(o.get("retry")),
             "tsum": (o.get("job") or {}).get("mode") == "tsum",   # ツムツム代行の注文（画面が別なので区別する）
             "puni": (o.get("job") or {}).get("mode") == "puni",   # ぷにぷに代行の注文
+            "product": (o.get("product") or {}).get("type"),       # チケット・支援BOX（代行ではない買い物）
             "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
             "coupon_issued": o.get("coupon_issued"),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
@@ -2848,7 +2869,7 @@ def _qa_orders_for(shop: str) -> list:
     picked = []
     with _orders_lock:
         for v in _orders.values():
-            if v.get("owner") != me or v.get("hidden_by_owner"):
+            if v.get("owner") != me or v.get("hidden_by_owner") or v.get("product"):
                 continue
             mode = (v.get("job") or {}).get("mode")
             is_tsum, is_puni = mode == "tsum", mode == "puni"
@@ -2902,7 +2923,7 @@ def _qa_prices(shop: str) -> list:
                 rows.append(f"{label}：{PRICES.get(pk, 0)}円")
         else:
             for pk, label in PRICE_LABELS.items():
-                if not pk.startswith(("tsum_", "puni_")):
+                if not pk.startswith(("tsum_", "puni_", "ticket_")):
                     rows.append(f"{label}：{PRICES.get(pk, 0)}円")
     except Exception:  # noqa: BLE001  料金が取れなくても回答は続ける
         _log_orders.exception("qa prices failed")
@@ -2929,8 +2950,134 @@ def _qa_live(shop: str) -> dict:
             "running": p["running_jobs"], "slots": p["max_concurrent_jobs"],
             "free_slots": p["available_slots"], "queued": p["queued_jobs"],
             "prices": _qa_prices(shop), "price_note": _QA_PRICE_NOTE.get(shop, ""),
+            "tickets": {"once": PRICES["ticket_once"], "day1": ticket_period_price(1), "day7": ticket_period_price(7),
+                        "day30": ticket_period_price(30), "unlimited": ticket_period_price(0)},
             "coupon_min": COUPON_MIN, "coupon_days": COUPON_DAYS,
             "unpaid_ttl_min": ORDER_TTL // 60}
+
+
+# ---------------------------------------------------------------- チケット・支援BOX（docs/TICKETS.md）
+PRODUCT_LABELS = {"ticket_once": "1回なんでも無料チケット", "ticket_period": "期間無料チケット", "support": "支援BOX"}
+
+
+def _period_label(days: int) -> str:
+    return "無制限" if days == 0 else f"{days}日間"
+
+
+def _create_product_order(product: dict, amount: int, summary: str):
+    """チケット・支援の注文（支払い待ち）を作る。支払いは代行と同じ PayPay 送金リンクの流れ。
+    クーポンは使えない（チケットをチケットで買う・割引で買うのを防ぐ）。"""
+    if _maint()["on"]:
+        return _maintenance_response()
+    if not _rate_ok("product:" + _client_ip(), 10, 600):
+        return _too_fast()
+    _gc_orders()
+    me = _owner()
+    with _orders_lock:
+        mine = sorted(((k, o) for k, o in _orders.items() if o["owner"] == me and o["state"] == "unpaid"
+                       and o.get("product") and not o.get("link_code")), key=lambda kv: kv[1]["created"])
+        for k, _o in mine[:max(0, len(mine) - (MAX_UNPAID_PER_OWNER - 1))]:
+            _orders.pop(k, None)
+        order_id = secrets.token_urlsafe(16)
+        breakdown = [{"label": summary, "count": 1, "unit": amount}]
+        _orders[order_id] = {"owner": me, "uid": _uid(me), "state": "unpaid", "amount": amount, "created": time.time(),
+                             "job": None, "arguments": None, "transfer_key": None, "product": product,
+                             "breakdown": breakdown, "skipped": [], "summary": summary, "coupon": None, "base_amount": amount}
+    _persist_orders()
+    return jsonify(order=order_id, amount=amount, breakdown=breakdown)
+
+
+def _deliver_product(order: dict):
+    """入金が確認できたチケット・支援の注文に、クーポンを発行して完了にする（同じ注文からは同じコード）。"""
+    with _orders_lock:
+        if order["state"] != "paid":
+            return jsonify(error="この注文は発行できる状態ではありません。画面を開き直してください。", code="started"), 409
+        order["state"] = "starting"
+    order_id = _order_id_of(order)
+    p = order["product"]
+    try:
+        if p["type"] == "ticket_once":
+            code, exp = paypay_gateway.coupon_issue_kind("free", TICKET_ONCE_DAYS, "ticket:" + order_id, "チケット購入")
+        elif p["type"] == "ticket_period":
+            days = int(p.get("days") or 0)
+            code, exp = paypay_gateway.coupon_issue_kind("period", days or paypay_gateway.UNLIMITED_DAYS, "ticket:" + order_id,
+                                                         "期間チケット " + _period_label(days))
+        else:
+            code, exp = paypay_gateway.coupon_issue_kind("pct30", SUPPORT_COUPON_DAYS, "support:" + order_id,
+                                                         f"支援 {order['amount']}円")
+    except Exception:
+        _log_orders.exception("product coupon issue failed")
+        with _orders_lock:
+            order["state"] = "paid"   # 支払いは有効のまま。もう一度押せば再送金なしで発行し直す
+        return jsonify(error="コードの発行に失敗しました。もう一度ボタンを押してください（再送金は不要です）。",
+                       code="start_failed", paid=True), 503
+    result = {"product": p["type"], "coupon": code, "expires": int(exp),
+              "unlimited": p["type"] == "ticket_period" and not p.get("days"), "days": p.get("days")}
+    with _orders_lock:
+        order.update(state="done", result=result, diag=f"発行 {code[:2]} {time.strftime('%m/%d %H:%M')}")
+    try:
+        paypay_gateway.mark_used(order.get("link_code"))
+    except Exception:
+        _log_orders.exception("mark_used failed")
+    _persist_orders()
+    return jsonify(order=order_id, state="done", result=result)
+
+
+@app.get("/ticket")
+def ticket_page():
+    """チケット購入（1回なんでも無料・期間無料）。買うとクーポンコードが出て、全部門の注文で使える。"""
+    periods = [{"days": d, "price": ticket_period_price(d)} for d in range(1, TICKET_MAX_DAYS + 1)]
+    periods.append({"days": 0, "price": ticket_period_price(0)})
+    return render_template_string(EXTRA_HTML, mode="ticket", prices=PRICES, periods=periods, once_days=TICKET_ONCE_DAYS,
+                                  avg=_typical_order_price(), maint=_maint(), payments=PAYMENTS_ENABLED,
+                                  uid=_uid(_owner()), version=APP_VERSION, site=_site(),
+                                  support_min=SUPPORT_MIN, support_max=SUPPORT_MAX, support_pct=SUPPORT_COUPON_PCT,
+                                  support_days=SUPPORT_COUPON_DAYS)
+
+
+@app.get("/support")
+def support_page():
+    """支援BOX（100円から。1回の支援ごとに30%引きクーポン）。"""
+    return render_template_string(EXTRA_HTML, mode="support", prices=PRICES, periods=[], once_days=TICKET_ONCE_DAYS,
+                                  avg=_typical_order_price(), maint=_maint(), payments=PAYMENTS_ENABLED,
+                                  uid=_uid(_owner()), version=APP_VERSION, site=_site(),
+                                  support_min=SUPPORT_MIN, support_max=SUPPORT_MAX, support_pct=SUPPORT_COUPON_PCT,
+                                  support_days=SUPPORT_COUPON_DAYS)
+
+
+def _typical_order_price() -> int:
+    """比較グラフの初期値：代行メニューの単品料金の中央値（いまの料金表から計算）。"""
+    vals = sorted(v for k, v in PRICES.items() if not k.startswith(("ticket_",)) and v > 0)
+    return vals[len(vals) // 2] if vals else 50
+
+
+@app.post("/api/ticket/order")
+def ticket_order():
+    data = request.get_json(silent=True) or {}
+    plan = str(data.get("plan", ""))
+    if plan == "once":
+        return _create_product_order({"type": "ticket_once"}, int(PRICES["ticket_once"]), PRODUCT_LABELS["ticket_once"])
+    if plan == "period":
+        try:
+            days = int(data.get("days"))
+            amount = ticket_period_price(days)
+        except (TypeError, ValueError):
+            return jsonify(error=f"期間は1〜{TICKET_MAX_DAYS}日、または無制限から選んでください。", code="bad_days"), 400
+        return _create_product_order({"type": "ticket_period", "days": days}, amount,
+                                     f"{PRODUCT_LABELS['ticket_period']}（{_period_label(days)}）")
+    return jsonify(error="チケットの種類を選んでください。", code="bad_plan"), 400
+
+
+@app.post("/api/support/order")
+def support_order():
+    data = request.get_json(silent=True) or {}
+    try:
+        amount = int(data.get("amount"))
+    except (TypeError, ValueError):
+        amount = 0
+    if not SUPPORT_MIN <= amount <= SUPPORT_MAX:
+        return jsonify(error=f"支援は {SUPPORT_MIN}円〜{SUPPORT_MAX:,}円でお願いします。", code="bad_amount"), 400
+    return _create_product_order({"type": "support"}, amount, f"{PRODUCT_LABELS['support']}（{amount}円）")
 
 
 @app.post("/api/qa")
@@ -3174,12 +3321,14 @@ def _pay_order(order_id: str):
 
 def _start_paid_order(order: dict):
     """支払い済みの注文の実行を開始する（利用者の操作・管理者の「支払い済みにする」の両方から使う）。"""
+    if order.get("product"):   # チケット・支援BOX：実行するものは無く、クーポンを発行して完了にする
+        return _deliver_product(order)
     with _orders_lock:
         # 開始できるのは「支払い済み」の注文だけ。開始の権利をロック内で1回だけ取る（同時押しで二重に実行しない）
         if order["state"] != "paid" or order.get("arguments") is None:
             return jsonify(error="この注文は実行を開始できる状態ではありません。画面を開き直してください。", code="started"), 409
         order["state"] = "starting"
-        coupon_to_use = order.get("coupon") if not order.get("coupon_used") else None
+        coupon_to_use = order.get("coupon") if not order.get("coupon_used") and order.get("coupon_kind") != "period" else None
     if coupon_to_use:   # 入金が確認できた（支払い済み）ので、クーポンを使用済みにする
         try:
             paypay_gateway.coupon_consume(coupon_to_use, _order_id_of(order))
@@ -3309,6 +3458,7 @@ PUNI_HTML = _template("puni.html")     # ぷにぷに代行の画面
 
 
 HOME_HTML = _template("home.html")     # トップ（大メニュー）
+EXTRA_HTML = _template("extra.html")   # チケット購入・支援BOX
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))

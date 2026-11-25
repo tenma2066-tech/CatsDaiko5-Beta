@@ -577,9 +577,9 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <h2>ご注文内容</h2>
       <p class="sub">内容と金額を確認して、下の「お支払いへ進む」を押してください。</p>
       <div id="cart"></div>
-      {% if payments and not is_admin %}<label class="field"><span>クーポンコード（お持ちの方）</span>
+      {% if payments and not is_admin %}<label class="field"><span>クーポン・チケットコード（お持ちの方）</span>
         <input type="text" id="coupon" style="text-transform:uppercase" placeholder="例：NK-ABCD-EFGH" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="20"></label>
-      <p class="sub" style="margin-top:4px">{{ coupon_min }}円以上のご注文で10%引き（1円未満切り捨て）。無料クーポン（FR-で始まるコード）は金額に関係なく0円になります。1つのコードは1回だけ使えます。</p>{% endif %}
+      <p class="sub" style="margin-top:4px">{{ coupon_min }}円以上のご注文で10%引き（1円未満切り捨て）。無料クーポン（FR-）・<a href="/ticket">期間無料チケット</a>（PS-）は金額に関係なく0円、<a href="/support">支援BOX</a>のお礼（SP-）は30%引きです。</p>{% endif %}
       <div class="err" id="orderErr" role="alert"></div>
     </div>
     <div class="panel">
@@ -1258,8 +1258,9 @@ function estimate(pc,qm){
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
   return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other+(restartOn()?PRICES.restart:0)+Math.floor(ptMin().min/10)*PRICES.playtime10;
 }
-function freeCoupon(){ return !IS_ADMIN&&/^FR-/.test(couponCode()); }
-function payable(base){ if(IS_ADMIN||freeCoupon()) return 0; return (couponCode()&&base>=COUPON_MIN)?Math.floor(base*9/10):base; }
+function freeCoupon(){ return !IS_ADMIN&&/^(FR|PS)-/.test(couponCode()); }   /* FR＝1回無料・PS＝期間無料チケット */
+function supportCoupon(){ return !IS_ADMIN&&/^SP-/.test(couponCode()); }      /* 支援BOXのお礼：30%引き・下限なし */
+function payable(base){ if(IS_ADMIN||freeCoupon()) return 0; if(supportCoupon()) return Math.floor(base*70/100); return (couponCode()&&base>=COUPON_MIN)?Math.floor(base*9/10):base; }
 function renderCart(pc,qm){
   const box=$('#cart'); if(!box) return; box.textContent='';
   const t=$('#transfer').value.trim();
@@ -1297,8 +1298,9 @@ function renderCart(pc,qm){
   }
   if(PAYMENTS){
     const cc=couponCode(), pay=payable(total);
-    if(freeCoupon()&&total>0) line('無料クーポン',cc+'（使えるかは次へ進むときに確認します）',el('span',null,'-'+total.toLocaleString('ja-JP')+'円'),null);
-    else if(!IS_ADMIN&&cc&&!freeCoupon()){
+    if(freeCoupon()&&total>0) line(/^PS-/.test(cc)?'期間無料チケット':'無料クーポン',cc+'（使えるかは次へ進むときに確認します）',el('span',null,'-'+total.toLocaleString('ja-JP')+'円'),null);
+    else if(supportCoupon()&&total>0) line('支援クーポン（30%引き）',cc+'（使えるかは次へ進むときに確認します）',el('span',null,'-'+(total-pay).toLocaleString('ja-JP')+'円'),null);
+    else if(!IS_ADMIN&&cc&&!freeCoupon()&&!supportCoupon()){
       if(total>=COUPON_MIN) line('クーポン（10%引き）',cc+'（使えるかは次の画面へ進むときに確認します）',el('span',null,'-'+(total-pay).toLocaleString('ja-JP')+'円'),null);
       else box.append(el('p','cnote warn','クーポンは '+COUPON_MIN+'円以上のご注文で使えます（いまは '+total.toLocaleString('ja-JP')+'円）。'));
     }
@@ -2003,7 +2005,7 @@ async function forgetOrder(o){
 async function loadResume(quiet){
   try{
     const r=quiet?await fetch('/api/orders/mine',{cache:'no-store'}):await api('/api/orders/mine',{cache:'no-store'},6); if(!r.ok) return;
-    const j=await r.json(); const list=(j.orders||[]).filter(o=>!o.tsum&&!o.puni);   /* ツム・ぷにの注文は各画面で扱う */
+    const j=await r.json(); const list=(j.orders||[]).filter(o=>!o.tsum&&!o.puni&&!o.product);   /* ツム・ぷにの注文は各画面で扱う */
     let seen=[]; try{ seen=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); }catch(e){}
     // いま見ている（見た）実行の注文は「結果を見せた」として記録する
     list.forEach(o=>{ if(o.job&&o.job===curJob&&o.state==='done') markShown(o.order); });

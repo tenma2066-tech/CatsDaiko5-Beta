@@ -658,8 +658,44 @@ def coupon_issue_free(days: int = 30, note: str = "") -> str:
     raise PayPayError("coupon_issue", "クーポンを発行できませんでした。")
 
 
+COUPON_PREFIX = {"free": "FR", "period": "PS", "pct30": "SP"}   # FR＝1回無料／PS＝期間無料（パス）／SP＝支援30%引き
+UNLIMITED_DAYS = 36500                                          # 「無制限」の期間チケット（100年）
+
+
+def coupon_issue_kind(kind: str, days: int, issued_order: str, note: str = "") -> tuple[str, float]:
+    """購入（チケット・支援BOX）で発行するクーポン。同じ注文からは同じコードを返す（二重発行しない）。
+    戻り値は (コード, 有効期限のUNIX時刻)。"""
+    if kind not in COUPON_PREFIX:
+        raise ValueError(kind)
+    days = max(1, min(int(days), UNLIMITED_DAYS))
+    note = str(note or "").strip()[:60] or None
+    now = time.time()
+    with _ledger() as db:
+        _coupon_table(db)
+        row = db.execute("SELECT code, expires FROM coupons WHERE issued_order=?", (issued_order,)).fetchone()
+        if row:
+            return row["code"], float(row["expires"])
+        for _ in range(10):
+            code = _new_coupon_code(COUPON_PREFIX[kind])
+            try:
+                db.execute("INSERT INTO coupons(code, created, expires, state, issued_order, used_order, updated, kind, note) "
+                           "VALUES(?,?,?,?,?,?,?,?,?)", (code, now, now + days * 86400, "active", issued_order, None, now, kind, note))
+                return code, now + days * 86400
+            except sqlite3.IntegrityError:
+                continue
+    raise PayPayError("coupon_issue", "クーポンを発行できませんでした。")
+
+
+def coupon_expires(code: str):
+    """有効期限（UNIX時刻）。見つからなければ None。"""
+    with _ledger() as db:
+        _coupon_table(db)
+        row = db.execute("SELECT expires FROM coupons WHERE code=?", (code,)).fetchone()
+    return float(row["expires"]) if row else None
+
+
 def coupon_kind(code: str):
-    """クーポンの種類（'pct10' / 'free'）。見つからなければ None。"""
+    """クーポンの種類（'pct10' / 'free' / 'period' / 'pct30'）。見つからなければ None。"""
     with _ledger() as db:
         _coupon_table(db)
         row = db.execute("SELECT kind FROM coupons WHERE code=?", (code,)).fetchone()
@@ -667,10 +703,10 @@ def coupon_kind(code: str):
 
 
 def coupon_revoke(code: str) -> bool:
-    """未使用の無料クーポンを取り消す（使用中・使用済みは取り消さない）。"""
+    """未使用の無料・期間・支援クーポンを取り消す（使用中・使用済みは取り消さない）。"""
     with _ledger() as db:
         _coupon_table(db)
-        cur = db.execute("UPDATE coupons SET state='used', used_order='revoked', updated=? WHERE code=? AND state='active' AND kind='free'",
+        cur = db.execute("UPDATE coupons SET state='used', used_order='revoked', updated=? WHERE code=? AND state='active' AND kind IN ('free','period','pct30')",
                          (time.time(), code))
         return cur.rowcount == 1
 
