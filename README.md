@@ -13,6 +13,7 @@
 | `/ticket` | チケット購入（1回無料・期間無料。クーポンコード式） | `templates/extra.html` | コードを発行するだけ |
 | `/support` | 支援BOX（お礼に30%引きクーポン） | `templates/extra.html` | 同上 |
 | `/source` | ソースコード購入（この仕組み一式の zip） | `templates/extra.html` | `source_pack.py` |
+| `/reviews` | 実績（完了したお客さんの星5段階の評価と感想） | `templates/reviews.html` | 入力欄は `static/review.js` |
 | `/admin` | 管理画面（PayPay 接続・注文・料金・クーポン・メンテ表示） | `templates/admin.html` | — |
 
 右下の「質問する」は AI の Q&A チャット（`qa_bot.py`）。鍵（`ANTHROPIC_API_KEY`）が無ければ固定の案内文になります。

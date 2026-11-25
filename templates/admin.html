@@ -69,6 +69,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <button class="tab" role="tab" data-sec="orders">注文{% if dash.attention %}<span class="badge">{{ dash.attention|length }}</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="history">履歴</button>
 <button class="tab" role="tab" data-sec="paypay">PayPay{% if not pp.ready %}<span class="badge">!</span>{% endif %}</button>
+<button class="tab" role="tab" data-sec="reviews">実績</button>
 <button class="tab" role="tab" data-sec="settings">設定{% if maint.on %}<span class="badge warn">ON</span>{% endif %}</button>
 </div></div>
 
@@ -155,6 +156,14 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <button class="btn full">認証</button></form></div></section>
 
 <!-- ===== 設定 ===== -->
+<section class="view" id="sec-reviews">
+<div class="card"><h2>実績（お客さんの評価と感想）</h2>
+<p class="sub">完了した注文1件につき1つ、お客さんが書けます。{% if review_stats %}公開中 {{ review_stats.count }}件・平均 ★{{ review_stats.average }}。{% endif %}不適切なものは「非表示」にできます（消えるのは公開ページの表示だけ。あとで戻せます）。<a href="/reviews" target="_blank" rel="noopener">公開ページを開く</a></p>
+{% for r in reviews %}<div class="h"><div class="l1"><b>{{ "★" * r.stars }}{{ "☆" * (5 - r.stars) }}</b><span class="chip">{{ r.shop }}</span><span class="chip">{{ r.when }}</span>{% if r.hidden %}<span class="chip warn">非表示</span>{% endif %}</div>
+<div class="sub" style="white-space:pre-wrap;word-break:break-word;margin:4px 0">{{ r.text }}</div>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="{{ 'review_show' if r.hidden else 'review_hide' }}"><input type="hidden" name="id" value="{{ r.id }}"><button class="btn" style="padding:4px 10px;font-size:12px">{{ 'もう一度表示する' if r.hidden else '非表示にする' }}</button></form></div>
+{% else %}<div class="empty">まだ実績はありません</div>{% endfor %}</div>
+</section>
 <section class="view" id="sec-settings">
 <div class="card"><h2>メンテナンス表示</h2>
 <p class="sub">オンの間は新規の注文・新しい支払いを止めます。すでに支払い済み・保留中の注文は最後まで進みます。</p>
@@ -201,7 +210,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 
 <script>
 (function(){
-  var secs=['home','orders','history','paypay','settings'];
+  var secs=['home','orders','history','paypay','reviews','settings'];
   function show(id,push){
     if(secs.indexOf(id)<0) id='home';
     secs.forEach(function(s){ var e=document.getElementById('sec-'+s); if(e) e.classList.toggle('on',s===id); });

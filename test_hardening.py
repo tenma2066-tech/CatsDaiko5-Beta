@@ -172,13 +172,13 @@ class ShopIdentity(unittest.TestCase):
         c = A.app.test_client()
         with patch.object(site_config, "SHOP_NAME", "テスト商店"), patch.object(site_config, "SHOP_X_ID", "test_shop"), \
              patch.object(site_config, "REVIEW_POST_ID", ""), patch.object(site_config, "GOOGLE_SITE_VERIFICATION", ""):
-            for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source"):
+            for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source", "/reviews"):
                 page = c.get(path).get_data(as_text=True)
                 self.assertIn("テスト商店", page, path)
                 self.assertNotIn("TN SHOP", page, path)
                 self.assertNotIn("paysms1212", page, path)
             self.assertNotIn("google-site-verification", c.get("/").get_data(as_text=True))
-            self.assertIn("const REVIEW_POST=\"\"", c.get("/nyanko").get_data(as_text=True))   # レビューのお願いは出ない
+            self.assertNotIn("今までの実績を見る", c.get("/reviews").get_data(as_text=True))   # X のポストが未設定なら、そのリンクは出さない
 
     def test_empty_env_value_falls_back_to_default(self):
         with patch.dict("os.environ", {"X_TEST_VALUE": "  "}):

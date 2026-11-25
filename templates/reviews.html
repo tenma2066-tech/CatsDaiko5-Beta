@@ -1,0 +1,118 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>実績｜お客さまの評価と感想｜{{ shop_name }}</title>
+<meta name="description" content="{{ shop_name }} をご利用いただいたお客さまの評価と感想です。実際に注文が完了した方だけが書けます。">
+<link rel="canonical" href="{{ site }}/reviews">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<meta name="theme-color" content="#ffd400">
+<style>
+:root{
+  --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
+  --accent:#ffc42e;--star:#f5a623;--bar:#d5dbe3;--ok:#12a05c;--bad:#d93636;--badbg:#fdebeb;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;--bar:#333943;--badbg:#321a1a;
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;
+  font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+.wrap{max-width:600px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top,0px)) 14px calc(32px + env(safe-area-inset-bottom,0px))}
+a:focus-visible,button:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+[hidden]{display:none!important}
+.top{margin:0 0 10px}
+.top a{font-size:14px;color:var(--muted);text-decoration:none;font-weight:700}
+h1{margin:0 0 4px;font-size:24px;font-weight:800}
+.lead{margin:0 0 16px;font-size:14px;color:var(--muted)}
+.maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px;margin:0 0 14px;box-shadow:0 4px 0 var(--line)}
+.sum{display:flex;gap:16px;align-items:center}
+.sum .avg{flex:none;text-align:center;min-width:96px}
+.sum .avg b{display:block;font-size:44px;font-weight:800;line-height:1}
+.sum .avg span{display:block;color:var(--star);font-size:18px;letter-spacing:1px}
+.sum .avg small{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+.dist{flex:1;min-width:0;font-size:12.5px}
+.dist div{display:flex;align-items:center;gap:6px;margin:3px 0}
+.dist i{flex:1;height:8px;border-radius:4px;background:var(--bar);overflow:hidden;font-style:normal}
+.dist i u{display:block;height:100%;background:var(--star);border-radius:4px;text-decoration:none}
+.dist em{font-style:normal;color:var(--muted);min-width:2.4em;text-align:right;font-variant-numeric:tabular-nums}
+.rv{padding:14px 16px}
+.rv .hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 6px}
+.rv .st{color:var(--star);font-size:17px;letter-spacing:1px}
+.rv .st s{color:var(--bar);text-decoration:none}
+.tag{padding:1px 9px;border-radius:999px;border:2px solid var(--line);font-size:11.5px;font-weight:800;background:var(--soft)}
+.rv time{margin-left:auto;font-size:12px;color:var(--muted)}
+.rv p{margin:0;font-size:14.5px;line-height:1.75;white-space:pre-wrap;word-break:break-word}
+.empty{text-align:center;color:var(--muted);font-size:14px;padding:22px 0}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:10px 18px;border:2px solid var(--line);
+  border-radius:14px;background:var(--panel);color:inherit;font:inherit;font-weight:800;cursor:pointer;box-shadow:0 3px 0 var(--line);text-decoration:none}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
+.btn.primary{background:var(--accent);color:#17181c}
+.how{font-size:13px;color:var(--muted);margin:10px 0 0}
+.foot{margin:24px 0 0;text-align:center;font-size:12.5px;color:var(--muted)}
+</style></head><body>
+<main class="wrap">
+  <div class="top"><a href="/">← メニューへ</a></div>
+  {% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}</div>{% endif %}
+  <h1>実績⭐</h1>
+  <p class="lead">ご利用いただいたお客さまの評価と感想です。<b>実際に注文が完了した方だけ</b>が、1つの注文につき1回書けます。</p>
+
+  <section class="card sum" aria-label="評価のまとめ">
+    <div class="avg">
+      <b>{{ "%.1f"|format(stats.average) if stats.count else "–" }}</b>
+      <span aria-hidden="true">{% set full = stats.average|round|int %}{{ "★" * full }}{{ "☆" * (5 - full) }}</span>
+      <small>{{ "{:,}".format(stats.count) }}件の評価</small>
+    </div>
+    <div class="dist">
+      {% for n in [5, 4, 3, 2, 1] %}<div><span>★{{ n }}</span><i><u style="width:{{ (stats.dist[n] / stats.count * 100)|round(1) if stats.count else 0 }}%"></u></i><em>{{ stats.dist[n] }}</em></div>{% endfor %}
+    </div>
+  </section>
+
+  <div id="list">
+  {% for r in reviews %}
+    <article class="card rv">
+      <div class="hd"><span class="st" aria-label="星{{ r.stars }}">{{ "★" * r.stars }}<s>{{ "★" * (5 - r.stars) }}</s></span>{% if r.shop %}<span class="tag">{{ r.shop }}</span>{% endif %}<time>{{ r.date }}</time></div>
+      <p>{{ r.text }}</p>
+    </article>
+  {% else %}
+    <div class="card empty" id="empty">まだ実績はありません。<br>最初の感想をお待ちしています。</div>
+  {% endfor %}
+  </div>
+  <button class="btn" id="more" type="button" {% if not more %}hidden{% endif %}>もっと見る</button>
+
+  <section class="card" style="margin-top:14px">
+    {% if past_reviews_url %}<a class="btn primary" href="{{ past_reviews_url }}" target="_blank" rel="noopener">今までの実績を見る（X）→</a>
+    <p class="how">アプリ内の実績を始める前にいただいた感想は、X のポストへのリプライでご覧いただけます。</p>{% endif %}
+    <p class="how" {% if not past_reviews_url %}style="margin-top:0"{% endif %}>感想は、代行が完了したときの画面から書けます。お名前や注文の内容は掲載されません。</p>
+  </section>
+
+  <div class="foot">{{ shop_name }}{% if shop_x %} ／ お問い合わせ：X <b>@{{ shop_x }}</b>{% endif %} ／ v{{ version }}</div>
+</main>
+<script>
+"use strict";
+/* 「もっと見る」：続きを取ってきて、同じ形で足す */
+(function(){
+  const more=document.getElementById('more'), list=document.getElementById('list');
+  let last={{ (reviews[-1].id if reviews else 0)|tojson }}, busy=false;
+  function el(tag,cls,text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
+  function card(r){
+    const a=el('article','card rv'), hd=el('div','hd'), st=el('span','st','★'.repeat(r.stars));
+    st.setAttribute('aria-label','星'+r.stars); st.append(el('s',null,'★'.repeat(5-r.stars))); hd.append(st);
+    if(r.shop) hd.append(el('span','tag',r.shop));
+    hd.append(el('time',null,r.date)); a.append(hd,el('p',null,r.text)); return a;
+  }
+  more.addEventListener('click',async()=>{
+    if(busy) return; busy=true; more.textContent='読み込んでいます…';
+    try{
+      const r=await fetch('/api/reviews?before='+encodeURIComponent(last),{cache:'no-store'}); const j=await r.json();
+      (j.reviews||[]).forEach(x=>{ list.append(card(x)); last=x.id; });
+      more.hidden=!j.more;
+    }catch(e){}
+    busy=false; more.textContent='もっと見る';
+  });
+})();
+</script>
+</body></html>

@@ -179,6 +179,11 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="lines" id="resultLines"></p>
   <div id="codes"></div>
   <p class="okbox" id="coupBox" hidden></p>
+  {% if reviews_on %}<div class="card" id="reviewBox" style="margin:12px 0 0" hidden>
+    <h3 style="margin:0 0 2px;font-size:16px">⭐ 評価と感想をお聞かせください</h3>
+    <p class="note" style="margin:0 0 6px">星と{{ review_min }}文字以上の感想を送ると、「<a href="/reviews" target="_blank" rel="noopener">実績</a>」に掲載されます（お名前・注文内容は出ません）。</p>
+    <div id="reviewForm"></div>
+  </div>{% endif %}
   <details class="logbox"><summary>くわしい記録</summary><pre id="log"></pre></details>
 </section>
 
@@ -233,7 +238,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <div class="row"><button class="btn primary" id="capGo" type="button">送信する</button></div>
 </div></div>
 
-<script src="/static/shop.js?v=1"></script>
+<script src="/static/review.js?v=1"></script>
+<script src="/static/shop.js?v=2"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
@@ -337,6 +343,7 @@ $('#modeList').addEventListener('change',syncMode);
 /* ---------- 注文まわり（支払い・一覧・再開）は共通の static/shop.js ---------- */
 const orders=ShopOrders({
   shop:'tsum', payments:PAYMENTS, couponMin:COUPON_MIN,
+  review:{min:{{ review_min }},max:{{ review_max }},pastUrl:{{ past_reviews_url|tojson }}},
   isBusy:()=>!!curJob, watch, afterClose:renderCart,
   result:{ has:o=>!!o.result, label:'引き継ぎ情報を見る', name:'引き継ぎ情報', show:o=>{
     $('#s-status').hidden=false; $('#codes').textContent=''; delete $('#codes').dataset.done;
@@ -380,6 +387,7 @@ function watch(job){
   /* 前の注文の結果を消してから表示する（取り違え防止） */
   $('#codes').textContent=''; delete $('#codes').dataset.done;
   $('#resultLines').textContent=''; $('#coupBox').hidden=true; $('#log').textContent='';
+  if($('#reviewBox')) $('#reviewBox').hidden=true;
   $('#now').dataset.s='running'; $('#now').textContent='準備しています…'; $('#pbar').style.width='0'; $('#pbar').dataset.s='';
   $('#s-status').hidden=false; renderCart();
   $('#s-status').scrollIntoView({behavior:'smooth',block:'start'});
@@ -410,6 +418,7 @@ async function poll(){
   if(j.result) showCodes(j.result, st==='error');
   if(st==='done'||st==='error'){
     const job=curJob; stopWatch(); orders.loadCoupon(job); orders.loadResume();
+    if(st==='done') orders.offerReview(job);
     if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }
 }

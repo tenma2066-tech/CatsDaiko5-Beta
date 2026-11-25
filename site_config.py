@@ -22,8 +22,19 @@ SHOP_X_ID = re.sub(r"[^A-Za-z0-9_]", "", _env("SHOP_X_ID", "paysms1212"))[:15]
 # Google Search Console の所有確認（<meta name="google-site-verification">）。空なら出さない。
 GOOGLE_SITE_VERIFICATION = re.sub(r"[^A-Za-z0-9_-]", "", _env(
     "GOOGLE_SITE_VERIFICATION", "HOaFZOzV5t4jyEXdAr2bMg6f2OVwvdpedlAosg1FXT0"))[:100]
-# にゃんこ代行の完了後に出す「レビューのお願い」の返信先ポスト（X のポストID）。空なら出さない。
+# アプリ内の実績を始める前に、感想を集めていた X のポストのID。「今までの実績を見る」のリンク先になる。空なら出さない。
 REVIEW_POST_ID = re.sub(r"\D", "", _env("REVIEW_POST_ID", "2119246650996932810"))[:25]
+
+
+# 実績（完了後に星と感想を書いてもらう）を使うか。0 にすると、入力のお願いも /reviews も出さない。
+REVIEWS_ENABLED = _env("REVIEWS_ENABLED", "1") != "0"
+REVIEW_MIN_CHARS = 20            # 感想の最小文字数
+REVIEW_MAX_CHARS = 400
+
+
+def past_reviews_url() -> str:
+    """アプリ内の実績を始める前の実績（X のポスト）へのリンク。REVIEW_POST_ID が空なら出さない。"""
+    return f"https://x.com/{SHOP_X_ID or 'i'}/status/{REVIEW_POST_ID}" if REVIEW_POST_ID else ""
 
 
 def contact_text() -> str:
@@ -61,4 +72,6 @@ def template_context() -> dict:
     """すべての画面に渡す値。"""
     return {"shop_name": SHOP_NAME, "shop_x": SHOP_X_ID, "contact": contact_text(), "contact_url": contact_url(),
             "google_verification": GOOGLE_SITE_VERIFICATION, "review_post_id": REVIEW_POST_ID,
-            "flow_images": flow_images(), "og": og_images()}
+            "flow_images": flow_images(), "og": og_images(),
+            "reviews_on": REVIEWS_ENABLED, "past_reviews_url": past_reviews_url(),
+            "review_min": REVIEW_MIN_CHARS, "review_max": REVIEW_MAX_CHARS}

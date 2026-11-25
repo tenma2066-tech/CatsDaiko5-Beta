@@ -630,6 +630,59 @@ def history_list(limit: int = 200, user_id: str = ""):
         return [dict(r) for r in db.execute(sql, args).fetchall()]
 
 
+# ---------------------------------------------------------------- 実績（お客さんの評価と感想）
+def _review_table(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT UNIQUE NOT NULL,
+                  created REAL NOT NULL, shop TEXT NOT NULL, stars INTEGER NOT NULL, body TEXT NOT NULL,
+                  hidden INTEGER NOT NULL DEFAULT 0)""")
+
+
+def review_add(order_id: str, shop: str, stars: int, body: str) -> bool:
+    """実績を1件保存する。1つの注文につき1件だけ（すでにあれば False）。"""
+    with _ledger() as db:
+        _review_table(db)
+        try:
+            db.execute("INSERT INTO reviews(order_id, created, shop, stars, body) VALUES(?,?,?,?,?)",
+                       (order_id, time.time(), shop, int(stars), body))
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def review_list(limit: int = 30, before: int | None = None, include_hidden: bool = False):
+    """新しい順。before は「この id より前」（続きを読むとき）。注文番号は返さない。"""
+    sql, args = "SELECT id, created, shop, stars, body, hidden FROM reviews WHERE 1=1", []
+    if not include_hidden:
+        sql += " AND hidden=0"
+    if before:
+        sql += " AND id < ?"
+        args.append(int(before))
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(max(1, min(int(limit), 200)))
+    with _ledger() as db:
+        _review_table(db)
+        return [dict(r) for r in db.execute(sql, args).fetchall()]
+
+
+def review_stats() -> dict:
+    """公開中の実績の件数・平均・星ごとの件数。"""
+    with _ledger() as db:
+        _review_table(db)
+        rows = db.execute("SELECT stars, COUNT(*) AS n FROM reviews WHERE hidden=0 GROUP BY stars").fetchall()
+    dist = {i: 0 for i in range(1, 6)}
+    for r in rows:
+        if r["stars"] in dist:
+            dist[r["stars"]] = r["n"]
+    count = sum(dist.values())
+    return {"count": count, "average": round(sum(k * v for k, v in dist.items()) / count, 1) if count else 0.0, "dist": dist}
+
+
+def review_set_hidden(review_id: int, hidden: bool) -> bool:
+    with _ledger() as db:
+        _review_table(db)
+        return db.execute("UPDATE reviews SET hidden=? WHERE id=?", (1 if hidden else 0, int(review_id))).rowcount == 1
+
+
 # ---------------------------------------------------------------- クーポン（200円以上で10%引き・1回きり）
 _COUPON_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # 見間違えやすい 0/O/1/I を除く
 

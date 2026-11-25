@@ -220,7 +220,26 @@
       }
     }
 
+    /* 完了した注文に、まだ実績（星と感想）が無ければ入力欄を出す。書かなくても結果は見られる（お願いだけ）。 */
+    async function offerReview(job) {
+      var box = $("#reviewBox");
+      if (!box || !cfg.review || !window.ReviewForm || !cfg.payments || !job) return;
+      var o = null;
+      for (var i = 0; i < 3 && !o; i++) {   /* 完了が注文に反映されるまで数秒かかることがある */
+        try { o = (await myOrders()).find(function (x) { return x.job === job && x.state === "done"; }); } catch (e) {}
+        if (!o) await new Promise(function (ok) { setTimeout(ok, 1500); });
+      }
+      if (!o || o.reviewed) return;
+      window.ReviewForm($("#reviewForm"), { min: cfg.review.min, max: cfg.review.max, pastUrl: cfg.review.pastUrl,
+        target: function () { return { order: o.order, job: job }; },
+        onDone: function (saved) {
+          $("#reviewForm").textContent = "";
+          $("#reviewForm").append(el("p", "okbox", saved ? "ありがとうございました！実績に掲載しました。" : "ありがとうございました！"));
+        } });
+      box.hidden = false;
+    }
+
     return { api: api, postJson: postJson, copyText: copyText, seenJobs: seenJobs, markSeen: markSeen,
-             begin: begin, loadResume: loadResume, loadCoupon: loadCoupon };
+             begin: begin, loadResume: loadResume, loadCoupon: loadCoupon, offerReview: offerReview };
   };
 })();

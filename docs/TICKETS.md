@@ -41,3 +41,16 @@
   - 置き換え後に持ち主の情報（`FORBIDDEN`）が残っていたら、zip を作らずエラーにする。**新しく持ち主の情報をコードに書いたら、`REPLACE` と `FORBIDDEN` に足すこと。**
   - 買った人向けの `LICENSE.md`（再配布不可・無保証）と `docs/SETUP.md`（導入ガイド）が入る。
 - 確かめ方：`python source_pack.py out.zip` で手元に作れる。`test_source.py` が中身（必要なものが入り、持ち主の情報が無いこと）と購入〜ダウンロードを確かめる。
+
+## 実績（`/reviews`・7つ目。トップのいちばん上の細長い帯）
+
+完了した代行の注文に、お客さんが **星1〜5と感想（20〜400文字）** を書ける。以前の「X のポストにリプライ」を置き換えたもの。
+
+- 入力欄は全画面共通の `static/review.js`（`ReviewForm`）。にゃんこは**送信するとコードが見られる**（`templates/main.html` の `needReview` / `rvOpen` / `rvUnlock`）。ツムツム・ぷにぷには完了後に任意で出す（`static/shop.js` の `offerReview`）。
+- 保存：`POST /api/reviews {stars, text, order?, job?}`。本人の・完了した・代行の注文で、まだ書いていないものだけ（1注文1件。注文に `reviewed` の印）。対象が無いときも `ok`（`saved:false`）を返し、画面は先へ進める。
+- **お客さんを止めない**：保存に2回続けて失敗したら、入力欄は閉じてコードを見せる。
+- 置き場所：台帳（SQLite）の `reviews` 表（`paypay_gateway.review_*`）。注文番号は外へ出さない。部門名と日付だけ添える（注文内容・名前は出さない）。
+- 公開：`/reviews`（平均・星ごとの件数・一覧・「もっと見る」＝`GET /api/reviews?before=id`）。`REVIEW_POST_ID` があれば「今までの実績を見る（X）」のリンクを出す。
+- 管理：`/admin` の「実績」タブで非表示／再表示（平均と件数からも外れる）。
+- 止める：`REVIEWS_ENABLED=0`（入力のお願い・ページ・トップの帯・sitemap すべて消える）。
+- テスト：`test_reviews.py`、ブラウザは `test_ui_results.py` の `ReviewGate`。

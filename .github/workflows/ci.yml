@@ -53,6 +53,7 @@ jobs:
           python -m unittest -v test_tickets.py
           python -m unittest -v test_source.py
           python -m unittest -v test_hardening.py
+          python -m unittest -v test_reviews.py
           python -m unittest -v test_hold_e2e.py
           python -m unittest -v test_paypay_hold.py
           python -m unittest -v test_paypay_gateway.py

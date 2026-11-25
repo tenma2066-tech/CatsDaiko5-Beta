@@ -20,6 +20,7 @@ services:
       SHOP_NAME: ${SHOP_NAME:-}
       SHOP_X_ID: ${SHOP_X_ID:-}
       REVIEW_POST_ID: ${REVIEW_POST_ID:-}
+      REVIEWS_ENABLED: ${REVIEWS_ENABLED:-}
       GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
       # LINEログインのIPローテーション。固定IPだと画像認証/reCAPTCHA が繰り返し出てログインできないことがある。
       # ホスト(Ubuntu)に入れた Tor を host.docker.internal（＝docker のホストゲートウェイ。この環境では

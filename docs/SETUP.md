@@ -33,7 +33,8 @@ PAYMENTS_ENABLED=0 ADMIN_PASSWORD=test python app.py
 |---|---|---|
 | `SHOP_NAME` | `MY SHOP` | 店名（画面のタイトル・フッター・Q&A の名乗り） |
 | `SHOP_X_ID` | `your_x_id` | 問い合わせ先の X のID（@ なし）。空なら問い合わせ先を出さない |
-| `REVIEW_POST_ID` | `1234567890` | にゃんこ代行の完了後に「レビューのお願い」を出すポストのID。空なら出さない |
+| `REVIEW_POST_ID` | `1234567890` | 以前 X で感想を集めていたポストのID。実績ページの「今までの実績を見る」のリンク先になる。空なら出さない |
+| `REVIEWS_ENABLED` | `1` | 実績（完了後に星と感想を書いてもらう）を使うか。`0` で入力のお願いも実績ページも出さない |
 | `GOOGLE_SITE_VERIFICATION` | （Search Console の値） | 検索の所有確認。空なら出さない |
 
 画像（`static/game-*.jpg` `static/ogp-*.jpg` `static/icon-*.png`）は、自分のお店のものに差し替えてください。
@@ -79,6 +80,7 @@ PAYMENTS_ENABLED=0 ADMIN_PASSWORD=test python app.py
 - **保留**：PayPay 側の安全確認で止まった送金は、90秒ごとに自動で再確認します。管理画面の「注文」で手動の再確認もできます。
 - **要確認（dead）**：自動で確定できなかった注文。PayPay アプリで着金を確かめてから「支払い済みにする」を押します。
 - **メンテ表示**：管理画面の「設定」でオンにすると、新しい注文と支払いだけ止まります（支払い済みの注文は進められます）。
+- **実績**：完了したお客さんが星と感想を書きます（1注文1回）。不適切なものは管理画面の「実績」タブで非表示にできます。
 - **バックアップ**：管理画面からダウンロードできます（暗号鍵は入りません。`.env` は別に控える）。
 - **更新**：`main` に push するたび、実行中の注文が終わるのを待ってから入れ替わります。
 
@@ -96,7 +98,7 @@ PAYMENTS_ENABLED=0 ADMIN_PASSWORD=test python app.py
 | `MAX_CONCURRENT_JOBS` | `4` | 同時に実行する件数 |
 | `ANTHROPIC_API_KEY` `QA_MODEL` | — | Q&A チャット（`docs/QA_SETUP.md`） |
 | `TSUM_SOCKS_URL` `PUNI_SOCKS_URL` | — | ログイン時に使うプロキシ（`docs/TSUM.md`・`docs/PUNI.md`） |
-| `SHOP_NAME` `SHOP_X_ID` `REVIEW_POST_ID` `GOOGLE_SITE_VERIFICATION` | — | お店の名前など（手順2） |
+| `SHOP_NAME` `SHOP_X_ID` `REVIEW_POST_ID` `REVIEWS_ENABLED` `GOOGLE_SITE_VERIFICATION` | — | お店の名前など（手順2） |
 
 ## うまくいかないとき
 

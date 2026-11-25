@@ -9,6 +9,7 @@
   6. 管理画面                         … /admin（_admin_post が操作、_admin_page が表示）
   7. 注文（決済してから実行）           … _orders、保存、_reconcile_orders（結末の反映）
   8. 画面のページ                     … / /nyanko /tsum /puni、robots・sitemap
+     （実績＝星と感想 /reviews・/api/reviews は 10 の手前にある）
   9. 注文を作る                       … /run → 各部門の検査 → _checkout → _place_order（クーポンもここ）
  10. Q&A・チケット・支援・ソースコード  … /api/qa、/ticket /support /source（_deliver_product）
  11. 注文の一覧・支払い・進み具合       … /api/orders/…（_pay_order → _start_paid_order）、/status
@@ -63,7 +64,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.16"
+APP_VERSION = "1.17"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
@@ -1665,7 +1666,7 @@ def admin():
 
 
 ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
-             "maint_save": "settings", "price_save": "settings", "order_recheck": "orders", "order_start": "orders",
+             "maint_save": "settings", "price_save": "settings", "review_hide": "reviews", "review_show": "reviews", "order_recheck": "orders", "order_start": "orders",
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
 
@@ -1821,6 +1822,13 @@ def _admin_post(token):
             ok = False
         msg = (f"クーポン {code} を取り消しました。" if ok
                else "取り消せませんでした（取り消せるのは、未使用の無料クーポン・チケット・支援クーポンだけです）。")
+    elif action in ("review_hide", "review_show"):
+        try:
+            ok = paypay_gateway.review_set_hidden(int(request.form.get("id") or 0), action == "review_hide")
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("review moderation failed")
+            ok = False
+        msg = ("実績を非表示にしました。" if action == "review_hide" else "実績をもう一度表示するようにしました。") if ok else "変更できませんでした。"
     elif action == "backup_download":
         return _backup_response()
     elif action == "lock":
@@ -1949,9 +1957,17 @@ def _admin_page(msg):
                 coupons.append(c)
         except Exception:
             _log_orders.exception("coupon list failed")
+    reviews = []
+    if unlocked:
+        try:
+            for r in paypay_gateway.review_list(100, include_hidden=True):
+                reviews.append({"id": r["id"], "stars": r["stars"], "text": r["body"], "hidden": bool(r["hidden"]),
+                                "shop": SHOP_LABELS.get(r["shop"], ""), "when": time.strftime("%m/%d %H:%M", time.localtime(r["created"]))})
+        except Exception:
+            _log_orders.exception("review list failed")
     rp = restart_pack()
     rp_text = "\n".join(f"{k}={v}" for k, v in rp["items"].items())
-    return render_template_string(ADMIN_HTML, coupons=coupons, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
+    return render_template_string(ADMIN_HTML, coupons=coupons, reviews=reviews, review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
                                   maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED,
@@ -2174,6 +2190,7 @@ def home():
     if request.args.get("game") == "nyanko":        # 以前の入口（/?game=nyanko）
         return redirect("/nyanko", code=301)
     return render_template_string(HOME_HTML, prices=PRICES, low=_lowest_prices(), maint=_maint(),
+                                  reviews=_review_stats() if site_config.REVIEWS_ENABLED else None,
                                   version=APP_VERSION, site=_site())
 
 
@@ -2232,7 +2249,8 @@ def robots_txt():
 @app.get("/sitemap.xml")
 def sitemap_xml():
     urls = "".join(f"<url><loc>{xml_escape(_site() + path)}</loc></url>"
-                   for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source"))
+                   for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source")
+                   + (("/reviews",) if site_config.REVIEWS_ENABLED else ()))
     return Response(
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -2876,6 +2894,7 @@ def _public_order(order_id: str, o: dict) -> dict:
             "tsum": (o.get("job") or {}).get("mode") == "tsum",   # ツムツム代行の注文（画面が別なので区別する）
             "puni": (o.get("job") or {}).get("mode") == "puni",   # ぷにぷに代行の注文
             "product": (o.get("product") or {}).get("type"),       # チケット・支援BOX（代行ではない買い物）
+            "reviewed": bool(o.get("reviewed")),                    # 実績（星と感想）を書いたか
             "result": o.get("result") if o["state"] == "done" and not o.get("dry") else None, "clone": bool(o.get("clone")),
             "coupon_issued": o.get("coupon_issued"),
             "breakdown": o.get("breakdown") or [], "skipped": o.get("skipped") or []}
@@ -3165,6 +3184,126 @@ def support_order():
     if not SUPPORT_MIN <= amount <= SUPPORT_MAX:
         return jsonify(error=f"支援は {SUPPORT_MIN}円〜{SUPPORT_MAX:,}円でお願いします。", code="bad_amount"), 400
     return _create_product_order({"type": "support"}, amount, f"{PRODUCT_LABELS['support']}（{amount}円）")
+
+
+# ---------------------------------------------------------------- 実績（星と感想）
+SHOP_LABELS = {"nyanko": "にゃんこ代行", "tsum": "ツムツム代行", "puni": "ぷにぷに代行"}
+
+
+def _order_shop(o: dict) -> str:
+    """その注文がどの部門のものか（nyanko / tsum / puni）。"""
+    mode = (o.get("job") or {}).get("mode")
+    return mode if mode in ("tsum", "puni") else "nyanko"
+
+
+def _clean_review_text(raw) -> str:
+    """感想の文章を整える：制御文字を除き、空白の連続と4行以上の空行をつめる。"""
+    text = "".join(ch for ch in str(raw or "") if ch >= " " or ch == "\n")
+    text = re.sub(r"[ \t\u3000]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _review_target(me: str, order_id: str, job_id: str):
+    """実績を書ける注文を探す：本人の、完了した代行の注文で、まだ実績を書いていないもの。
+    注文番号 → 実行の番号 → いちばん新しいもの、の順に当てはめる。呼び出し側で _orders_lock を持つこと。"""
+    def ok(o):
+        return o["owner"] == me and o["state"] == "done" and not o.get("product") and not o.get("reviewed")
+    if order_id and order_id in _orders and ok(_orders[order_id]):
+        return order_id
+    if job_id:
+        hit = next((k for k, o in _orders.items() if o.get("job_id") == job_id and ok(o)), None)
+        if hit:
+            return hit
+    cands = sorted(((k, o) for k, o in _orders.items() if ok(o)), key=lambda kv: -kv[1]["created"])
+    return cands[0][0] if cands else None
+
+
+@app.post("/api/reviews")
+def review_post():
+    """完了した注文に、星（1〜5）と感想（20文字以上）を1件だけ書ける。
+    戻り値の saved は「保存したか」。対象の注文が無い・すでに書いた場合も ok（画面はコードの表示へ進める）。"""
+    if not site_config.REVIEWS_ENABLED:
+        return jsonify(error="not found"), 404
+    data = request.get_json(silent=True) or {}
+    stars = data.get("stars")
+    if type(stars) is not int or not 1 <= stars <= 5:
+        return jsonify(error="星を1〜5で選んでください。", code="bad_stars"), 400
+    text = _clean_review_text(data.get("text"))
+    low, high = site_config.REVIEW_MIN_CHARS, site_config.REVIEW_MAX_CHARS
+    if len(text) < low:
+        return jsonify(error=f"感想は{low}文字以上でお願いします（いま {len(text)} 文字）。", code="too_short"), 400
+    if len(text) > high:
+        return jsonify(error=f"感想は{high}文字までにしてください。", code="too_long"), 400
+    if len(set(text)) < 5:
+        return jsonify(error="同じ文字のくり返しではなく、感想を書いてください。", code="too_plain"), 400
+    if not _rate_ok("review:" + _client_ip(), 8, 600):
+        return _too_fast()
+    me = _owner()
+    with _orders_lock:
+        oid = _review_target(me, str(data.get("order") or "").strip(), str(data.get("job") or "").strip())
+        if oid:
+            _orders[oid]["reviewed"] = True          # 先に印を付ける（二度押しで2件にならない）
+            shop = _order_shop(_orders[oid])
+    if not oid:
+        return jsonify(ok=True, saved=False)
+    try:
+        saved = paypay_gateway.review_add(oid, shop, stars, text)
+    except Exception:  # noqa: BLE001  保存に失敗しても、お客さんのコード表示は止めない
+        _log_orders.exception("review save failed")
+        with _orders_lock:
+            if oid in _orders:
+                _orders[oid].pop("reviewed", None)
+        return jsonify(error="保存できませんでした。もう一度お試しください。", code="save_failed"), 503
+    _persist_orders()
+    return jsonify(ok=True, saved=saved)
+
+
+def _public_reviews(rows) -> list:
+    return [{"id": r["id"], "stars": r["stars"], "text": r["body"], "shop": SHOP_LABELS.get(r["shop"], ""),
+             "date": time.strftime("%Y/%m/%d", time.localtime(r["created"]))} for r in rows]
+
+
+def _review_stats() -> dict:
+    try:
+        return paypay_gateway.review_stats()
+    except Exception:  # noqa: BLE001  台帳が読めなくても、ページは出す
+        _log_orders.exception("review stats failed")
+        return {"count": 0, "average": 0.0, "dist": {i: 0 for i in range(1, 6)}}
+
+
+@app.get("/api/reviews")
+def review_list():
+    """実績の続き（「もっと見る」）。before＝この id より前。"""
+    if not site_config.REVIEWS_ENABLED:
+        return jsonify(error="not found"), 404
+    try:
+        before = int(request.args.get("before") or 0) or None
+    except (TypeError, ValueError):
+        before = None
+    try:
+        rows = paypay_gateway.review_list(REVIEW_PAGE, before)
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("review list failed")
+        rows = []
+    return jsonify(reviews=_public_reviews(rows), more=len(rows) == REVIEW_PAGE)
+
+
+REVIEW_PAGE = 20   # 実績を1回に出す件数
+
+
+@app.get("/reviews")
+def reviews_page():
+    """実績（お客さんの評価と感想）の一覧。"""
+    if not site_config.REVIEWS_ENABLED:
+        return redirect("/")
+    try:
+        rows = paypay_gateway.review_list(REVIEW_PAGE)
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("review list failed")
+        rows = []
+    return render_template_string(REVIEWS_HTML, stats=_review_stats(), reviews=_public_reviews(rows),
+                                  more=len(rows) == REVIEW_PAGE, maint=_maint(), version=APP_VERSION, site=_site())
 
 
 @app.post("/api/qa")
@@ -3546,7 +3685,8 @@ PUNI_HTML = _template("puni.html")     # ぷにぷに代行の画面
 
 
 HOME_HTML = _template("home.html")     # トップ（大メニュー）
-EXTRA_HTML = _template("extra.html")   # チケット購入・支援BOX
+EXTRA_HTML = _template("extra.html")   # チケット購入・支援BOX・ソースコード購入
+REVIEWS_HTML = _template("reviews.html")   # 実績（星と感想）
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))

@@ -238,7 +238,6 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 .rvlock>.rvhint,.rvlock .rvhint{display:block}
 #reviewPanel{z-index:40}
 #reviewPanel .rvmsg p{margin:8px 0;line-height:1.7}
-#reviewLink{display:block;text-align:center;padding:14px 16px;text-decoration:none;font-size:16px;margin:14px 0 6px}
 .note{margin:10px 0 0;font-size:12px;color:var(--muted)}
 .fail{margin-top:12px;border:2px solid var(--bad);background:var(--badbg);border-radius:14px;padding:12px;font-size:14px;font-weight:700}
 .srv{margin-top:12px;font-size:13px;color:var(--muted)}
@@ -633,7 +632,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <div class="fail" id="fail" hidden></div>
       <div class="result" id="res" hidden>
         <h3 id="res-title">完了しました</h3>
-        <p class="rvhint">🔒 コードは、お知らせのリンクを開くと見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">お知らせを開く</button></p>
+        <p class="rvhint">🔒 コードは、評価と感想を送ると見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">評価を書く</button></p>
         <div id="res-single">
           <div class="code"><div><small>引継ぎコード</small><strong id="r-transfer"></strong></div><button class="btn" type="button" data-copy="r-transfer">コピー</button></div>
           <div class="code"><div><small>暗証番号</small><strong id="r-confirm"></strong></div><button class="btn" type="button" data-copy="r-confirm">コピー</button></div>
@@ -773,7 +772,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <h2 id="doneTitle">完了しました</h2>
     <p class="sub">下の<b>引継ぎコード</b>と<b>暗証番号</b>を、必ず今すぐ控えてください（スクリーンショットでもOK）。この表示は30分で消えます。</p>
     <div id="doneCodes"></div>
-    <p class="rvhint">🔒 コードは、表示されたお知らせのリンクを開くと見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">お知らせを開く</button></p>
+    <p class="rvhint">🔒 コードは、評価と感想を送ると見られるようになります。<button class="btn" type="button" data-rvopen style="margin-left:6px;padding:4px 10px;font-size:12px">評価を書く</button></p>
     <div id="doneCoupon" class="couponbox" hidden></div>
     <h3>ゲームでの引き継ぎ手順</h3>
     <ol class="howto">
@@ -797,17 +796,10 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
   <div class="mbox">
     <h2 id="reviewTitle">ご利用ありがとうございました！✨</h2>
     <div class="rvmsg">
-      <p>この度はにゃんこ代行をご利用いただき、ありがとうございました！</p>
-      <p><b>コードをお渡しする前に、ご利用後の感想や評価を、下のポストへのリプライでお願いしています。</b>🙇‍♂️<br>今後のサービス改善の参考にもなりますので、率直なご感想をお待ちしております。</p>
+      <p><b>コードをお渡しする前に、評価と感想をお聞かせください。</b>🙇‍♂️<br>星を選んで、{{ review_min }}文字以上の感想を書いて送信すると、すぐに<b>引継ぎコードと暗証番号</b>が表示されます。</p>
+      <p class="sub">いただいた感想は「<a href="/reviews" target="_blank" rel="noopener">実績</a>」に掲載します（お名前・注文内容は出ません）。</p>
     </div>
-    <ol class="howto" style="margin:8px 0">
-      <li>下のボタンを押すと、X でポストへの<b>リプライ画面</b>が開きます。</li>
-      <li>感想・評価を書いて<b>リプライ</b>してください。</li>
-      <li>この画面に戻ると、<b>引継ぎコードと暗証番号</b>が表示されます。</li>
-    </ol>
-    <a id="reviewLink" class="btn pri" href="https://x.com/intent/tweet?in_reply_to={{ review_post_id }}" target="_blank" rel="noopener">💬 X でリプライする</a>
-    <p class="sub" style="text-align:center" id="reviewWait">リプライ画面が開かないときは <a href="https://x.com/{{ shop_x or 'i' }}/status/{{ review_post_id }}" target="_blank" rel="noopener" id="reviewPost">ポストを直接開く</a></p>
-    <p class="sub" style="text-align:center">またのご利用をお待ちしております！🐱✨</p>
+    <div id="reviewForm"></div>
   </div>
 </div>
 <div class="maintbar" id="maintBar" hidden><b>メンテナンス中</b><span id="maintMsg"></span> <a id="maintLink" href="#" hidden rel="noopener">新しいサイトを開く</a></div>
@@ -815,6 +807,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
 
+<script src="/static/review.js?v=1"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAINT={{ maint|tojson }};
@@ -1336,69 +1329,43 @@ function clock(d){return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.get
 function uptime(s){const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h>0?h+'時間'+m+'分':m+'分'+pad(s%60)+'秒'}
 function pill(id,s,text){const e=$(id); e.dataset.s=s; e.lastElementChild.textContent=text;}
 /* ---------- コードを見る前のお知らせ（感想ポストのリンクを開くと、コードが見られるようになる） ---------- */
-const REVIEW_POST={{ review_post_id|tojson }};   /* 空なら「レビューのお願い」は出さない（site_config.py） */
+/* ---------- 実績（評価と感想）：完了したら、星と感想を送ってもらってからコードを見せる ----------
+   入力欄は全画面共通の static/review.js。送信できたらその場で開く（X へ移動しないので、戻ってこられない事故が起きない）。
+   どの結果を見せたかは、コードそのものではなく目印（ハッシュ）で端末に覚えておく。 */
+const REVIEWS_ON={{ reviews_on|tojson }}&&PAYMENTS;
 const RVKEY='nyanko-review-ok';
 function rvHash(t){ let h=5381; t=String(t||''); for(let i=0;i<t.length;i++) h=((h*33)^t.charCodeAt(i))>>>0; return h.toString(36); }   /* コードそのものは保存しない */
 function rvLoad(){ try{ return JSON.parse(localStorage.getItem(RVKEY)||'[]'); }catch(e){ return []; } }
-let rvOk=new Set(rvLoad()), rvWait=[];
+let rvOk=new Set(rvLoad()), rvWait=[], rvForm=null;
 function rvKeys(result){ return resultPairs(result).map(p=>rvHash(p[1].transfer)); }
 function rvSave(){ try{ localStorage.setItem(RVKEY,JSON.stringify([...rvOk].slice(-200))); }catch(e){} }
-/* 「X でリプライする」を押した時刻は端末に残す。X のアプリ内ブラウザではページが移動し、iPhone では
-   裏に回ったタブが捨てられることがあるため、戻ってきてページが読み込み直されても覚えておく。 */
-const RV_WAIT=20, RVCLICK='nyanko-review-click', RV_GRANT=30*60*1000;
-function rvClickAt(){ try{ const v=JSON.parse(localStorage.getItem(RVCLICK)||'null'); return v&&typeof v.t==='number'&&Date.now()-v.t<RV_GRANT?v.t:0; }catch(e){ return 0; } }
-function rvGranted(){ const t=rvClickAt(); return !!t&&Date.now()-t>=RV_WAIT*1000; }
 function needReview(result){
-  if(!REVIEW_POST||!result) return false;
-  const miss=rvKeys(result).filter(k=>!rvOk.has(k));
-  if(!miss.length) return false;
-  if(rvGranted()){ miss.forEach(k=>rvOk.add(k)); rvSave(); return false; }   /* 押してから20秒たっている */
-  return true;
+  if(!REVIEWS_ON||!result) return false;
+  return rvKeys(result).some(k=>!rvOk.has(k));
 }
 function rvOpen(result,then){
   if(result) rvWait.push(result); if(then) rvThen.push(then);
-  if(rvGranted()){ setTimeout(rvUnlock,0); return; }
-  $('#reviewPanel').hidden=false; document.body.style.overflow='hidden'; rvTick();
+  if(!rvForm) rvForm=ReviewForm($('#reviewForm'),{min:{{ review_min }},max:{{ review_max }},pastUrl:{{ past_reviews_url|tojson }},
+    target:()=>({order:payOrder||'',job:curJob||''}),onDone:rvUnlock});
+  $('#reviewPanel').hidden=false; document.body.style.overflow='hidden';
 }
 let rvThen=[];
 function rvApply(){
   [['#donePanel',window.__doneResult],['#res',window.__resResult]].forEach(([q,r])=>{ const e=$(q); if(e) e.classList.toggle('rvlock',needReview(r)); });
   try{ renderHist(); }catch(e){}
 }
-/* リプライ画面を開いてから、少なくとも RV_WAIT 秒たって、この画面に戻ってきたらコードを表示する。
-   本当にリプライしたかは確かめられない（X の API が必要）ので、「書く時間を取ってもらう」ところまで。 */
-let rvClicked=rvClickAt(), rvTimer=null;
-function rvTick(){
-  if(!rvClicked) rvClicked=rvClickAt();          /* 別のタブで押した・読み込み直した */
-  if(!rvClicked) return;
-  const left=Math.ceil(RV_WAIT-(Date.now()-rvClicked)/1000);
-  if(left<=0){ clearInterval(rvTimer); rvTimer=null; rvClicked=0; rvUnlock(); return; }
-  if(!rvTimer) rvTimer=setInterval(rvTick,1000);
-  $('#reviewLink').textContent='💬 もう一度リプライ画面を開く';
-  if(document.visibilityState==='visible') $('#reviewWait').textContent='リプライが済んだら、そのままお待ちください（あと '+left+' 秒でコードが表示されます）';
-}
-function rvStart(){
-  if(!rvClicked){ rvClicked=Date.now(); try{ localStorage.setItem(RVCLICK,JSON.stringify({t:rvClicked})); }catch(e){} }
-  rvTick();
-}
-$('#reviewLink').addEventListener('click',rvStart);
-$('#reviewPost').addEventListener('click',rvStart);
-document.addEventListener('visibilitychange',rvTick);
-window.addEventListener('pageshow',rvTick);      /* 戻るボタンで戻ってきたとき（ページの保存から復元） */
-window.addEventListener('focus',rvTick);
-if(rvClicked) setTimeout(rvTick,0);              /* 読み込み直したとき：押した時刻から続きを数える */
 function rvUnlock(){
-  /* 待っていた結果を見られるようにする（X のアプリに移っても、戻ってきたら表示されている） */
+  /* 送信できた（または送れない事情があった）→ 待っていた結果を見られるようにする */
   rvWait.forEach(r=>rvKeys(r).forEach(k=>rvOk.add(k)));
   [window.__doneResult,window.__resResult].forEach(r=>{ if(r) rvKeys(r).forEach(k=>rvOk.add(k)); });
   rvWait=[];
-  rvSave();
+  rvSave(); rvForm=null;   /* 次の注文では、まっさらな入力欄から */
   $('#reviewPanel').hidden=true; if($('#donePanel').hidden&&$('#payPanel').hidden&&$('#helpPanel').hidden) document.body.style.overflow='';
   rvApply();
   const t=rvThen; rvThen=[]; setTimeout(()=>t.forEach(f=>{ try{ f(); }catch(e){} }),0);
 }
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-rvopen]'); if(b) rvOpen(); });
-/* コピーの前に確認：まだリンクを開いていなければ、お知らせを出す */
+/* コピーの前に確認：まだ評価と感想を送っていなければ、入力欄を出す */
 function rvGuard(result,fn){ if(needReview(result)) rvOpen(result); else fn(); }
 async function copyText(text){
   try{await navigator.clipboard.writeText(text); return true}catch(e){
