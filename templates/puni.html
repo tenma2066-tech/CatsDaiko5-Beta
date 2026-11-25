@@ -88,6 +88,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .go[disabled]{opacity:.5}
 .btn{padding:9px 13px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-weight:700;white-space:nowrap;flex:none}
 .btn.primary{background:var(--accent)}
+.btn.del{background:transparent;border-color:var(--bad);color:var(--bad);font-weight:700}
 .pbar{height:10px;border:2px solid var(--line);border-radius:999px;background:var(--soft);overflow:hidden;margin:10px 0}
 .pbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .5s ease}
 .pbar i[data-s=done]{background:var(--ok)}.pbar i[data-s=error]{background:var(--bad)}
@@ -559,9 +560,26 @@ async function loadResume(){
       b.addEventListener('click',()=>{ payOrder=o.order; payAmount=o.amount; if(o.state==='unpaid'){ openPay(); } else { $('#payPanel').hidden=false; document.body.style.overflow='hidden'; $('#payYen').textContent=yen(o.amount); $('#payOrderNo').textContent='注文番号：'+o.order; $('#payLink').closest('label').hidden=true; payNow(''); } });
       d.append(b);
     }
+    /* 完了・停止・未払いは、本人が一覧から消せる（表示だけ・管理台帳には残る） */
+    if(['done','dead','unpaid'].includes(o.state)){
+      const del=document.createElement('button'); del.className='btn del'; del.type='button'; del.textContent='削除';
+      del.addEventListener('click',()=>forgetOrder(o,d));
+      d.append(del);
+    }
     box.append(d);
   });
   if(list.some(o=>['hold','paying','starting'].includes(o.state)||(o.state==='started'&&o.job))) startOrderWatch(); else stopOrderWatch();
+}
+async function forgetOrder(o,row){
+  const msg=(o.state==='done'&&o.result)
+    ? 'この完了注文を一覧から削除します。結果（アカウント情報など）も見られなくなります。よろしいですか？'
+    : 'この注文を一覧から削除します。よろしいですか？';
+  if(!confirm(msg)) return;
+  try{
+    const r=await api('/api/orders/'+encodeURIComponent(o.order)+'/forget',{method:'POST'});
+    if(r.ok){ row.remove(); loadResume(); }
+    else{ const j=await r.json().catch(()=>({})); alert(j.error||'削除できませんでした。'); }
+  }catch(e){ alert('通信に失敗しました。'); }
 }
 
 async function claimOrder(){

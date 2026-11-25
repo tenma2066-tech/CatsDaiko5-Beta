@@ -486,6 +486,55 @@ class AppIntegration(unittest.TestCase):
         self.assertEqual(self.client.get("/nyanko").status_code, 200)
         self.assertEqual(self.client.get("/tsum").status_code, 200)
 
+    def test_forget_done_order_hides_it(self):
+        app = self.app
+        oid = "TESTFORGET1"
+        with mock.patch.object(app, "_owner", return_value="owner-A"):
+            with app._orders_lock:
+                app._orders[oid] = {"owner": "owner-A", "uid": "x", "state": "done",
+                                    "amount": 50, "created": __import__("time").time(),
+                                    "job": {"mode": "puni"}, "result": None}
+            try:
+                r = self.client.post(f"/api/orders/{oid}/forget")
+                self.assertEqual(r.status_code, 200)
+                self.assertTrue(app._orders[oid]["hidden_by_owner"])
+                mine = self.client.get("/api/orders/mine").get_json()["orders"]
+                self.assertNotIn(oid, [o["order"] for o in mine])
+            finally:
+                with app._orders_lock:
+                    app._orders.pop(oid, None)
+
+    def test_forget_paid_order_is_blocked(self):
+        app = self.app
+        oid = "TESTFORGET2"
+        with mock.patch.object(app, "_owner", return_value="owner-A"):
+            with app._orders_lock:
+                app._orders[oid] = {"owner": "owner-A", "uid": "x", "state": "paid",
+                                    "amount": 50, "created": __import__("time").time(),
+                                    "job": {"mode": "puni"}}
+            try:
+                r = self.client.post(f"/api/orders/{oid}/forget")
+                self.assertEqual(r.status_code, 409)
+                self.assertFalse(app._orders[oid].get("hidden_by_owner"))
+            finally:
+                with app._orders_lock:
+                    app._orders.pop(oid, None)
+
+    def test_forget_other_owner_is_404(self):
+        app = self.app
+        oid = "TESTFORGET3"
+        with mock.patch.object(app, "_owner", return_value="owner-A"):
+            with app._orders_lock:
+                app._orders[oid] = {"owner": "someone-else", "uid": "y", "state": "done",
+                                    "amount": 50, "created": __import__("time").time(),
+                                    "job": {"mode": "puni"}}
+            try:
+                r = self.client.post(f"/api/orders/{oid}/forget")
+                self.assertEqual(r.status_code, 404)
+            finally:
+                with app._orders_lock:
+                    app._orders.pop(oid, None)
+
     def test_mode_new_with_action_menu_does_not_create_accounts(self):
         """なりすまし対策：mode=new + 非作成メニューでも、アカウント作成に化けない。
         経路はメニューから決まるので、周回メニューはログイン経路（資格情報が要る）になる。"""

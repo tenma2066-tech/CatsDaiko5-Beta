@@ -2798,6 +2798,9 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
 
 RESUMABLE = ("unpaid", "hold", "paid")
 VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号を管理者に伝えられるよう表示する
+# 利用者が自分の一覧から消せる状態（お金が動いていない・進行中でないものだけ）。
+# 管理台帳（PayPay）には残すので、消えるのは利用者の画面上の表示だけ。
+FORGETTABLE = ("done", "dead", "unpaid")
 
 
 def _public_order(order_id: str, o: dict) -> dict:
@@ -2819,8 +2822,11 @@ def my_orders():
         live = set(_jobs)
     with _orders_lock:
         items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in VISIBLE
+                 and not v.get("hidden_by_owner")  # 利用者が自分で消した注文は見せない
                  and not str(v.get("diag", "")).startswith("superseded")]  # 新しい注文に支払いを引き継いだ古い注文は見せない
         for k, v in _orders.items():  # 実行中・完了した注文は、状況・結果を見られるようにする
+            if v.get("hidden_by_owner"):
+                continue
             if v["owner"] == me and v["state"] == "started" and v.get("job_id") in live:
                 items.append(dict(_public_order(k, v), job=v["job_id"]))
             elif v["owner"] == me and v["state"] == "done" and (v.get("job_id") in live or (v.get("result") and not v.get("dry"))):
@@ -2844,9 +2850,28 @@ def claim_order(order_id: str):
         o["owner"] = _owner()
         o["uid"] = _uid(o["owner"])
         o["job"]["owner"] = o["owner"]
+        o.pop("hidden_by_owner", None)   # 番号で呼び戻したら表示を復活させる
         out = _public_order(order_id, o)
     _persist_orders()
     return jsonify(out)
+
+
+@app.post("/api/orders/<order_id>/forget")
+def forget_order(order_id: str):
+    """利用者が自分の一覧からこの注文を消す（表示だけ）。管理台帳には残る。
+    進行中・支払い済み・保留の注文は消せない（お金が動いているため）。"""
+    me = _owner()
+    order_id = (order_id or "").strip()
+    with _orders_lock:
+        o = _orders.get(order_id)
+        if not o or o["owner"] != me:
+            return jsonify(error="注文が見つかりません。", code="order_missing"), 404
+        if o["state"] not in FORGETTABLE:
+            return jsonify(error="この注文は進行中または支払い済みのため、まだ削除できません。"
+                                 "完了してから削除してください。", code="not_forgettable"), 409
+        o["hidden_by_owner"] = True
+    _persist_orders()
+    return jsonify(ok=True)
 
 
 @app.post("/api/orders/<order_id>/pay")
