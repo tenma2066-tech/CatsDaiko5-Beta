@@ -11,6 +11,9 @@ import shutil
 import threading
 import time
 import unittest
+from unittest.mock import patch
+
+import site_config
 
 try:
     from playwright.sync_api import sync_playwright
@@ -125,6 +128,14 @@ class ReviewGateSurvivesLeavingThePage(ResultCodesNotMixedUp):
     """「X でリプライする」を押すと、X のアプリ内ブラウザではページが移動し、iPhone では裏に回ったタブが
     捨てられることがある。戻ってきてページが読み込み直されても、押したことを覚えていてコードを出す
     （2026-11 の「リプライを押してもコードが見られない」報告の再発防止）。"""
+
+    def setUp(self):
+        super().setUp()
+        # 「レビューのお願い」は、返信先のポストが設定されているお店だけの機能（site_config.REVIEW_POST_ID）。
+        # お店の設定に左右されないよう、このテストの中では決まった値を入れて確かめる。
+        for p in (patch.object(site_config, "REVIEW_POST_ID", "1234567890"), patch.object(site_config, "SHOP_X_ID", "test_shop")):
+            p.start()
+            self.addCleanup(p.stop)
 
     def _review_page(self):
         pg, _ = self._page(live=True)

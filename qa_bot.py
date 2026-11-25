@@ -12,7 +12,12 @@
 """
 from __future__ import annotations
 
+import logging
 import os
+
+import site_config
+
+_log = logging.getLogger("qa")
 
 MODEL = os.environ.get("QA_MODEL", "claude-haiku-5-5")   # Claude Haiku 5.5
 MAX_Q_CHARS = 300          # 質問の最大文字数
@@ -20,13 +25,15 @@ MAX_TOKENS = 300           # 回答の最大トークン（チャットの短い
 MAX_HISTORY = 6            # 文脈として受け取る直前の会話（発言数）
 MAX_HISTORY_CHARS = 500    # 履歴1発言あたりの最大文字数
 MAX_ORDERS = 10            # 文脈に入れる注文の最大件数
-CONTACT = "X @paysms1212"
+CONTACT = site_config.contact_text()   # 例：「X @your_x_id」。お店ごとの値は site_config.py
+SHOP = site_config.SHOP_NAME
+API_TIMEOUT = 20.0         # AI の返事を待つ秒数（これを超えたら固定文で案内する。サーバーの手を長く塞がない）
 
 SHOP_NAMES = {"nyanko": "にゃんこ大戦争 代行", "tsum": "ツムツム代行", "puni": "ぷにぷに代行"}
 
 # 全Shop共通の「サービスの仕組み」。ボットが流れを順序立てて説明できるようにする。
 SERVICE_FLOW = (
-    "TN SHOP は、ゲームの代行を PayPay 払い・スマホだけで頼めるお店です。3部門あります："
+    f"{SHOP} は、ゲームの代行を PayPay 払い・スマホだけで頼めるお店です。3部門あります："
     "にゃんこ大戦争（/nyanko）、LINE ディズニー ツムツム（/tsum）、妖怪ウォッチ ぷにぷに（/puni）。\n"
     "【ご利用の流れ】\n"
     "1. メニューを選ぶ（複数まとめて選べる。料金は画面に表示される）。\n"
@@ -41,7 +48,7 @@ SERVICE_FLOW = (
     "画面を閉じた・履歴から消した後でも、番号があれば戻せる。\n"
     "【履歴の削除】完了・停止・未払いの注文は一覧の「削除」で消せる（番号でまた戻せる）。"
     "実行中・支払い済みの注文は、お金が動いているので消せない。\n"
-    "【返金・不具合】提供できなかった分は個別対応。注文番号を添えて X @paysms1212 へ。\n"
+    f"【返金・不具合】提供できなかった分は個別対応。注文番号を添えて {CONTACT} へ。\n"
     "【クーポン】200円以上のご注文で、次回使えるクーポン（10%引き・1回きり・30日）が出る。\n"
     "【チケット（/ticket）】トップの『チケット購入🎫』で買える、クーポンコード式のチケット。全部門で使え、"
     "注文画面のクーポン・チケットコード欄に入れる。『1回なんでも無料チケット』（FR-）は1回の注文が金額に関係なく0円・180日有効。"
@@ -50,6 +57,9 @@ SERVICE_FLOW = (
     "コードを知っている人は誰でも使えるので人に教えない。\n"
     "【支援BOX（/support）】100円から開発費を支援できる。1回の支援ごとに30%引きクーポン（SP-・金額の下限なし・90日・1回）を発行。"
     "支援は返金できない。\n"
+    "【ソースコード購入（/source）】このお店の仕組み一式（ソースコードと導入ガイド）を zip で買える。"
+    "支払いが確認できるとその場でダウンロードでき、購入から30日間は注文番号で呼び戻してもう一度ダウンロードできる。"
+    "再配布・転売は不可。導入の個別サポートは含まれない。クーポン・チケットは使えない。\n"
     "【このボットの範囲】FAQ の案内と、このお客様自身の注文状況の確認のみ。"
     "代行の実行・支払い・注文の作成や削除などの操作はできない（画面から操作してもらう）。"
 )
@@ -102,7 +112,7 @@ STATE_GUIDE = {
     "started": "画面の『状況』で進み具合を確認できる。画面を閉じても、注文番号から続きを確認できる。",
     "done": "結果は注文画面で見られる。完了から3日間は注文番号で呼び戻して再表示できる。",
     "dead": "自動では入金を確認できなかった（リンクの取り消し・期限切れなど）。お支払い済みなら注文番号を添えて "
-            "X @paysms1212 へ連絡する。確認が取れれば画面から実行を開始できる。再送金はしない。",
+            f"{CONTACT} へ連絡する。確認が取れれば画面から実行を開始できる。再送金はしない。",
 }
 
 STATE_NAMES = {"unpaid": "お支払い待ち", "paying": "確認中", "hold": "保留中", "paid": "お支払い済み・開始待ち",
@@ -120,7 +130,7 @@ def enabled() -> bool:
 
 
 def shop_name(shop: str) -> str:
-    return SHOP_NAMES.get(shop, "TN SHOP")
+    return SHOP_NAMES.get(shop, SHOP)
 
 
 def clean_question(q: str) -> str:
@@ -202,6 +212,8 @@ def _live_text(live) -> str:
         out.append(f"チケットの現在の料金：1回なんでも無料 {t.get('once')}円、期間無料 1日 {t.get('day1')}円・"
                    f"7日 {t.get('day7')}円・30日 {t.get('day30')}円・無制限 {t.get('unlimited')}円"
                    "（途中の日数はページのメーターで表示）。")
+    if live.get("source_price"):
+        out.append(f"ソースコード購入の現在の料金：{live['source_price']}円。")
     if live.get("coupon_min"):
         out.append(f"クーポン：{live['coupon_min']}円以上のご注文で、次回使える10%引きクーポンを1枚発行"
                    f"（{live.get('coupon_days', 30)}日間・1回きり・{live['coupon_min']}円以上の注文で使える）。")
@@ -227,7 +239,7 @@ def _menu_overview(shop: str) -> str:
 
 def _system_prompt(shop: str, orders, live=None) -> str:
     return (
-        f"あなたは TN SHOP「{shop_name(shop)}」のチャットサポートです。"
+        f"あなたは {SHOP}「{shop_name(shop)}」のチャットサポートです。"
         "スマホの小さなチャット欄で、お客様と会話しています。\n"
         "話し方：\n"
         "- 友だちに話すような、やわらかい丁寧語で。1回の返事は1〜3文、長くても100字程度。\n"
@@ -307,7 +319,7 @@ def answer(shop: str, question: str, orders=None, history=None, live=None) -> di
                 "answer": _DISABLED_MSG.format(contact=CONTACT)}
     try:
         import anthropic
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(timeout=API_TIMEOUT, max_retries=1)
         resp = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
@@ -319,7 +331,8 @@ def answer(shop: str, question: str, orders=None, history=None, live=None) -> di
         if not text:
             text = f"うまく回答できませんでした。{CONTACT} へお問い合わせください。"
         return {"ok": True, "enabled": True, "answer": text}
-    except Exception:  # noqa: BLE001  鍵不正・通信・API変更など。固定文で案内する
+    except Exception as exc:  # noqa: BLE001  鍵不正・通信・API変更など。固定文で案内する
+        _log.warning("Q&A の回答に失敗しました（%s）", type(exc).__name__)   # 原因の種類だけ残す（質問文・鍵は残さない）
         return {"ok": True, "enabled": True,
                 "answer": (f"ただいま混み合っています。少し時間をおくか、{CONTACT} へ"
                            "お問い合わせください。")}

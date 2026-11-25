@@ -1,17 +1,17 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
-<meta name="google-site-verification" content="HOaFZOzV5t4jyEXdAr2bMg6f2OVwvdpedlAosg1FXT0" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+{% if google_verification %}<meta name="google-site-verification" content="{{ google_verification }}" />
+{% endif %}<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>にゃんこ大戦争・ツムツム・ぷにぷに代行｜TN SHOP</title>
+<title>にゃんこ大戦争・ツムツム・ぷにぷに代行｜{{ shop_name }}</title>
 <link rel="canonical" href="{{ site }}/">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
 <meta name="theme-color" content="#ffd400">
-<meta name="description" content="にゃんこ大戦争・ツムツムの代行（TN SHOP）。PayPayでかんたん、スマホだけで完結します。">
+<meta name="description" content="にゃんこ大戦争・ツムツム・ぷにぷにの代行（{{ shop_name }}）。PayPayでかんたん、スマホだけで完結します。">
 <meta property="og:type" content="website">
-<meta property="og:title" content="TN SHOP 代行｜にゃんこ大戦争・ツムツム">
-<meta property="og:description" content="にゃんこ大戦争とツムツムの代行。PayPayでかんたん・スマホだけ。">
+<meta property="og:title" content="{{ shop_name }} 代行｜にゃんこ大戦争・ツムツム・ぷにぷに">
+<meta property="og:description" content="にゃんこ大戦争・ツムツム・ぷにぷにの代行。PayPayでかんたん・スマホだけ。">
 <meta property="og:url" content="{{ site }}/">
 <meta property="og:image" content="{{ site }}/static/ogp-home.jpg?v=1">
 <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
@@ -53,6 +53,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
 .gamecard img{display:block;width:100%;height:100%;object-fit:cover}
 .gamecard .art{display:grid;place-items:center;font-size:44px}
 .gamecard .art.tk{background:linear-gradient(135deg,#ffe27a,#ffb44d)}
+.gamecard .art.sc{background:linear-gradient(135deg,#cfe3ff,#8fb8ff)}
 .gamecard .art.sp{background:linear-gradient(135deg,#ffd1e0,#ff9fbf)}
 .gamecard .txt{padding:8px 10px 10px}
 .gamecard b{display:block;font-size:14.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -64,7 +65,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
 .foot p{margin:0}
 </style></head><body>
 <main class="wrap">
-  <h1>TN SHOP 代行</h1>
+  <h1>{{ shop_name }} 代行</h1>
   <p class="sub">メニューを選んでください</p>
   {% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}{% if maint.url %}<br><a href="{{ maint.url }}">お知らせ</a>{% endif %}</div>{% endif %}
 
@@ -75,20 +76,21 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
     <a href="/puni" id="minePuni" hidden>👾 ぷにぷに代行の注文・アカウント情報を見る →</a>
     <a href="/ticket" id="mineTicket" hidden>🎫 チケットの注文・コードを見る →</a>
     <a href="/support" id="mineSupport" hidden>💝 支援のお礼クーポンを見る →</a>
+    <a href="/source" id="mineSource" hidden>📦 ソースコードの購入・ダウンロードを見る →</a>
   </div>
 
-  <nav class="grid" aria-label="代行メニュー">
+  <nav class="grid" aria-label="メニュー">
     <a class="gamecard" href="/nyanko">
       <picture><source srcset="/static/game-nyanko.webp?v=1" type="image/webp"><img src="/static/game-nyanko.jpg?v=1" alt="" width="1024" height="512"></picture>
-      <span class="txt"><b>🐱 にゃんこ大戦争</b><small><em>{{ prices.other }}円</em>〜</small></span>
+      <span class="txt"><b>🐱 にゃんこ大戦争</b><small><em>{{ low.nyanko }}円</em>〜</small></span>
     </a>
     <a class="gamecard" href="/tsum">
       <picture><source srcset="/static/game-tsum.webp?v=1" type="image/webp"><img src="/static/game-tsum.jpg?v=1" alt="" width="1024" height="512"></picture>
-      <span class="txt"><b>🧸 ツムツム</b><small><em>{{ prices.tsum_guest_create }}円</em>〜</small></span>
+      <span class="txt"><b>🧸 ツムツム</b><small><em>{{ low.tsum }}円</em>〜</small></span>
     </a>
     <a class="gamecard" href="/puni">
       <picture><source srcset="/static/game-puni.webp?v=2" type="image/webp"><img src="/static/game-puni.jpg?v=2" alt="" width="1024" height="512" style="object-position:left center"></picture>
-      <span class="txt"><b>👾 ぷにぷに</b><small><em>{{ [prices.puni_missions, prices.puni_presents, prices.puni_deck]|min }}円</em>〜</small></span>
+      <span class="txt"><b>👾 ぷにぷに</b><small><em>{{ low.puni }}円</em>〜</small></span>
     </a>
     <a class="gamecard" href="/ticket">
       <span class="art tk" aria-hidden="true">🎫</span><span class="new">NEW</span>
@@ -98,9 +100,13 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
       <span class="art sp" aria-hidden="true">💝</span>
       <span class="txt"><b>支援BOX</b><small>100円〜・30%引きのお礼</small></span>
     </a>
+    <a class="gamecard" href="/source">
+      <span class="art sc" aria-hidden="true">📦</span>
+      <span class="txt"><b>ソースコード購入</b><small>このお店の仕組み一式 <em>{{ "{:,}".format(prices.source_code) }}円</em></small></span>
+    </a>
   </nav>
 
-  <div class="foot"><p>TN SHOP ／ お問い合わせ：X <b>@paysms1212</b></p><p>v{{ version }}</p></div>
+  <div class="foot"><p>{{ shop_name }}{% if shop_x %} ／ お問い合わせ：X <b>@{{ shop_x }}</b>{% endif %}</p><p>v{{ version }}</p></div>
 </main>
 <script>
 "use strict";
@@ -114,6 +120,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
     const n=list.some(o=>!o.tsum&&!o.puni&&!o.product&&live(o)),
           tk=list.some(o=>(o.product||'').startsWith('ticket')&&live(o)),
           sp=list.some(o=>o.product==='support'&&live(o)),
+          sc=list.some(o=>o.product==='source'&&live(o)),
           t=list.some(o=>o.tsum&&live(o)),
           p=list.some(o=>o.puni&&live(o));
     document.getElementById('mineNyanko').hidden=!n;
@@ -121,7 +128,8 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
     document.getElementById('minePuni').hidden=!p;
     document.getElementById('mineTicket').hidden=!tk;
     document.getElementById('mineSupport').hidden=!sp;
-    document.getElementById('mine').hidden=!(n||t||p||tk||sp);
+    document.getElementById('mineSource').hidden=!sc;
+    document.getElementById('mine').hidden=!(n||t||p||tk||sp||sc);
   }catch(e){}
 })();
 </script>

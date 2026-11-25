@@ -1,21 +1,21 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>にゃんこ大戦争代行｜アイテム・キャラ・ステージ｜TN SHOP</title>
+<title>にゃんこ大戦争代行｜アイテム・キャラ・ステージ｜{{ shop_name }}</title>
 <link rel="canonical" href="{{ site }}/nyanko">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
 <meta name="theme-color" content="#ffd400">
-<meta name="description" content="にゃんこ大戦争の代行ならTN SHOP。アイテム・キャラ・ステージなどのメニューと料金を確認し、スマホから申し込めます。PayPay決済に対応。">
+<meta name="description" content="にゃんこ大戦争の代行なら{{ shop_name }}。アイテム・キャラ・ステージなどのメニューと料金を確認し、スマホから申し込めます。PayPay決済に対応。">
 <meta property="og:type" content="website">
-<meta property="og:title" content="にゃんこ代行｜TN SHOP">
+<meta property="og:title" content="にゃんこ代行｜{{ shop_name }}">
 <meta property="og:description" content="アイテム・キャラ・ステージ・バン保証。PayPayでかんたん・スマホだけ。">
 <meta property="og:url" content="{{ site }}/nyanko">
-<meta property="og:image" content="{{ site }}/static/ogp-nyanko.jpg?v=1">
-<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image" content="{{ site }}{{ og.nyanko.src }}">
+<meta property="og:image:width" content="{{ og.nyanko.w }}"><meta property="og:image:height" content="{{ og.nyanko.h }}">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="{{ site }}/static/ogp-nyanko.jpg?v=1">
+<meta name="twitter:image" content="{{ site }}{{ og.nyanko.src }}">
 <style>
 :root{
   --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
@@ -69,8 +69,6 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .pill[data-s=bad] .dot{background:var(--bad)}
 .pill[data-s=busy] .dot{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.3}}
-.hint{margin:8px 0 0;font-size:13px;color:var(--muted)}
-.hint b{color:var(--ink)}
 
 /* タブ */
 .tabs{position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0 8px;
@@ -393,11 +391,11 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 .toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;font-weight:700;max-width:90vw}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
-</style><link rel="stylesheet" href="/static/qa.css?v=1">
+</style><link rel="stylesheet" href="/static/qa.css?v=2">
 </head><body>
 
 <div class="wrap"><header>
-  <div class="top"><div class="brand"><h1>にゃんこ代行</h1><small>by <b>TN SHOP</b></small></div><button type="button" class="btn" id="helpBtn">使い方・よくある質問</button></div>
+  <div class="top"><div class="brand"><h1>にゃんこ代行</h1><small>by <b>{{ shop_name }}</b></small></div><button type="button" class="btn" id="helpBtn">使い方・よくある質問</button></div>
   <div class="pills" aria-live="polite">
     <span class="pill" id="p-conn" data-s="wait"><i class="dot"></i><span>接続を確認中</span></span>
     <span class="pill" id="p-data" data-s="idle"><i class="dot"></i><span>ゲームデータ</span></span>
@@ -428,10 +426,10 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <h2>未完了の注文があります</h2>
       <div id="resumeList"></div>
     </div>
-    <details class="panel flowbox">
+    {% if flow_images.nyanko %}<details class="panel flowbox">
       <summary><b>📖 はじめての方へ：ご利用の流れ（図解）</b></summary>
       <a href="/static/flow.jpg?v=1" target="_blank" rel="noopener" class="flowlink"><picture><source srcset="/static/flow.webp?v=1" type="image/webp"><img src="/static/flow.jpg?v=1" alt="にゃんこ代行 ご利用の流れ：1 メニューを選ぶ、2 アカウントを入力、3 内容を確認してPayPayで支払い、4 実行・完了を待つ、5 コードを受け取ってゲームで引き継ぎ" loading="lazy" width="1024" height="1536" class="flowimg"></picture></a><p class="sub" style="text-align:center;margin:0">画像をタップすると大きく表示できます</p>
-    </details>
+    </details>{% endif %}
     <div class="panel">
       <h2>何をしますか？</h2>
       <p class="sub">いずれか1つを選んでください。引継ぎコードは、このあとの「アカウント」で入力します。</p>
@@ -534,7 +532,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       {% elif key == 'chars' %}
       <input type="search" class="search" id="cs" placeholder="名前か番号で検索（例：ネコ、155）" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="キャラ検索">
       <div class="nstat"><span id="nstat">キャラ名データを確認中…</span><button type="button" class="btn" id="cRetry" hidden>再取得</button><button type="button" class="btn" id="latestCats">最新キャラに対応</button></div>
-      <div class="cres" id="cres" role="list"></div>
+      <div class="cres" id="cres"></div>
       <div class="tools"><button type="button" class="btn" id="cAddAll" hidden>表示中をすべて追加</button></div>
       <p class="sec">選んだキャラ・個別強化設定</p>
       <p class="note">各キャラごとに設定できます。空欄の項目は変更しません。レベルは「基本レベル＋プラス値」（例：60＋70）で指定します。個別設定カードは先頭60体まで表示します。</p>
@@ -685,8 +683,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
   </section>
 
 <footer class="foot">
-  <p><b>にゃんこ代行</b> ・ © TN SHOP 作成</p>
-  <p>お問い合わせ：<a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a></p>
+  <p><b>にゃんこ代行</b> ・ © {{ shop_name }} 作成</p>
+  {% if shop_x %}<p>お問い合わせ：<a href="{{ contact_url }}" target="_blank" rel="noopener">X（@{{ shop_x }}）</a></p>{% endif %}
   <p>ユーザーID <code>{{ uid }}</code>（お問い合わせのときにお伝えください）</p>
 </footer>
 </main>
@@ -724,15 +722,15 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="modal" id="helpPanel" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
   <div class="mbox">
     <h2 id="helpTitle">にゃんこ代行へようこそ</h2>
-    <p class="lead"><b>TN SHOP</b> のにゃんこ大戦争データ代行です。メニューを選んで PayPay で払うと、自動で処理して<b>数分で引継ぎコード</b>をお渡しします。</p>
+    <p class="lead"><b>{{ shop_name }}</b> のにゃんこ大戦争データ代行です。メニューを選んで PayPay で払うと、自動で処理して<b>数分で引継ぎコード</b>をお渡しします。</p>
     <div class="promise">
       <div><i>✅</i><p><b>入金を確認してから実行</b><span>お支払いが確認できるまで、データには一切さわりません。</span></p></div>
       <div><i>🔁</i><p><b>失敗しても再送金なし</b><span>うまくいかなかったときは、同じお支払いのまま無料でやり直せます。</span></p></div>
       <div><i>🔒</i><p><b>引継ぎコードは処理にだけ使用</b><span>入力したコードは処理のためだけに使い、完了後に削除します。</span></p></div>
-      <div><i>💬</i><p><b>困ったらすぐ相談</b><span><a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a>のDMで受け付けています。</span></p></div>
+      <div><i>💬</i><p><b>困ったらすぐ相談</b><span>{% if shop_x %}<a href="{{ contact_url }}" target="_blank" rel="noopener">X（@{{ shop_x }}）</a>のDMで受け付けています。{% else %}お店までお問い合わせください。{% endif %}</span></p></div>
     </div>
-    <h3>ご利用の流れ（図解）</h3>
-    <a href="/static/flow.jpg?v=1" target="_blank" rel="noopener" class="flowlink"><picture><source srcset="/static/flow.webp?v=1" type="image/webp"><img src="/static/flow.jpg?v=1" alt="にゃんこ代行 ご利用の流れ：1 メニューを選ぶ、2 アカウントを入力、3 内容を確認してPayPayで支払い、4 実行・完了を待つ、5 コードを受け取ってゲームで引き継ぎ" loading="lazy" width="1024" height="1536" class="flowimg"></picture></a><p class="sub" style="text-align:center;margin:0">画像をタップすると大きく表示できます</p>
+    {% if flow_images.nyanko %}<h3>ご利用の流れ（図解）</h3>
+    <a href="/static/flow.jpg?v=1" target="_blank" rel="noopener" class="flowlink"><picture><source srcset="/static/flow.webp?v=1" type="image/webp"><img src="/static/flow.jpg?v=1" alt="にゃんこ代行 ご利用の流れ：1 メニューを選ぶ、2 アカウントを入力、3 内容を確認してPayPayで支払い、4 実行・完了を待つ、5 コードを受け取ってゲームで引き継ぎ" loading="lazy" width="1024" height="1536" class="flowimg"></picture></a><p class="sub" style="text-align:center;margin:0">画像をタップすると大きく表示できます</p>{% endif %}
     <h3>かんたん4ステップ</h3>
     <ol class="steps4">
       <li><b>メニュー</b><span>欲しいものを選ぶ。下のバーに金額が出ます</span></li>
@@ -760,13 +758,13 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     </ul>
     <h3>よくある質問</h3>
     <details><summary>BANされませんか？</summary><p>アイテムの多くは問題が起きにくいものですが、絶対ではありません。猫缶・レアチケなどは特に注意が必要な項目なので、気になる方は選ばないでください。心配な場合は、検査と修復を行う「バン保証」もご利用ください。</p></details>
-    <details><summary>失敗したらどうなりますか？</summary><p>お支払いはそのまま有効です。再送金なしで、もう一度実行できます。それでも解決しないときは、注文番号を添えて <a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a> にご連絡ください。</p></details>
+    <details><summary>失敗したらどうなりますか？</summary><p>お支払いはそのまま有効です。再送金なしで、もう一度実行できます。それでも解決しないときは、注文番号を添えて {% if shop_x %}<a href="{{ contact_url }}" target="_blank" rel="noopener">X（@{{ shop_x }}）</a>{% else %}お店{% endif %} にご連絡ください。</p></details>
     <details><summary>リンクがエラーになる</summary><p>金額が違う・パスコード付き・期限切れ・受け取り済みのリンクは使えません。金額を確認して、新しいリンクを作り直してください。</p></details>
     <details><summary>「保留」になった</summary><p>PayPay側の安全確認です。送金した方のPayPayアプリに届く確認（承認）の通知、または取引履歴のその送金から、保留を解除してください。解除されると、サーバーが自動で確認して実行します（画面を閉じていても大丈夫です）。あとで同じブラウザで開くと、結果の引継ぎコードが表示されます。同じリンクを送り直したり、再送金したりしないでください。</p></details>
-    <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（注文は30分で期限切れ）。</p></details>
+    <details><summary>支払ったあとに「待機枠がいっぱい」と出た</summary><p>支払いは完了しています。もう一度ボタンを押せば、再送金なしで開始できます（支払い済みの注文は7日間残ります）。</p></details>
     <details><summary>支払い画面を閉じてしまった・別の端末で続けたい</summary><p>同じブラウザなら、「① メニュー」画面の上に「未完了の注文」が出るので「支払い画面を開く」を押してください。別の端末やブラウザでは、下の欄に注文番号を入れて再開できます。</p>
       <div class="tools"><input type="text" id="claimNo" placeholder="注文番号" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn" id="claimGo">再開</button></div></details>
-    <p class="ordno">お問い合わせ：<a href="https://x.com/paysms1212" target="_blank" rel="noopener">X（@paysms1212）</a>　あなたのユーザーID：<code>{{ uid }}</code></p>
+    <p class="ordno">{% if shop_x %}お問い合わせ：<a href="{{ contact_url }}" target="_blank" rel="noopener">X（@{{ shop_x }}）</a>　{% endif %}あなたのユーザーID：<code>{{ uid }}</code></p>
     <div class="mbtns"><button class="btn pri" id="helpClose" type="button">はじめる</button></div>
   </div>
 </div>
@@ -807,8 +805,8 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
       <li>感想・評価を書いて<b>リプライ</b>してください。</li>
       <li>この画面に戻ると、<b>引継ぎコードと暗証番号</b>が表示されます。</li>
     </ol>
-    <a id="reviewLink" class="btn pri" href="https://x.com/intent/tweet?in_reply_to=2119246650996932810" target="_blank" rel="noopener">💬 X でリプライする</a>
-    <p class="sub" style="text-align:center" id="reviewWait">リプライ画面が開かないときは <a href="https://x.com/paysms1212/status/2119246650996932810" target="_blank" rel="noopener" id="reviewPost">ポストを直接開く</a></p>
+    <a id="reviewLink" class="btn pri" href="https://x.com/intent/tweet?in_reply_to={{ review_post_id }}" target="_blank" rel="noopener">💬 X でリプライする</a>
+    <p class="sub" style="text-align:center" id="reviewWait">リプライ画面が開かないときは <a href="https://x.com/{{ shop_x or 'i' }}/status/{{ review_post_id }}" target="_blank" rel="noopener" id="reviewPost">ポストを直接開く</a></p>
     <p class="sub" style="text-align:center">またのご利用をお待ちしております！🐱✨</p>
   </div>
 </div>
@@ -837,7 +835,6 @@ const GROUPS=['events','subs','others'];
 const TABS=['start','input','qty','events','chars','subs','others','confirm','status'];
 const MENU=['qty','events','chars','subs','others'];
 let curView='input', lastMenu='qty';
-const STEP_TEXT=['準備','取得','書き換え','発行'];
 let curJob=null, pollTimer=null, tickTimer=null, jobStart=0, jobRunning=false;
 let lastOk=0, fails=0, state=null;
 let CATS=[], CATSTATE='none', catsTries=0, catsAsked=false;
@@ -1106,7 +1103,7 @@ function renderResults(){
   const sel=new Set(parseNums($('#chars').value).nums);
   shown=hit.slice(0,40);
   shown.forEach(c=>{
-    const b=el('button','cr'); b.type='button'; b.dataset.n=String(c.n); b.setAttribute('role','listitem'); b.setAttribute('aria-pressed',sel.has(c.n)?'true':'false');
+    const b=el('button','cr'); b.type='button'; b.dataset.n=String(c.n); b.setAttribute('aria-pressed',sel.has(c.n)?'true':'false');
     const nm=el('span','nm',c.name); if(c.alt) nm.append(el('small',null,c.alt));
     b.append(el('span','no',String(c.n)),nm,el('span','st',sel.has(c.n)?'選択中 ✓':'追加'));
     b.addEventListener('click',()=>toggleNum(c.n));
@@ -1247,13 +1244,12 @@ function renderChecks(pc,qm,total){
     li.append(el('i',null,lv==='ok'?'✓':lv==='warn'?'!':'✕'),el('span',null,tx)); ul.append(li); });
 }
 /* 安全モードは廃止：すべての項目を料金に含める（サーバーと同じ数え方） */
-function chargeable(name){ return true; }
 function estimate(pc,qm){
   if($('#integrity').checked) return PRICES.ban_guarantee;
   if($('#clone').checked) return PRICES.clone;
   const oth=picked('others');
   const crash=oth.filter(x=>CRASH.includes(x)).length;
-  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])].filter(chargeable)).size+subUnits()+oth.length-crash+picked('events').length;
+  const other=new Set([...picked('items'),...Object.keys(qm).map(k=>k.split('#')[0])]).size+subUnits()+oth.length-crash+picked('events').length;
   let units=0;
   if(!pc.err){ const cs=catSettingsPayload(); pc.nums.forEach(n=>{ const c=cs[n]||{}; const k=((c.base_level!=null||c.plus_level!=null)?1:0)+(c.form!=null?1:0)+(c.talents_all?1:0); units+=Math.max(1,k); }); }
   return units*PRICES.chara+crash*PRICES.crash+other*PRICES.other+(restartOn()?PRICES.restart:0)+Math.floor(ptMin().min/10)*PRICES.playtime10;
@@ -1285,7 +1281,7 @@ function renderCart(pc,qm){
       total+=units*PRICES.chara;
       line('キャラ '+pc.nums.length+'体','番号 '+compress(pc.nums)+'（レベル・形態・本能は1項目ずつ）',yen(units*PRICES.chara,PRICES.chara,units),'chars');
     }
-    const items=picked('items').filter(chargeable), qkeys=Object.keys(qm).filter(chargeable);
+    const items=picked('items'), qkeys=Object.keys(qm);
     const qbase=[...new Set(qkeys.map(k=>k.split('#')[0]))].filter(x=>!items.includes(x));
     if(items.length) { total+=items.length*PRICES.other; line('アイテム（最大まで）',items.join('・'),yen(items.length*PRICES.other,PRICES.other,items.length),'items'); }
     if(qbase.length){ total+=qbase.length*PRICES.other; line('アイテム（数量指定）',qkeys.map(k=>{ const e=document.querySelector('input.q[data-item="'+CSS.escape(k)+'"]'); return (e&&e.dataset.label||k)+' '+Number(qm[k]).toLocaleString('ja-JP'); }).join('・'),yen(qbase.length*PRICES.other,PRICES.other,qbase.length),'qty'); }
@@ -1340,6 +1336,7 @@ function clock(d){return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.get
 function uptime(s){const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h>0?h+'時間'+m+'分':m+'分'+pad(s%60)+'秒'}
 function pill(id,s,text){const e=$(id); e.dataset.s=s; e.lastElementChild.textContent=text;}
 /* ---------- コードを見る前のお知らせ（感想ポストのリンクを開くと、コードが見られるようになる） ---------- */
+const REVIEW_POST={{ review_post_id|tojson }};   /* 空なら「レビューのお願い」は出さない（site_config.py） */
 const RVKEY='nyanko-review-ok';
 function rvHash(t){ let h=5381; t=String(t||''); for(let i=0;i<t.length;i++) h=((h*33)^t.charCodeAt(i))>>>0; return h.toString(36); }   /* コードそのものは保存しない */
 function rvLoad(){ try{ return JSON.parse(localStorage.getItem(RVKEY)||'[]'); }catch(e){ return []; } }
@@ -1352,7 +1349,7 @@ const RV_WAIT=20, RVCLICK='nyanko-review-click', RV_GRANT=30*60*1000;
 function rvClickAt(){ try{ const v=JSON.parse(localStorage.getItem(RVCLICK)||'null'); return v&&typeof v.t==='number'&&Date.now()-v.t<RV_GRANT?v.t:0; }catch(e){ return 0; } }
 function rvGranted(){ const t=rvClickAt(); return !!t&&Date.now()-t>=RV_WAIT*1000; }
 function needReview(result){
-  if(!result) return false;
+  if(!REVIEW_POST||!result) return false;
   const miss=rvKeys(result).filter(k=>!rvOk.has(k));
   if(!miss.length) return false;
   if(rvGranted()){ miss.forEach(k=>rvOk.add(k)); rvSave(); return false; }   /* 押してから20秒たっている */
@@ -1779,6 +1776,9 @@ async function api(url,opts,tries){
           if(r.status===409){ const c=r.clone(); const j=await c.json().catch(()=>null); if(j&&j.code==='paying'){ last=r; await sleep(4000); continue; } }
           return r;
         }
+        /* 自動でやり直すのは「アップデート中」と、サーバーに届かなかったとき（返事が JSON でない）だけ。
+           メンテナンス中・開始できなかった等は、理由つきの返事なのですぐ画面に出す。 */
+        if(r.status===503){ const j=await r.clone().json().catch(()=>null); if(j&&j.code&&j.code!=='updating') return r; }
         last=r;
       }catch(e){ last=null; }
       if(!shown){ shown=true; updBanner(true); }
@@ -1962,7 +1962,8 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#helpPanel').h
 /* ---------- 起動時 ---------- */
 
 /* ---------- 未完了の注文の再開 ---------- */
-const STATE_JA={unpaid:'支払い待ち',hold:'保留中（解除待ち）',paid:'支払い済み・未実行',dead:'確認が必要です',started:'実行中',done:'完了'};
+const STATE_JA={unpaid:'お支払い待ち',paying:'確認中',hold:'保留中（自動で確認しています）',paid:'お支払い済み・開始待ち',starting:'開始処理中',
+                dead:'自動では確認できませんでした',started:'実行中',done:'完了'};   /* ツムツム・ぷにぷに（static/shop.js）と同じ言葉 */
 let watchTimer=null;
 /* 未完了の注文があるあいだ、状態を自動で確認し続ける。
    管理者が「支払い済み」にした・保留が解除された、などで実行が始まったら、自動で進み具合の画面に切り替える。 */
@@ -2053,8 +2054,10 @@ async function loadResume(quiet){
         b.addEventListener('click',async()=>{ const ok=await copyText(o.order); toast(ok?'注文番号をコピーしました。管理者に伝えてください':'コピーできませんでした'); });
         row.append(b); addDel(o,row); box.append(row);
         box.append(el('p','note','自動では確認できませんでした。お支払い済みの場合は、注文番号を管理者に伝えてください。確認が取れると、ここから実行を開始できます（再送金は不要です）。'));
+      }else if(o.state==='paying'||o.state==='starting'){
+        box.append(row);   /* サーバーが確認・開始している最中（数秒）。押せるものは出さない */
       }else{
-        const b=el('button','btn',o.state==='paid'?(o.retry?'同じ内容でもう一度実行':'実行を開始する'):'支払い画面を開く'); b.type='button';
+        const b=el('button','btn',o.state==='paid'?(o.retry?'同じ内容でもう一度実行':'実行を開始する'):o.state==='hold'?'状況を確認する':'支払い画面を開く'); b.type='button';
         b.addEventListener('click',()=>openPay(o.order,o.amount,o.breakdown,o.skipped,o.state));
         row.append(b); if(o.state==='unpaid') addDel(o,row); box.append(row);
         if(o.state==='paid'&&o.retry) box.append(el('p','note','前回は実行できませんでした。お支払いは有効です（再送金は不要）。引継ぎコードなどを直したい場合は、入力し直して「決済して実行」を押すと、この支払いがそのまま使われます（同じ金額以下のとき）。'));
@@ -2068,6 +2071,11 @@ $('#claimGo').addEventListener('click',async()=>{
   try{
     const r=await api('/api/orders/'+encodeURIComponent(no)+'/claim',{method:'POST'}); const j=await r.json();
     if(!r.ok){ toast(j.error||'再開できませんでした'); return; }
+    if(j.tsum||j.puni||j.product){   /* ほかの画面の注文。呼び戻しはできているので、その画面へ案内する */
+      const to=j.tsum?['/tsum','ツムツム代行']:j.puni?['/puni','ぷにぷに代行']:j.product==='support'?['/support','支援BOX']:j.product==='source'?['/source','ソースコード購入']:['/ticket','チケット購入'];
+      if(confirm('この番号は「'+to[1]+'」の注文です。その画面を開きますか？')) location.href=to[0];
+      return;
+    }
     closeHelp(); $('#claimNo').value=''; loadResume();
     if(j.state==='done'&&j.result){ show('status'); openDone({result:j.result,clone:j.clone,coupon:j.coupon_issued}); }  /* 完了注文：コードを表示 */
     else if(['unpaid','hold','paid'].includes(j.state)){ openPay(j.order,j.amount,j.breakdown,j.skipped,j.state); }  /* 支払い系だけ支払い画面 */

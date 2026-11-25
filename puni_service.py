@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import threading
@@ -204,6 +205,17 @@ def sort_menus(keys) -> list:
     return sorted(dict.fromkeys(known), key=lambda k: MENUS[k]["order"])
 
 
+MAX_DIGITS = 12   # 数量・ステージIDとして受け付ける桁数（これより長い数字は、変換せずに断る）
+
+
+def _safe_message(exc: Exception) -> str:
+    """お客さんの画面に出すエラー文。通信ライブラリの例外には接続先のURLやトークンが入ることがあるので、
+    URL と長い英数字の並びは伏せる。"""
+    text = re.sub(r"https?://\S+", "（URL）", str(exc))
+    text = re.sub(r"[A-Za-z0-9+/=_-]{24,}", "（省略）", text)
+    return text[:200]
+
+
 def validate_order(menus, qty: dict, stages: dict | None = None):
     """画面から来た内容を検査する。戻り値は (並べ替えたメニュー, 数量, ステージID, エラー文)。
     stages … STAGE_MENUS 用の {メニューkey: ステージID} 辞書。"""
@@ -221,7 +233,7 @@ def validate_order(menus, qty: dict, stages: dict | None = None):
         raw = str((qty or {}).get(key, "")).strip()
         if raw == "":
             return [], {}, {}, f"「{menu_label(key)}」の数量を入力してください。"
-        if not (raw.isascii() and raw.isdigit()):
+        if not (raw.isascii() and raw.isdigit()) or len(raw) > MAX_DIGITS:
             return [], {}, {}, f"「{menu_label(key)}」の数量は0以上の整数（半角）で入力してください。"
         num = int(raw)
         low, high = limits
@@ -235,7 +247,7 @@ def validate_order(menus, qty: dict, stages: dict | None = None):
         raw = str((stages or {}).get(key, "")).strip()
         if raw == "":
             return [], {}, {}, f"「{menu_label(key)}」のステージIDを入力してください。"
-        if not (raw.isascii() and raw.isdigit()):
+        if not (raw.isascii() and raw.isdigit()) or len(raw) > MAX_DIGITS:
             return [], {}, {}, f"「{menu_label(key)}」のステージIDは半角の整数で入力してください。"
         sid = int(raw)
         if sid < STAGE_ID_MIN or sid > STAGE_ID_MAX:
@@ -772,7 +784,8 @@ def _create_accounts(c_mod, menu: str, count: int, prog: _Progress, log) -> tupl
         except Exception as exc:  # noqa: BLE001
             return accounts, f"{i + 1}件目のアカウント作成に失敗しました（{type(exc).__name__}）。"
         entry = {"email": rec["email"], "password": rec["password"],
-                 "player_name": rec["player_name"]}
+                 "player_name": rec["player_name"],
+                 "save": rec.get("client") is not None}   # False＝ID はできたが、ゲームのセーブを作れなかった
         if aged and rec.get("client") is not None:
             # 初回クリアはゲームAPI段。ログイン用の出口から周回用の出口へ切替（既定：直結）
             _set_client_egress(c_mod, rec["client"], _game_api_proxy())
@@ -829,11 +842,16 @@ def run_order(mode: str, login_id: str, password: str,
         out["done"] = len(accounts)
         out["delivered"] = bool(accounts)   # 1件でも作成済みなら自動再実行しない（P-02）
         out["lines"] = [f"■ {menu_label(menu)}：{a['email']}"
-                        + ("（初回クリア済み）" if a.get("cleared") else
+                        + ("（ゲームのセーブ作成に失敗・IDのみ）" if a.get("save") is False else
+                           "（初回クリア済み）" if a.get("cleared") else
                            "（初回クリア失敗）" if a.get("cleared") is False else "")
                         for a in accounts]
+        unsaved = sum(1 for a in accounts if a.get("save") is False)
         if error:
             out["error"] = error
+        elif unsaved:   # ID だけできてセーブが無いものを「成功」と言わない（管理者が確認できるようにする）
+            out["error"] = (f"{unsaved}件のアカウントで、ゲームのセーブデータを作成できませんでした"
+                            "（ID とパスワードは発行済みです）。注文番号を管理者にお伝えください。")
         out["ok"] = bool(accounts and not error)
         prog.update(10, "完了しました" if out["ok"] else "一部失敗しました", force=True)
         return out
@@ -855,12 +873,12 @@ def run_order(mode: str, login_id: str, password: str,
         except _ActionPartial as exc:
             # 途中まで提供済み。自動再実行させない（over-delivery 防止・P-02）
             out["delivered"] = True
-            lines.append(f"■ {menu_label(menu)}：一部完了（{exc}）")
-            out["error"] = str(exc)[:200]
+            lines.append(f"■ {menu_label(menu)}：一部完了（{_safe_message(exc)}）")
+            out["error"] = _safe_message(exc)
             out["lines"] = lines
             return out
         except Exception as exc:  # noqa: BLE001
-            msg = str(exc)[:200] or f"「{menu_label(menu)}」の実行に失敗しました。"
+            msg = _safe_message(exc) or f"「{menu_label(menu)}」の実行に失敗しました。"
             lines.append(f"■ {menu_label(menu)}：失敗（{msg}）")
             out["error"] = msg
             out["lines"] = lines

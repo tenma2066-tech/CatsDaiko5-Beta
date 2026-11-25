@@ -17,7 +17,9 @@ PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other":
           "puni_coin_gacha_normal": 50, "puni_missions": 30, "puni_presents": 30,
           "puni_deck": 30, "puni_level_open": 50,
           # チケット（クーポンコード式。全部門で使える）
-          "ticket_once": 1000, "ticket_day": 500, "ticket_unlimited": 9800}
+          "ticket_once": 1000, "ticket_day": 500, "ticket_unlimited": 9800,
+          # ソースコード購入（このお店の仕組み一式の zip）
+          "source_code": 5000}
 PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "クラッシュ解除（1件）", "ban_guarantee": "バン保証",
                 "clone": "アカウント複製", "other": "それ以外のメニュー（1件）", "playtime10": "プレイ時間（10分ごと）",
                 "restart": "初期垢作成（リスタートパック・基本料金）",
@@ -35,7 +37,8 @@ PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "
                 "puni_coin_gacha_normal": "ぷに：通常コインガチャ回し切り", "puni_missions": "ぷに：ミッション報酬受取",
                 "puni_presents": "ぷに：プレゼント受取", "puni_deck": "ぷに：最強編成", "puni_level_open": "ぷに：レベル上限解放",
                 "ticket_once": "チケット：1回なんでも無料", "ticket_day": "チケット：期間無料（1日・長いほど割安になる基準）",
-                "ticket_unlimited": "チケット：期間無料（無制限）"}
+                "ticket_unlimited": "チケット：期間無料（無制限）",
+                "source_code": "ソースコード購入（一式・zip）"}
 PT_KEY = "プレイ時間+分"          # qty に入れる「プレイ時間を増やす（分）」の特別なキー
 PT_MIN_MINUTES = 60
 PT_MAX_MINUTES = 2147483647 // (30 * 60)   # セーブの上限（1/30秒単位の int）を超えない
@@ -51,6 +54,8 @@ SUPPORT_MIN = 100                # 支援BOX：100円から
 SUPPORT_MAX = 100000
 SUPPORT_COUPON_PCT = 30          # 1回の支援ごとに 30%引きクーポン
 SUPPORT_COUPON_DAYS = 90
+SOURCE_KEEP_DAYS = 30            # ソースコード購入：購入から30日は、注文番号でもう一度ダウンロードできる
+NOT_SERVICE_PREFIXES = ("ticket_", "source_")   # 代行メニューではない料金（Q&A の料金一覧・比較グラフの初期値から外す）
 
 
 def ticket_period_price(days: int) -> int:

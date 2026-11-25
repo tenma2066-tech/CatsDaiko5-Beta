@@ -1,8 +1,6 @@
 .git
 __pycache__
-test_*.py
-selftest.py
-docs
 instance
 exchange
+xbot
 *.log

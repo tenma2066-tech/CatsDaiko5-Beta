@@ -144,6 +144,9 @@ def sort_menus(keys) -> list:
     return sorted(dict.fromkeys(known), key=lambda k: MENUS[k]["order"])
 
 
+MAX_DIGITS = 12   # 数量として受け付ける桁数（これより長い数字は、変換せずに断る）
+
+
 def validate_order(menus, qty: dict):
     """画面から来た内容を検査する。戻り値は (並べ替えたメニュー, 数量, エラー文)。"""
     picked = sort_menus(menus)
@@ -172,7 +175,7 @@ def validate_order(menus, qty: dict):
         raw = str((qty or {}).get(key, "")).strip()
         if raw == "":
             return [], {}, f"「{menu_label(key)}」の数量を入力してください。"
-        if not (raw.isascii() and raw.isdigit()):
+        if not (raw.isascii() and raw.isdigit()) or len(raw) > MAX_DIGITS:
             return [], {}, f"「{menu_label(key)}」の数量は0以上の整数（半角）で入力してください。"
         num = int(raw)
         low, high = limits
@@ -498,7 +501,12 @@ def run_order(mode: str, login_id: str, password: str, menus, qty: dict,
     action_menus = [m for m in menus if m != "tsum_guest_create"]
     if action_menus:
         prog.update(3, "ゲームデータを取得しています…", force=True)
-        done, lines, failure = _run_menus(c, sess, forge, action_menus, qty, prog, log)
+        try:
+            done, lines, failure = _run_menus(c, sess, forge, action_menus, qty, prog, log)
+        except Exception as exc:  # noqa: BLE001  ここで落ちても、下の「引き継ぎ情報の発行」まで必ず進める
+            # 引き継ぎ・新規ではアカウントがこちらに移っている。例外で抜けるとお客さんに返せなくなる。
+            done, lines, failure = 0, [], f"代行の実行中にエラーが発生しました（{type(exc).__name__}）。"
+            log("エラー: " + failure)
         out["done"] = done
         out["lines"] = lines
         if failure:

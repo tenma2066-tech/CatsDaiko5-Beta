@@ -206,6 +206,7 @@ async def begin_login(phone: str, password: str):
                    "access_token":result["access_token"],"session_cookie":result["session_cookie"],
                    "expires_at":time.time()+result["expires_in"]})
     _pending_otp.clear()
+    _relogin_block["until"] = 0.0
     return {"otp_required": False}
 
 async def finish_login(otp: str):
@@ -226,6 +227,7 @@ async def finish_login(otp: str):
                    "access_token":result["access_token"],"session_cookie":result["session_cookie"],
                    "expires_at":time.time()+result["expires_in"]})
     _pending_otp.clear()
+    _relogin_block["until"] = 0.0
     return {"connected": True}
 
 def _normalize_link(raw: str):
@@ -357,25 +359,49 @@ def _ledger():
     except github_runtime_store.RuntimeStoreError as exc:
         raise PayPayError("runtime_store", str(exc)) from exc
 
-async def _fresh_account(force: bool = False):
+# 自動の再ログインを休む時間（秒）。保留の見張り（90秒ごと）やお客さんの支払いのたびにパスワードで
+# ログインし直すと、SMS が何通も飛び、管理者が入力中の認証コードも無効になる。失敗したらしばらく試さない。
+RELOGIN_WAIT = {"otp_required": 600, "oauth_rejected": 600, "cookie_missing": 300}
+RELOGIN_WAIT_DEFAULT = 60        # 通信エラーなど
+_relogin_block: dict = {"until": 0.0, "code": "", "message": ""}
+
+
+def _block_relogin(exc: PayPayError) -> None:
+    _relogin_block.update(until=time.time() + RELOGIN_WAIT.get(exc.code, RELOGIN_WAIT_DEFAULT),
+                          code=exc.code, message=exc.message)
+
+
+async def _fresh_account(force: bool = False, manual: bool = False):
     """保存済みアカウントを読み、期限切れなら再ログインして返す。呼び出し側で _LOCK を保持すること。
-    force=True: PayPayがセッションを拒否した（401/403）ときに、期限内でもログインし直す。"""
+    force=True: PayPayがセッションを拒否した（401/403）ときに、期限内でもログインし直す。
+    manual=True: 管理者が「接続を更新」を押したとき。休み時間（RELOGIN_WAIT）を無視して今すぐ試す。"""
     account = _load_account()
     if not account:
         raise PayPayError("login_required", "現在、決済を受け付けられません（受取側のPayPay未接続）。管理者にお知らせください。")
     if force or float(account.get("expires_at",0)) <= time.time()+60 or not account.get("session_cookie"):
-        renewed = await _oauth({"scope":"SIGN_IN","client_uuid":account["uuid"],"grant_type":"password",
-                                "username":account["phone"],"password":account["password"],
-                                "add_otp_prefix":True,"language":"ja"},
-                               "https://www.paypay.ne.jp/app/account/sign-in")
+        if not manual and time.time() < _relogin_block["until"]:
+            raise PayPayError(_relogin_block["code"], _relogin_block["message"])
+        try:
+            renewed = await _oauth({"scope":"SIGN_IN","client_uuid":account["uuid"],"grant_type":"password",
+                                    "username":account["phone"],"password":account["password"],
+                                    "add_otp_prefix":True,"language":"ja"},
+                                   "https://www.paypay.ne.jp/app/account/sign-in")
+        except PayPayError as exc:
+            _block_relogin(exc)
+            raise
         if renewed["kind"] == "otp":
             _pending_otp.clear()
             _pending_otp.update(phone=account["phone"],password=account["password"],uuid=account["uuid"],
                                 otp_reference_id=renewed["otp_reference_id"],otp_prefix=renewed["otp_prefix"],
                                 cookies=renewed.get("cookies", {}))
-            raise PayPayError("otp_required", "現在、決済を受け付けられません（受取側のPayPayが再認証待ち）。管理者にお知らせください。")
+            exc = PayPayError("otp_required", "現在、決済を受け付けられません（受取側のPayPayが再認証待ち）。管理者にお知らせください。")
+            _block_relogin(exc)
+            raise exc
         if not renewed.get("session_cookie"):
-            raise PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
+            exc = PayPayError("cookie_missing", "PayPayの再認証結果を確認できません。")
+            _block_relogin(exc)
+            raise exc
+        _relogin_block["until"] = 0.0
         account.update(access_token=renewed["access_token"],session_cookie=renewed["session_cookie"],
                        expires_at=time.time()+renewed["expires_in"])
         _save_account(account)
@@ -404,12 +430,16 @@ async def _accept(session, account, code, verified, digest):
     ok=(status_code==200 and isinstance(reply,dict) and isinstance(reply.get("header"),dict)
         and reply["header"].get("resultCode")=="S0000" and isinstance(reply.get("payload"),dict)
         and reply["payload"].get("orderStatus")=="COMPLETED" and reply.get("error") is None)
-    if ok:
-        with _ledger() as db: db.execute("UPDATE links SET state='paid' WHERE digest=?",(digest,))
-        return digest
     hold_code = _provider_hold_code(reply)
-    state="pending" if hold_code else "review"
-    with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
+    state = "paid" if ok else ("pending" if hold_code else "review")
+    try:
+        with _ledger() as db: db.execute("UPDATE links SET state=? WHERE digest=?",(state,digest))
+    except PayPayError:
+        # 受け取りPOSTは送ったあと。台帳に書けなかっただけで「未払い」に戻すと、お金が動いたのに
+        # 注文が進まなくなる。結果不明（保留）として残し、同じリンクの再確認で拾えるようにする。
+        raise PayPayError("accept_uncertain","受取結果を記録できませんでした。同じリンクを再送せず、少し待ってから「今すぐ確認する」を押してください。") from None
+    if ok:
+        return digest
     raise PayPayError("temporary_hold" if state=="pending" else "accept_unconfirmed",
                       "PayPay側で一時保留です。状態を確認するまで再送金しないでください。" if state=="pending"
                       else "受取結果を確定できません。再購入せず管理者へお問い合わせください。")
@@ -759,7 +789,7 @@ async def refresh_session():
     """管理画面の「PayPayの接続を更新」: 保存済みの電話番号・パスワードでログインし直す（期限内でも）。
     SMS認証を求められたら otp_required（その後は管理画面のSMS認証欄で続きを入力できる）。"""
     with _LOCK:
-        account = await _fresh_account(force=True)
+        account = await _fresh_account(force=True, manual=True)
     return {"expires_at": int(account.get("expires_at", 0))}
 
 

@@ -1,8 +1,21 @@
-"""にゃんこ代行（TN SHOP）のサーバー本体。
-利用者がメニューを選び、PayPay で支払うと、引継ぎコードのセーブデータを編集して新しいコードを返す。
-画面は templates/、料金の計算は pricing.py、セーブ編集は engine.py、PayPay と台帳は paypay_gateway.py。
-ツムツム代行（もう1つの大メニュー）は画面が /tsum、実行が tsum_service.py。注文・支払い・実行枠は共通。
-仕組みとルールは AGENTS.md を読むこと。
+"""お店のサーバー本体（Flask）。画面を出し、注文を受け、PayPay の入金を確かめ、実行して結果を返す。
+
+このファイルの並び（上から。見出しは「# ----」で検索できる）:
+  1. 設定・料金の読み込み             … 環境変数、管理画面で変えた料金（prices.json）
+  2. にゃんこのメニュー定義・キャラ名   … ITEMS / SUBS / OTHERS、キャラ番号、名前データの取得
+  3. 状態管理・実行枠                 … 同時に動かす件数、順番待ち、別プロセスでの実行（_launch_job）
+  4. にゃんこの実行                   … _apply_edits / _run_job（セーブの編集は engine.py）
+  5. 認証・連打よけ・お店の設定         … 管理者ログイン、_rate_ok、メンテ表示、初期垢の中身
+  6. 管理画面                         … /admin（_admin_post が操作、_admin_page が表示）
+  7. 注文（決済してから実行）           … _orders、保存、_reconcile_orders（結末の反映）
+  8. 画面のページ                     … / /nyanko /tsum /puni、robots・sitemap
+  9. 注文を作る                       … /run → 各部門の検査 → _checkout → _place_order（クーポンもここ）
+ 10. Q&A・チケット・支援・ソースコード  … /api/qa、/ticket /support /source（_deliver_product）
+ 11. 注文の一覧・支払い・進み具合       … /api/orders/…（_pay_order → _start_paid_order）、/status
+
+ほかのファイル: 料金＝pricing.py／PayPay と台帳＝paypay_gateway.py／にゃんこ＝engine.py／
+ツムツム＝tsum_service.py／ぷにぷに＝puni_service.py／Q&A＝qa_bot.py／店名など＝site_config.py／販売用zip＝source_pack.py
+全体の説明は README.md、注文と支払いの決まりは docs/REBUILD_FOR_OTHERS.md。
 """
 from __future__ import annotations
 
@@ -40,17 +53,21 @@ import save_repair
 import tsum_service
 import puni_service
 import qa_bot
+import site_config
+import source_pack
 from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py からも同じ名前で使えるようにしている
+    NOT_SERVICE_PREFIXES, SOURCE_KEEP_DAYS,
     SUPPORT_COUPON_DAYS, SUPPORT_COUPON_PCT, SUPPORT_MAX, SUPPORT_MIN, TICKET_MAX_DAYS, TICKET_ONCE_DAYS, ticket_period_price,
     COUPON_DAYS, COUPON_MIN, CRASH_ITEMS, DB_OFFSET, EV_PREFIX, EVENT_BY_ID, EVENT_MAPS, EVENT_SELECTABLE, PRICE_LABELS, PRICES,
     PT_KEY, PT_MAX_MINUTES, PT_MIN_MINUTES, RESTART_KEY, _ALL_EVENT_MAPS, _event_ids, _legend_kinds, _load_event_maps,
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.15"
+APP_VERSION = "1.16"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 2
 
+# ---------------------------------------------------------------- 1. 設定・料金の読み込み
 def _read_admin_password() -> str:
     """ADMIN_PASSWORD_FILE があればそのファイルから読む（記号を含むパスワードでも安全に渡すため）。"""
     path = os.environ.get("ADMIN_PASSWORD_FILE", "")
@@ -109,6 +126,7 @@ ORDER_TTL = 1800
 import mimetypes
 mimetypes.add_type("image/webp", ".webp")   # 本番のコンテナでは .webp の種類が登録されていないことがある
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024   # 送られてくる内容は最大2MB（巨大な入力でサーバーを固めさせない）
 app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
     ("nyanko-web:" + ADMIN_PASSWORD).encode()  # ワーカープロセス間でも同じ値になるよう固定（本番は SECRET_KEY を設定）
 ).hexdigest()
@@ -116,6 +134,13 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=bool(os.environ.get("FLY_APP_NAME") or os.environ.get("SESSION_COOKIE_SECURE")),
                   PERMANENT_SESSION_LIFETIME=30 * 86400)
 
+@app.context_processor
+def _shop_context() -> dict:
+    """すべての画面で使える値：店名・問い合わせ先など（site_config.py）。"""
+    return site_config.template_context()
+
+
+# ---------------------------------------------------------------- 2. にゃんこのメニュー定義・キャラ名
 ITEMS = [
     "猫缶", "XP", "NP", "にゃんチケ", "レアチケ", "プラチケ", "プラチナのかけら", "レジェチケ",
     "イベチケ&福チケ", "バトルアイテム", "ネコビタン", "城素材", "キャッツアイ",
@@ -423,7 +448,7 @@ def _latest_catalog_thread() -> None:
         _run_lock.release()
 
 
-# ---------------------------------------------------------------- 状態管理
+# ---------------------------------------------------------------- 3. 状態管理・実行枠
 _started_at = time.time()
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
@@ -953,6 +978,7 @@ def _launch_job(job_id: str, job: dict, arguments: tuple, slot: int, transfer_ke
     threading.Thread(target=_monitor_worker, args=(receiver, process, job_id, slot, transfer_key), daemon=True).start()
 
 
+# ---------------------------------------------------------------- 4. にゃんこの実行
 def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settings=None) -> None:
     """選ばれた項目をセーブに書き込む（複製モードでは呼ばない）。"""
     def warn_failures(failures):
@@ -1373,7 +1399,7 @@ def _run_job(job: dict, transfer: str, confirm: str, items, subs, others, qty=No
         _publish_job(job)
 
 
-# ---------------------------------------------------------------- 認証
+# ---------------------------------------------------------------- 5. 認証・連打よけ・お店の設定
 _fail: dict[str, list[float]] = {}
 ADMIN_SESSION_SEC = 12 * 3600      # 管理者ログインの有効時間（そのあとは入り直し）
 
@@ -1618,6 +1644,7 @@ def health():
     return "ok"
 
 
+# ---------------------------------------------------------------- 6. 管理画面
 def _pp(coro):
     """PayPay gateway coroutine を同期実行し (結果, エラーメッセージ) を返す。"""
     try:
@@ -1678,169 +1705,169 @@ def _backup_response():
 def _admin_post(token):
     """管理画面の操作。結果は次の画面（GET）で表示する＝再読み込みしても同じ操作が二重に送られない。"""
     msg = ""
-    if True:
-        provided = request.form.get("csrf", "")
-        if not hmac.compare_digest(provided.encode(), token.encode()):
-            return "不正なリクエストです。", 403
-        action = request.form.get("action")
-        if action == "unlock":
-            ip = _client_ip()
-            if _too_many_fails("admin:" + ip) or _too_many_fails("admin:*", 30):   # 1つの IP で5回・全体で30回（10分）
-                msg = "失敗が続いたので、10分ほど待ってください。"
-            elif ADMIN_PASSWORD and hmac.compare_digest(request.form.get("passcode", "").encode(), ADMIN_PASSWORD.encode()):
-                session["admin"] = True
-                session["admin_at"] = time.time()
-                session["admin_csrf"] = secrets.token_urlsafe(32)
-                return redirect("/admin")
-            else:
-                _note_fail("admin:" + ip)
-                _note_fail("admin:*")
-                msg = "管理者パスコードが違うか、設定されていません。"
-        elif not _is_admin():
-            return "管理者モードが必要です。", 403
-        elif action == "pp_login":
-            res, err = _pp(paypay_gateway.begin_login(request.form.get("phone", "").strip(), request.form.get("password", "")))
-            msg = err or ("SMSの認証コードを入力してください。" if res["otp_required"] else "PayPayに接続しました。")
-        elif action == "pp_otp":
-            res, err = _pp(paypay_gateway.finish_login(request.form.get("otp", "").strip()))
-            msg = err or "PayPayに接続しました。"
-        elif action == "maint_save":
-            try:
-                _set_maint(request.form.get("on") == "1", request.form.get("message", ""), request.form.get("url", ""))
-                msg = "メンテナンス表示を" + ("オンにしました（新規の注文と新しい支払いを止めています）。" if request.form.get("on") == "1" else "オフにしました。")
-            except (ValueError, OSError) as exc:
-                msg = str(exc) or "保存できませんでした。"
-        elif action == "order_recheck":
-            oid = request.form.get("order", "")
-            r = _recheck_and_start(oid, "admin")
-            msg = {"started": "PayPayで入金を確認できたので、実行を開始しました。",
-                   "paid": "PayPayで入金を確認しました（支払い済み）。待機枠がいっぱいのため、利用者の画面に開始ボタンが出ます。",
-                   "skip": "この注文は再確認できません（送金リンクがない、または開始済み）。"}.get(r)
-            if not msg:
-                kind, _, code = r.partition(":")
-                msg = (f"まだ入金を確認できません（{code}）。保留中のままです。90秒ごとに自動で確認します。" if kind == "wait"
-                       else f"PayPayの状態が受け取り不可でした（{code}）。PayPayアプリで着金を確認できた場合だけ「支払い済みにする」を押してください。")
-        elif action == "order_start":
-            oid = request.form.get("order", "")
-            with _orders_lock:
-                o = _orders.get(oid)
-            if not o or o["state"] != "paid":
-                msg = "この注文は支払い済みではありません。"
-            else:
-                resp = _start_paid_order(o)
-                rc = resp[1] if isinstance(resp, tuple) else 200
-                msg = "実行を開始しました。利用者の画面は自動で切り替わり、完了するとコードが表示されます（3日間保存）。" if rc == 200 else "いま待機枠がいっぱいです。少し待ってからもう一度押してください。"
-                _persist_orders()
-        elif action in ("order_paid", "order_dead", "order_hold"):
-            oid = request.form.get("order", "")
-            with _orders_lock:
-                o = _orders.get(oid)
-                if not o or o["state"] in ("started", "paying", "starting"):
-                    msg = "その注文は変更できません（開始済み・確認中・期限切れ）。"
-                else:
-                    if action == "order_paid":
-                        o["state"] = "paid"
-                    elif action == "order_dead":
-                        o["state"] = "dead"
-                    else:
-                        o["state"] = "hold" if o.get("link_code") else "unpaid"
-                    o["diag"] = f"admin:{action} {time.strftime('%m/%d %H:%M')}"
-                    msg = "注文を更新しました。"
-                    if action == "order_paid" and o.get("arguments") is None and not o.get("product"):
-                        o["state"] = "done"
-                        msg = "この注文は入力内容が残っていない（完了済み）ため、実行できません。"
-                    code_for_ledger = o.get("link_code") if action == "order_paid" else None
-            if msg == "注文を更新しました。":
-                if code_for_ledger:
-                    try:
-                        paypay_gateway.mark_paid_by_admin(code_for_ledger, oid)
-                    except Exception:
-                        pass
-                if action == "order_paid":
-                    # 支払い済みにしたら、その場で実行を開始する（利用者の操作を待たない）。
-                    # 利用者の画面は自動で状態を確認しているので、そのまま進み具合の表示に切り替わる。
-                    try:
-                        resp = _start_paid_order(o)
-                        body, rc = (resp if isinstance(resp, tuple) else (resp, 200))
-                        if rc == 200:
-                            msg = "支払い済みにして、実行を開始しました。利用者の画面は自動で進み具合の表示に切り替わります。"
-                        elif rc == 429:
-                            msg = "支払い済みにしました。いま待機枠がいっぱいのため、利用者の画面に「実行を開始する」ボタンが出ます（再送金は不要）。"
-                        else:
-                            msg = "支払い済みにしました。実行の開始に失敗したため、利用者の画面に「実行を開始する」ボタンが出ます。"
-                    except Exception:
-                        _log_orders.exception("admin start failed")
-                        msg = "支払い済みにしました。実行の開始に失敗したため、利用者の画面に「実行を開始する」ボタンが出ます。"
-                _persist_orders()
-        elif action == "coupon_free_issue":
-            try:
-                days = int(request.form.get("days") or 30)
-                if not 1 <= days <= 365:
-                    raise ValueError
-            except ValueError:
-                msg = "有効期限は1〜365日で入力してください。"
-            else:
-                try:
-                    code = paypay_gateway.coupon_issue_free(days, request.form.get("note", ""))
-                    msg = f"無料クーポン {code} を発行しました（1回だけ・{days}日間有効）。このコードを相手に伝えてください。"
-                except Exception:  # noqa: BLE001
-                    _log_orders.exception("free coupon issue failed")
-                    msg = "無料クーポンを発行できませんでした。"
-        elif action == "coupon_revoke":
-            code = str(request.form.get("code", "")).strip().upper()[:20]
-            try:
-                ok = paypay_gateway.coupon_revoke(code)
-            except Exception:  # noqa: BLE001
-                _log_orders.exception("coupon revoke failed")
-                ok = False
-            msg = f"無料クーポン {code} を取り消しました。" if ok else "取り消せませんでした（未使用の無料クーポンだけ取り消せます）。"
-        elif action == "backup_download":
-            return _backup_response()
-        elif action == "lock":
-            session.pop("admin", None)
-            session.pop("admin_at", None)
+    provided = request.form.get("csrf", "")
+    if not hmac.compare_digest(provided.encode(), token.encode()):
+        return "不正なリクエストです。", 403
+    action = request.form.get("action")
+    if action == "unlock":
+        ip = _client_ip()
+        if _too_many_fails("admin:" + ip) or _too_many_fails("admin:*", 30):   # 1つの IP で5回・全体で30回（10分）
+            msg = "失敗が続いたので、10分ほど待ってください。"
+        elif ADMIN_PASSWORD and hmac.compare_digest(request.form.get("passcode", "").encode(), ADMIN_PASSWORD.encode()):
+            session["admin"] = True
+            session["admin_at"] = time.time()
+            session["admin_csrf"] = secrets.token_urlsafe(32)
             return redirect("/admin")
-        elif action == "pp_refresh":
+        else:
+            _note_fail("admin:" + ip)
+            _note_fail("admin:*")
+            msg = "管理者パスコードが違うか、設定されていません。"
+    elif not _is_admin():
+        return "管理者モードが必要です。", 403
+    elif action == "pp_login":
+        res, err = _pp(paypay_gateway.begin_login(request.form.get("phone", "").strip(), request.form.get("password", "")))
+        msg = err or ("SMSの認証コードを入力してください。" if res["otp_required"] else "PayPayに接続しました。")
+    elif action == "pp_otp":
+        res, err = _pp(paypay_gateway.finish_login(request.form.get("otp", "").strip()))
+        msg = err or "PayPayに接続しました。"
+    elif action == "maint_save":
+        try:
+            _set_maint(request.form.get("on") == "1", request.form.get("message", ""), request.form.get("url", ""))
+            msg = "メンテナンス表示を" + ("オンにしました（新規の注文と新しい支払いを止めています）。" if request.form.get("on") == "1" else "オフにしました。")
+        except (ValueError, OSError) as exc:
+            msg = str(exc) or "保存できませんでした。"
+    elif action == "order_recheck":
+        oid = request.form.get("order", "")
+        r = _recheck_and_start(oid, "admin")
+        msg = {"started": "PayPayで入金を確認できたので、実行を開始しました。",
+               "paid": "PayPayで入金を確認しました（支払い済み）。待機枠がいっぱいのため、利用者の画面に開始ボタンが出ます。",
+               "skip": "この注文は再確認できません（送金リンクがない、または開始済み）。"}.get(r)
+        if not msg:
+            kind, _, code = r.partition(":")
+            msg = (f"まだ入金を確認できません（{code}）。保留中のままです。90秒ごとに自動で確認します。" if kind == "wait"
+                   else f"PayPayの状態が受け取り不可でした（{code}）。PayPayアプリで着金を確認できた場合だけ「支払い済みにする」を押してください。")
+    elif action == "order_start":
+        oid = request.form.get("order", "")
+        with _orders_lock:
+            o = _orders.get(oid)
+        if not o or o["state"] != "paid":
+            msg = "この注文は支払い済みではありません。"
+        else:
+            resp = _start_paid_order(o)
+            rc = resp[1] if isinstance(resp, tuple) else 200
+            msg = "実行を開始しました。利用者の画面は自動で切り替わり、完了するとコードが表示されます（3日間保存）。" if rc == 200 else "いま待機枠がいっぱいです。少し待ってからもう一度押してください。"
+            _persist_orders()
+    elif action in ("order_paid", "order_dead", "order_hold"):
+        oid = request.form.get("order", "")
+        with _orders_lock:
+            o = _orders.get(oid)
+            if not o or o["state"] in ("started", "paying", "starting"):
+                msg = "その注文は変更できません（開始済み・確認中・期限切れ）。"
+            else:
+                if action == "order_paid":
+                    o["state"] = "paid"
+                elif action == "order_dead":
+                    o["state"] = "dead"
+                else:
+                    o["state"] = "hold" if o.get("link_code") else "unpaid"
+                o["diag"] = f"admin:{action} {time.strftime('%m/%d %H:%M')}"
+                msg = "注文を更新しました。"
+                if action == "order_paid" and o.get("arguments") is None and not o.get("product"):
+                    o["state"] = "done"
+                    msg = "この注文は入力内容が残っていない（完了済み）ため、実行できません。"
+                code_for_ledger = o.get("link_code") if action == "order_paid" else None
+        if msg == "注文を更新しました。":
+            if code_for_ledger:
+                try:
+                    paypay_gateway.mark_paid_by_admin(code_for_ledger, oid)
+                except Exception:
+                    pass
+            if action == "order_paid":
+                # 支払い済みにしたら、その場で実行を開始する（利用者の操作を待たない）。
+                # 利用者の画面は自動で状態を確認しているので、そのまま進み具合の表示に切り替わる。
+                try:
+                    resp = _start_paid_order(o)
+                    body, rc = (resp if isinstance(resp, tuple) else (resp, 200))
+                    if rc == 200:
+                        msg = "支払い済みにして、実行を開始しました。利用者の画面は自動で進み具合の表示に切り替わります。"
+                    elif rc == 429:
+                        msg = "支払い済みにしました。いま待機枠がいっぱいのため、利用者の画面に「実行を開始する」ボタンが出ます（再送金は不要）。"
+                    else:
+                        msg = "支払い済みにしました。実行の開始に失敗したため、利用者の画面に「実行を開始する」ボタンが出ます。"
+                except Exception:
+                    _log_orders.exception("admin start failed")
+                    msg = "支払い済みにしました。実行の開始に失敗したため、利用者の画面に「実行を開始する」ボタンが出ます。"
+            _persist_orders()
+    elif action == "coupon_free_issue":
+        try:
+            days = int(request.form.get("days") or 30)
+            if not 1 <= days <= 365:
+                raise ValueError
+        except ValueError:
+            msg = "有効期限は1〜365日で入力してください。"
+        else:
             try:
-                asyncio.run(paypay_gateway.refresh_session())
-                msg = "PayPayの接続を更新しました（保存済みの情報でログインし直しました）。"
-            except paypay_gateway.PayPayError as exc:
-                msg = {"otp_required": "PayPayがSMS認証を求めています。届いた4桁のコードを「② SMS 認証」に入力してください。",
-                       "login_required": "PayPayが未接続です。「① ログイン」から電話番号とパスワードで接続してください。"}.get(exc.code, exc.message)
-            except Exception:
-                _log_orders.exception("paypay refresh failed")
-                msg = "PayPayの接続を更新できませんでした。少し待ってからもう一度お試しください。"
-        elif action == "pp_recheck_all":
-            with _orders_lock:
-                targets = [k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
-                           if o["state"] in ("hold", "dead") and o.get("link_code")]
-            results = {}
-            for k in targets[:20]:
-                r = _recheck_and_start(k, "admin")
-                key = "開始" if r == "started" else ("支払い済み（開始待ち）" if r == "paid" else ("まだ保留" if r.startswith("wait") else ("要確認" if r.startswith("stop") else "対象外")))
-                results[key] = results.get(key, 0) + 1
-            msg = ("保留・要確認の注文 {} 件をPayPayに確認しました：".format(len(targets[:20])) + "、".join(f"{k} {v}件" for k, v in results.items())) if targets else "再確認が必要な注文（保留・要確認で送金リンクのあるもの）はありません。"
-        elif action == "restart_save":
-            try:
-                _save_restart(_parse_restart_form(request.form.get("items", ""), request.form.get("cats", ""),
-                                                  request.form.get("enabled") == "1", request.form.get("note", ""),
-                                                  request.form.getlist("subs"), request.form.get("cat_level", ""),
-                                                  request.form.get("facility_level", "")))
-                msg = "初期垢作成（リスタートパック）の中身を保存しました。" + ("利用者の画面で選べるようになりました。" if request.form.get("enabled") == "1" else "（いまは選べない状態です）")
-            except (ValueError, OSError) as exc:
-                msg = str(exc) or "保存できませんでした。"
-        elif action == "restart_official":
-            try:
-                _save_restart(dict(RESTART_OFFICIAL, enabled=True))
-                msg = "初期垢作成に公式リスタートパックと同じ中身を入れて、利用者の画面で選べるようにしました。"
-            except OSError:
-                msg = "保存できませんでした。"
-        elif action == "price_save":
-            try:
-                _save_prices(request.form)
-                msg = "料金を変更しました。これからの新しい注文から反映されます（作成済みの注文の金額は変わりません）。"
-            except (ValueError, OSError) as exc:
-                msg = str(exc) or "保存できませんでした。"
+                code = paypay_gateway.coupon_issue_free(days, request.form.get("note", ""))
+                msg = f"無料クーポン {code} を発行しました（1回だけ・{days}日間有効）。このコードを相手に伝えてください。"
+            except Exception:  # noqa: BLE001
+                _log_orders.exception("free coupon issue failed")
+                msg = "無料クーポンを発行できませんでした。"
+    elif action == "coupon_revoke":
+        code = str(request.form.get("code", "")).strip().upper()[:20]
+        try:
+            ok = paypay_gateway.coupon_revoke(code)
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("coupon revoke failed")
+            ok = False
+        msg = (f"クーポン {code} を取り消しました。" if ok
+               else "取り消せませんでした（取り消せるのは、未使用の無料クーポン・チケット・支援クーポンだけです）。")
+    elif action == "backup_download":
+        return _backup_response()
+    elif action == "lock":
+        session.pop("admin", None)
+        session.pop("admin_at", None)
+        return redirect("/admin")
+    elif action == "pp_refresh":
+        try:
+            asyncio.run(paypay_gateway.refresh_session())
+            msg = "PayPayの接続を更新しました（保存済みの情報でログインし直しました）。"
+        except paypay_gateway.PayPayError as exc:
+            msg = {"otp_required": "PayPayがSMS認証を求めています。届いた4桁のコードを「② SMS 認証」に入力してください。",
+                   "login_required": "PayPayが未接続です。「① ログイン」から電話番号とパスワードで接続してください。"}.get(exc.code, exc.message)
+        except Exception:
+            _log_orders.exception("paypay refresh failed")
+            msg = "PayPayの接続を更新できませんでした。少し待ってからもう一度お試しください。"
+    elif action == "pp_recheck_all":
+        with _orders_lock:
+            targets = [k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
+                       if o["state"] in ("hold", "dead") and o.get("link_code")]
+        results = {}
+        for k in targets[:20]:
+            r = _recheck_and_start(k, "admin")
+            key = "開始" if r == "started" else ("支払い済み（開始待ち）" if r == "paid" else ("まだ保留" if r.startswith("wait") else ("要確認" if r.startswith("stop") else "対象外")))
+            results[key] = results.get(key, 0) + 1
+        msg = ("保留・要確認の注文 {} 件をPayPayに確認しました：".format(len(targets[:20])) + "、".join(f"{k} {v}件" for k, v in results.items())) if targets else "再確認が必要な注文（保留・要確認で送金リンクのあるもの）はありません。"
+    elif action == "restart_save":
+        try:
+            _save_restart(_parse_restart_form(request.form.get("items", ""), request.form.get("cats", ""),
+                                              request.form.get("enabled") == "1", request.form.get("note", ""),
+                                              request.form.getlist("subs"), request.form.get("cat_level", ""),
+                                              request.form.get("facility_level", "")))
+            msg = "初期垢作成（リスタートパック）の中身を保存しました。" + ("利用者の画面で選べるようになりました。" if request.form.get("enabled") == "1" else "（いまは選べない状態です）")
+        except (ValueError, OSError) as exc:
+            msg = str(exc) or "保存できませんでした。"
+    elif action == "restart_official":
+        try:
+            _save_restart(dict(RESTART_OFFICIAL, enabled=True))
+            msg = "初期垢作成に公式リスタートパックと同じ中身を入れて、利用者の画面で選べるようにしました。"
+        except OSError:
+            msg = "保存できませんでした。"
+    elif action == "price_save":
+        try:
+            _save_prices(request.form)
+            msg = "料金を変更しました。これからの新しい注文から反映されます（作成済みの注文の金額は変わりません）。"
+        except (ValueError, OSError) as exc:
+            msg = str(exc) or "保存できませんでした。"
     if request.form.get("action") == "unlock" and not _is_admin():
         session["admin_flash"] = msg
         return redirect("/admin")
@@ -1927,10 +1954,11 @@ def _admin_page(msg):
     return render_template_string(ADMIN_HTML, coupons=coupons, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
                                   maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
-                                  prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED)
+                                  prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED,
+                                  coupon_min=COUPON_MIN, coupon_days=COUPON_DAYS)
 
 
-# ---------------------------------------------------------------- 注文（決済してから実行）
+# ---------------------------------------------------------------- 7. 注文（決済してから実行）
 _orders: dict[str, dict] = {}
 _orders_lock = threading.Lock()
 # 保存（暗号化してディスクへ）を直列化する。snapshot と書き込みを1つの単位にして、
@@ -1938,7 +1966,9 @@ _orders_lock = threading.Lock()
 _persist_lock = threading.Lock()
 
 
-ORDER_KEEP = {"hold": 7 * 86400, "paid": 7 * 86400, "paying": 7 * 86400, "starting": 7 * 86400, "dead": 7 * 86400, "started": 86400, "done": 3 * 86400}  # 支払い済み・保留は24時間残す（それ以外は ORDER_TTL）
+# 状態ごとに注文を残す時間。保留・支払い済み・要確認は7日、実行中は1日、完了は3日。未払いは ORDER_TTL（30分）。
+ORDER_KEEP = {"hold": 7 * 86400, "paid": 7 * 86400, "paying": 7 * 86400, "starting": 7 * 86400, "dead": 7 * 86400,
+              "started": 86400, "done": 3 * 86400}
 _log_orders = logging.getLogger("orders")
 
 
@@ -1947,21 +1977,28 @@ def _order_id_of(order: dict) -> str:
         return next((k for k, v in _orders.items() if v is order), "")
 
 
+def _order_keep(o: dict) -> float:
+    """この注文を残しておく秒数（作成から）。
+    - 個別に指定があればそれ（ソースコード購入は30日）
+    - 送金リンクを受け付けたことのある注文は、支払い待ちでも7日
+    - それ以外は状態ごと（ORDER_KEEP）。未払いは30分（ORDER_TTL）"""
+    if o.get("keep"):
+        return float(o["keep"])
+    return 7 * 86400 if o.get("link_code") else ORDER_KEEP.get(o["state"], ORDER_TTL)
+
+
 def _gc_orders() -> None:
     now = time.time()
     with _orders_lock:
         expiring = [(k, v.get("coupon")) for k, v in _orders.items()
-                    if v.get("coupon") and not v.get("coupon_used") and v["state"] == "unpaid"
-                    and now - v["created"] > (7 * 86400 if v.get("link_code") else ORDER_KEEP.get(v["state"], ORDER_TTL))]
-    for k, c in expiring:   # 支払われずに期限切れになった注文のクーポンは、使えるように戻す
+                    if v.get("coupon") and not v.get("coupon_used") and now - v["created"] > _order_keep(v)]
+    for k, c in expiring:   # 使われないまま消える注文（未払い・保留・要確認など）のクーポンは、使えるように戻す
         try:
             paypay_gateway.coupon_release(c, k)
         except Exception:
             pass
     with _orders_lock:
-        # 保留・支払い済み・要確認は7日、送金リンクを受け付けたことのある注文は（支払い待ちでも）7日残す
-        for k in [k for k, v in _orders.items()
-                  if now - v["created"] > (7 * 86400 if v.get("link_code") else ORDER_KEEP.get(v["state"], ORDER_TTL))]:
+        for k in [k for k, v in _orders.items() if now - v["created"] > _order_keep(v)]:
             del _orders[k]
 
 
@@ -2129,13 +2166,23 @@ if _is_server_process():
         _log_orders.exception("reconcile at startup failed")
 
 
+# ---------------------------------------------------------------- 8. 画面のページ
 @app.get("/")
 def home():
-    """トップ：大メニュー（にゃんこ／ツムツム）。それぞれの代行は別のページ（/nyanko・/tsum）なので、
-    ブラウザの戻るボタンで素直に行き来できる。"""
+    """トップ：正方形のカードが並ぶ入口（代行3部門・チケット・支援BOX・ソースコード）。
+    それぞれ別のページなので、ブラウザの戻るボタンで素直に行き来できる。"""
     if request.args.get("game") == "nyanko":        # 以前の入口（/?game=nyanko）
         return redirect("/nyanko", code=301)
-    return render_template_string(HOME_HTML, prices=PRICES, maint=_maint(), version=APP_VERSION, site=_site())
+    return render_template_string(HOME_HTML, prices=PRICES, low=_lowest_prices(), maint=_maint(),
+                                  version=APP_VERSION, site=_site())
+
+
+def _lowest_prices() -> dict:
+    """トップの「○円〜」に出す、部門ごとのいちばん安い料金（管理画面で変えた料金に追従する）。"""
+    def cheapest(service) -> int:
+        return min((PRICES.get(m["price"], 0) for m in service.MENUS.values()), default=0)
+    return {"nyanko": min(PRICES["other"], PRICES["crash"], PRICES["chara"]),
+            "tsum": cheapest(tsum_service), "puni": cheapest(puni_service)}
 
 
 @app.get("/nyanko")
@@ -2185,7 +2232,7 @@ def robots_txt():
 @app.get("/sitemap.xml")
 def sitemap_xml():
     urls = "".join(f"<url><loc>{xml_escape(_site() + path)}</loc></url>"
-                   for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support"))
+                   for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source"))
     return Response(
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -2198,12 +2245,16 @@ def favicon():
     return app.send_static_file("favicon.ico")
 
 
+def _service_menus(service) -> list:
+    """ツムツム・ぷにぷにの画面に渡すメニュー一覧（表示順・いまの料金つき）。"""
+    return [dict(key=k, **{kk: vv for kk, vv in v.items() if kk != "price"}, amount=PRICES.get(v["price"], 0))
+            for k, v in sorted(service.MENUS.items(), key=lambda kv: kv[1]["order"])]
+
+
 @app.get("/tsum")
 def tsum_page():
     """ツムツム代行の画面（にゃんこ代行とは別の大メニュー）。"""
-    menus = [dict(key=k, **{kk: vv for kk, vv in v.items() if kk != "price"},
-                  amount=PRICES.get(v["price"], 0))
-             for k, v in sorted(tsum_service.MENUS.items(), key=lambda kv: kv[1]["order"])]
+    menus = _service_menus(tsum_service)
     return render_template_string(
         TSUM_HTML, menus=menus, modes=tsum_service.MODE_LABELS, solo=list(tsum_service.SOLO_MENUS),
         is_admin=_is_admin() and PAYMENTS_ENABLED, maint=_maint(), payments=PAYMENTS_ENABLED,
@@ -2214,9 +2265,7 @@ def tsum_page():
 @app.get("/puni")
 def puni_page():
     """ぷにぷに代行の画面（にゃんこ・ツムツムに次ぐ3つ目の大メニュー）。"""
-    menus = [dict(key=k, **{kk: vv for kk, vv in v.items() if kk != "price"},
-                  amount=PRICES.get(v["price"], 0))
-             for k, v in sorted(puni_service.MENUS.items(), key=lambda kv: kv[1]["order"])]
+    menus = _service_menus(puni_service)
     return render_template_string(
         PUNI_HTML, menus=menus, modes=puni_service.MODE_LABELS, solo=list(puni_service.SOLO_MENUS),
         stage_menus=list(puni_service.STAGE_MENUS),
@@ -2338,6 +2387,7 @@ def api_cats_refresh():
     return jsonify(state=_names["state"])
 
 
+# ---------------------------------------------------------------- 9. 注文を作る
 def _clean_run_body(data):
     """/run に送られてきた内容の形をそろえる（画面以外から変な形で送られても、500 にしない）。"""
     if data is None:
@@ -2396,17 +2446,17 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
             free_coupon = True
             amount = 0           # 1回無料（管理者発行・チケット）／期間無料チケット：金額に関係なく0円
             label = "期間無料チケット" if coupon_kind == "period" else "無料クーポン"
-            breakdown.append({"label": f"{label} {coupon}", "count": 1, "unit": -base_amount})
+            breakdown.append({"label": f"{label} {coupon}", "count": 1, "unit": -base_amount, "coupon": True})
         elif coupon_kind == "pct30":
             amount = base_amount * (100 - SUPPORT_COUPON_PCT) // 100   # 支援BOXのお礼：30%引き（最低金額なし）
-            breakdown.append({"label": f"支援クーポン（{SUPPORT_COUPON_PCT}%引き）{coupon}", "count": 1, "unit": amount - base_amount})
+            breakdown.append({"label": f"支援クーポン（{SUPPORT_COUPON_PCT}%引き）{coupon}", "count": 1, "unit": amount - base_amount, "coupon": True})
         else:
             if base_amount < COUPON_MIN:
                 return jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400
             if not ok:
                 return jsonify(error=why, code="coupon_invalid"), 400
             amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
-            breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount})
+            breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount, "coupon": True})
     me = _owner()
     trimmed_coupons = []
     with _orders_lock:
@@ -2415,13 +2465,15 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
                                            and not (o["owner"] == me and o["state"] == "paid") for o in _orders.values()):
             return jsonify(error="この期間チケットは、いま別のご注文で使用中です。その注文が終わると次の注文に使えます（1件ずつ順番に使えます）。",
                            code="coupon_busy"), 409
-        # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）
+        # 支払い済みなのに実行できなかった注文があれば、その支払いを今回の内容に充てる（同額以下のとき・払い直し不要）。
+        # 比べるのは「割引前の金額どうし」。今回のクーポンで安くなった金額と比べると、安い注文の支払いで
+        # 高い注文が通ってしまう（しかもクーポンは使われずに残る）。
         credit = next((k for k, o in sorted(_orders.items(), key=lambda kv: kv[1]["created"])
-                       if o["owner"] == me and o["state"] == "paid" and o.get("retry")
-                       and (o["amount"] >= amount or o.get("free_coupon"))), None)
+                       if o["owner"] == me and o["state"] == "paid" and o.get("retry") and not o.get("product")
+                       and (int(o.get("base_amount") or o["amount"]) >= base_amount or o.get("free_coupon"))), None)
         if credit:
             o = _orders[credit]
-            breakdown = [b for b in breakdown if not str(b.get("label", "")).startswith("クーポン")]   # 支払い済みを充てるので、クーポンは使わない
+            breakdown = [b for b in breakdown if not b.get("coupon")]   # 支払い済みを充てるので、今回のクーポンは使わない（そのまま残る）
             o.update(job=job, arguments=arguments, transfer_key=transfer_key, breakdown=breakdown, skipped=skipped, summary=summary)
             paid_amount = o["amount"]
         else:
@@ -2460,6 +2512,32 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
     if credit:
         return jsonify(order=credit, amount=paid_amount, skipped=skipped, breakdown=breakdown, state="paid", prepaid=True)
     return jsonify(order=order_id, amount=amount, skipped=skipped, breakdown=breakdown)
+
+
+def _checkout(job: dict, arguments: tuple, transfer_key, summary: str, skipped: list, price, coupon_raw: str, admin_free: bool):
+    """内容の検査が済んだ注文を、次の段階へ進める（全部門共通）。
+    - 支払いなしの動作確認モード → そのまま実行
+    - 管理者でログイン中 → 0円の「支払い済み」注文にして実行
+    - それ以外 → 金額を計算して「支払い待ち」の注文を作る（price は (合計, 内訳の行) を返す関数）"""
+    if not PAYMENTS_ENABLED:
+        if _draining():
+            return _updating_response()
+        return _start_job(job, arguments, transfer_key)
+    if admin_free:
+        if _draining():
+            return _updating_response()
+        me = _owner()
+        free = {"owner": me, "uid": _uid(me), "state": "paid", "amount": 0, "created": time.time(), "admin_free": True,
+                "job": job, "arguments": arguments, "transfer_key": transfer_key, "breakdown": [], "skipped": skipped,
+                "summary": "【管理者・無料】" + summary}
+        with _orders_lock:
+            _orders[secrets.token_urlsafe(16)] = free
+        resp = _start_paid_order(free)
+        _persist_orders()
+        return resp
+    amount, rows = price()
+    breakdown = [{"label": label, "count": n, "unit": p} for label, n, p in rows]
+    return _place_order(job, arguments, transfer_key, amount, breakdown, summary, skipped, coupon_raw)
 
 
 def _tsum_summary(mode: str, menus: list, qty: dict) -> str:
@@ -2513,27 +2591,8 @@ def _run_tsum_order(data: dict, admin_free: bool):
         with _jobs_lock:
             if transfer_key in _active_transfers:
                 return jsonify(error="このアカウントの処理はすでに実行中です。完了までお待ちください。"), 409
-    summary = _tsum_summary(mode, menus, qty)
-    if not PAYMENTS_ENABLED:
-        if _draining():
-            return _updating_response()
-        return _start_job(job, arguments, transfer_key)
-    if admin_free:
-        if _draining():
-            return _updating_response()
-        oid = secrets.token_urlsafe(16)
-        me = _owner()
-        free = {"owner": me, "uid": _uid(me), "state": "paid", "amount": 0, "created": time.time(), "admin_free": True,
-                "job": job, "arguments": arguments, "transfer_key": transfer_key, "breakdown": [], "skipped": [],
-                "summary": "【管理者・無料】" + summary}
-        with _orders_lock:
-            _orders[oid] = free
-        resp = _start_paid_order(free)
-        _persist_orders()
-        return resp
-    amount, rows = compute_tsum_amount(menus, qty)
-    breakdown = [{"label": label, "count": n, "unit": p} for label, n, p in rows]
-    return _place_order(job, arguments, transfer_key, amount, breakdown, summary, [], data.get("coupon", ""))
+    return _checkout(job, arguments, transfer_key, _tsum_summary(mode, menus, qty), [],
+                     lambda: compute_tsum_amount(menus, qty), data.get("coupon", ""), admin_free)
 
 
 def _puni_summary(mode: str, menus: list, qty: dict, stages: dict) -> str:
@@ -2594,27 +2653,8 @@ def _run_puni_order(data: dict, admin_free: bool):
         with _jobs_lock:
             if transfer_key in _active_transfers:
                 return jsonify(error="このアカウントの処理はすでに実行中です。完了までお待ちください。"), 409
-    summary = _puni_summary(mode, menus, qty, stages)
-    if not PAYMENTS_ENABLED:
-        if _draining():
-            return _updating_response()
-        return _start_job(job, arguments, transfer_key)
-    if admin_free:
-        if _draining():
-            return _updating_response()
-        oid = secrets.token_urlsafe(16)
-        me = _owner()
-        free = {"owner": me, "uid": _uid(me), "state": "paid", "amount": 0, "created": time.time(), "admin_free": True,
-                "job": job, "arguments": arguments, "transfer_key": transfer_key, "breakdown": [], "skipped": [],
-                "summary": "【管理者・無料】" + summary}
-        with _orders_lock:
-            _orders[oid] = free
-        resp = _start_paid_order(free)
-        _persist_orders()
-        return resp
-    amount, rows = compute_puni_amount(menus, qty)
-    breakdown = [{"label": label, "count": n, "unit": p} for label, n, p in rows]
-    return _place_order(job, arguments, transfer_key, amount, breakdown, summary, [], data.get("coupon", ""))
+    return _checkout(job, arguments, transfer_key, _puni_summary(mode, menus, qty, stages), [],
+                     lambda: compute_puni_amount(menus, qty), data.get("coupon", ""), admin_free)
 
 
 @app.post("/run")
@@ -2774,27 +2814,10 @@ def run():
         with _jobs_lock:
             if transfer_key in _active_transfers:
                 return jsonify(error="この引継ぎコードの処理はすでに実行中です。完了までお待ちください。"), 409
-    if not PAYMENTS_ENABLED:
-        if _draining():
-            return _updating_response()
-        return _start_job(job, arguments, transfer_key)
-    if admin_free:
-        if _draining():
-            return _updating_response()
-        oid = secrets.token_urlsafe(16)
-        me = _owner()
-        free = {"owner": me, "uid": _uid(me), "state": "paid", "amount": 0, "created": time.time(), "admin_free": True,
-                "job": job, "arguments": arguments, "transfer_key": transfer_key, "breakdown": [], "skipped": skipped,
-                "summary": "【管理者・無料】" + _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))}
-        with _orders_lock:
-            _orders[oid] = free
-        resp = _start_paid_order(free)
-        _persist_orders()
-        return resp
-    amount, rows = compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings)
-    breakdown = [{"label": l, "count": n, "unit": p} for l, n, p in rows]
     summary = _summary(items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only, bool(transfer))
-    return _place_order(job, arguments, transfer_key, amount, breakdown, summary, skipped, data.get("coupon", ""))
+    return _checkout(job, arguments, transfer_key, summary, skipped,
+                     lambda: compute_amount(items, subs, others, qty, cat_nums, clone, integrity_only, cat_settings),
+                     data.get("coupon", ""), admin_free)
 
 
 def _start_job(job: dict, arguments: tuple, transfer_key):
@@ -2833,12 +2856,16 @@ def _start_job(job: dict, arguments: tuple, transfer_key):
     return jsonify(job=job_id)
 
 
+# ---------------------------------------------------------------- 注文の状態の分類・Q&A に渡す「いまの状況」
 RESUMABLE = ("unpaid", "hold", "paid")
 VISIBLE = RESUMABLE + ("dead",)  # dead は再開できないが、注文番号を管理者に伝えられるよう表示する
 # 注文番号で呼び戻せる状態。完了（done）も含める＝一覧から消した／別のブラウザでも、
 # 番号を知っていれば完了注文の結果（引き継ぎ情報・アカウント）をもう一度表示できる。
 # started/starting/paying（実行・確認の最中）は呼び戻せない（番号の持ち主＝本人なので安全）。
 CLAIMABLE = VISIBLE + ("done",)
+# 一覧（/api/orders/mine）に出す状態。確認中・開始処理中も出す＝サーバーが保留を再確認している数秒のあいだに
+# 画面の一覧から注文が消えて、自動の見張りが止まってしまうのを防ぐ。
+LISTED = VISIBLE + ("paying", "starting")
 # 利用者が自分の一覧から消せる状態（お金が動いていない・進行中でないものだけ）。
 # 管理台帳（PayPay）には残すので、消えるのは利用者の画面上の表示だけ。消しても番号で呼び戻せる。
 FORGETTABLE = ("done", "dead", "unpaid")
@@ -2857,7 +2884,6 @@ def _public_order(order_id: str, o: dict) -> dict:
 _QA_STATE_JA = {"unpaid": "お支払い待ち", "hold": "保留中", "paid": "お支払い済み・開始待ち",
                 "paying": "確認中", "starting": "開始処理中", "started": "実行中",
                 "done": "完了", "dead": "要確認"}
-_QA_SHOP_MODE = {"tsum": "tsum", "puni": "puni"}   # それ以外（にゃんこ）は mode が tsum/puni 以外
 
 
 def _qa_orders_for(shop: str) -> list:
@@ -2923,7 +2949,7 @@ def _qa_prices(shop: str) -> list:
                 rows.append(f"{label}：{PRICES.get(pk, 0)}円")
         else:
             for pk, label in PRICE_LABELS.items():
-                if not pk.startswith(("tsum_", "puni_", "ticket_")):
+                if not pk.startswith(("tsum_", "puni_") + NOT_SERVICE_PREFIXES):
                     rows.append(f"{label}：{PRICES.get(pk, 0)}円")
     except Exception:  # noqa: BLE001  料金が取れなくても回答は続ける
         _log_orders.exception("qa prices failed")
@@ -2952,12 +2978,14 @@ def _qa_live(shop: str) -> dict:
             "prices": _qa_prices(shop), "price_note": _QA_PRICE_NOTE.get(shop, ""),
             "tickets": {"once": PRICES["ticket_once"], "day1": ticket_period_price(1), "day7": ticket_period_price(7),
                         "day30": ticket_period_price(30), "unlimited": ticket_period_price(0)},
+            "source_price": PRICES["source_code"],
             "coupon_min": COUPON_MIN, "coupon_days": COUPON_DAYS,
             "unpaid_ttl_min": ORDER_TTL // 60}
 
 
-# ---------------------------------------------------------------- チケット・支援BOX（docs/TICKETS.md）
-PRODUCT_LABELS = {"ticket_once": "1回なんでも無料チケット", "ticket_period": "期間無料チケット", "support": "支援BOX"}
+# ---------------------------------------------------------------- 10. チケット・支援BOX・ソースコード購入（docs/TICKETS.md）
+PRODUCT_LABELS = {"ticket_once": "1回なんでも無料チケット", "ticket_period": "期間無料チケット", "support": "支援BOX",
+                  "source": "ソースコード一式"}
 
 
 def _period_label(days: int) -> str:
@@ -2967,6 +2995,8 @@ def _period_label(days: int) -> str:
 def _create_product_order(product: dict, amount: int, summary: str):
     """チケット・支援の注文（支払い待ち）を作る。支払いは代行と同じ PayPay 送金リンクの流れ。
     クーポンは使えない（チケットをチケットで買う・割引で買うのを防ぐ）。"""
+    if not PAYMENTS_ENABLED:
+        return jsonify(error="このサーバーは支払いなしの動作確認モードのため、購入はできません。", code="payments_off"), 400
     if _maint()["on"]:
         return _maintenance_response()
     if not _rate_ok("product:" + _client_ip(), 10, 600):
@@ -2995,6 +3025,18 @@ def _deliver_product(order: dict):
         order["state"] = "starting"
     order_id = _order_id_of(order)
     p = order["product"]
+    if p["type"] == "source":   # クーポンではなく、ダウンロードの権利を渡す（購入から30日は番号で呼び戻せる）
+        result = {"product": "source", "download": True, "version": APP_VERSION,
+                  "expires": int(order["created"] + SOURCE_KEEP_DAYS * 86400)}
+        with _orders_lock:
+            order.update(state="done", result=result, keep=SOURCE_KEEP_DAYS * 86400,
+                         diag=f"購入 source {time.strftime('%m/%d %H:%M')}")
+        try:
+            paypay_gateway.mark_used(order.get("link_code"))
+        except Exception:
+            _log_orders.exception("mark_used failed")
+        _persist_orders()
+        return jsonify(order=order_id, state="done", result=result)
     try:
         if p["type"] == "ticket_once":
             code, exp = paypay_gateway.coupon_issue_kind("free", TICKET_ONCE_DAYS, "ticket:" + order_id, "チケット購入")
@@ -3023,31 +3065,35 @@ def _deliver_product(order: dict):
     return jsonify(order=order_id, state="done", result=result)
 
 
+def _extra_page(mode: str, **more):
+    """チケット購入・支援BOX・ソースコード購入は同じひな形（templates/extra.html）。mode で中身を切り替える。"""
+    periods = []
+    if mode == "ticket":
+        periods = [{"days": d, "price": ticket_period_price(d)} for d in range(1, TICKET_MAX_DAYS + 1)]
+        periods.append({"days": 0, "price": ticket_period_price(0)})
+    ctx = dict(mode=mode, prices=PRICES, periods=periods, once_days=TICKET_ONCE_DAYS, avg=_typical_order_price(),
+               maint=_maint(), payments=PAYMENTS_ENABLED, uid=_uid(_owner()), version=APP_VERSION, site=_site(),
+               support_min=SUPPORT_MIN, support_max=SUPPORT_MAX, support_pct=SUPPORT_COUPON_PCT,
+               support_days=SUPPORT_COUPON_DAYS, source_days=SOURCE_KEEP_DAYS, pack=None)
+    ctx.update(more)
+    return render_template_string(EXTRA_HTML, **ctx)
+
+
 @app.get("/ticket")
 def ticket_page():
     """チケット購入（1回なんでも無料・期間無料）。買うとクーポンコードが出て、全部門の注文で使える。"""
-    periods = [{"days": d, "price": ticket_period_price(d)} for d in range(1, TICKET_MAX_DAYS + 1)]
-    periods.append({"days": 0, "price": ticket_period_price(0)})
-    return render_template_string(EXTRA_HTML, mode="ticket", prices=PRICES, periods=periods, once_days=TICKET_ONCE_DAYS,
-                                  avg=_typical_order_price(), maint=_maint(), payments=PAYMENTS_ENABLED,
-                                  uid=_uid(_owner()), version=APP_VERSION, site=_site(),
-                                  support_min=SUPPORT_MIN, support_max=SUPPORT_MAX, support_pct=SUPPORT_COUPON_PCT,
-                                  support_days=SUPPORT_COUPON_DAYS)
+    return _extra_page("ticket")
 
 
 @app.get("/support")
 def support_page():
     """支援BOX（100円から。1回の支援ごとに30%引きクーポン）。"""
-    return render_template_string(EXTRA_HTML, mode="support", prices=PRICES, periods=[], once_days=TICKET_ONCE_DAYS,
-                                  avg=_typical_order_price(), maint=_maint(), payments=PAYMENTS_ENABLED,
-                                  uid=_uid(_owner()), version=APP_VERSION, site=_site(),
-                                  support_min=SUPPORT_MIN, support_max=SUPPORT_MAX, support_pct=SUPPORT_COUPON_PCT,
-                                  support_days=SUPPORT_COUPON_DAYS)
+    return _extra_page("support")
 
 
 def _typical_order_price() -> int:
     """比較グラフの初期値：代行メニューの単品料金の中央値（いまの料金表から計算）。"""
-    vals = sorted(v for k, v in PRICES.items() if not k.startswith(("ticket_",)) and v > 0)
+    vals = sorted(v for k, v in PRICES.items() if not k.startswith(NOT_SERVICE_PREFIXES) and v > 0)
     return vals[len(vals) // 2] if vals else 50
 
 
@@ -3061,11 +3107,52 @@ def ticket_order():
         try:
             days = int(data.get("days"))
             amount = ticket_period_price(days)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return jsonify(error=f"期間は1〜{TICKET_MAX_DAYS}日、または無制限から選んでください。", code="bad_days"), 400
         return _create_product_order({"type": "ticket_period", "days": days}, amount,
                                      f"{PRODUCT_LABELS['ticket_period']}（{_period_label(days)}）")
     return jsonify(error="チケットの種類を選んでください。", code="bad_plan"), 400
+
+
+@app.get("/source")
+def source_page():
+    """ソースコード購入（このお店の仕組み一式を zip で渡す）。"""
+    try:
+        pack = source_pack.summary()
+    except Exception:  # noqa: BLE001  中身の数が出せなくても、ページは出す
+        _log_orders.exception("source pack summary failed")
+        pack = None
+    return _extra_page("source", pack=pack)
+
+
+@app.post("/api/source/order")
+def source_order():
+    return _create_product_order({"type": "source"}, int(PRICES["source_code"]), PRODUCT_LABELS["source"])
+
+
+@app.get("/api/source/download/<order_id>")
+def source_download(order_id: str):
+    """購入済みの人だけがダウンロードできる。zip はいま動いているコードから作る（source_pack.py）。"""
+    from flask import send_file
+    import io
+    if not _rate_ok("srcdl:" + _client_ip(), 10, 600):
+        return _too_fast()
+    with _orders_lock:
+        o = _orders.get((order_id or "").strip())
+        ok = bool(o and o["owner"] == _owner() and o["state"] == "done"
+                  and (o.get("product") or {}).get("type") == "source")
+    if not ok:
+        return jsonify(error="ダウンロードできる注文が見つかりません。別の端末で購入した場合は、注文番号で呼び戻してください。",
+                       code="order_missing"), 404
+    try:
+        data = source_pack.cached()
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("source pack build failed")
+        return jsonify(error="ファイルを用意できませんでした。時間をおいてもう一度お試しください。", code="pack_failed"), 503
+    resp = send_file(io.BytesIO(data), mimetype="application/zip", as_attachment=True,
+                     download_name=f"shop-source-v{APP_VERSION}.zip")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.post("/api/support/order")
@@ -3073,7 +3160,7 @@ def support_order():
     data = request.get_json(silent=True) or {}
     try:
         amount = int(data.get("amount"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         amount = 0
     if not SUPPORT_MIN <= amount <= SUPPORT_MAX:
         return jsonify(error=f"支援は {SUPPORT_MIN}円〜{SUPPORT_MAX:,}円でお願いします。", code="bad_amount"), 400
@@ -3101,6 +3188,7 @@ def qa():
     return jsonify(answer=out["answer"], enabled=out.get("enabled", False))
 
 
+# ---------------------------------------------------------------- 11. 注文の一覧・支払い・進み具合
 @app.get("/api/orders/mine")
 def my_orders():
     """このブラウザの未完了の注文（支払い待ち・保留・支払い済み未開始）。"""
@@ -3110,7 +3198,7 @@ def my_orders():
     with _jobs_lock:
         live = set(_jobs)
     with _orders_lock:
-        items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in VISIBLE
+        items = [_public_order(k, v) for k, v in _orders.items() if v["owner"] == me and v["state"] in LISTED
                  and not v.get("hidden_by_owner")  # 利用者が自分で消した注文は見せない
                  and not str(v.get("diag", "")).startswith("superseded")]  # 新しい注文に支払いを引き継いだ古い注文は見せない
         for k, v in _orders.items():  # 実行中・完了した注文は、状況・結果を見られるようにする
@@ -3136,7 +3224,7 @@ def claim_order(order_id: str):
     with _orders_lock:
         o = _orders.get(order_id)
         if not o or o["state"] not in CLAIMABLE:
-            _fail.setdefault("claim:" + ip, []).append(time.time())
+            _note_fail("claim:" + ip)
             return jsonify(error="見つかりません。番号を確認してください（実行中・確認中・期限切れの注文は呼び戻せません）。", code="order_missing"), 404
         o["owner"] = _owner()
         o["uid"] = _uid(o["owner"])
@@ -3298,7 +3386,7 @@ def _pay_order(order_id: str):
                        "session_rejected", "login_required", "otp_required", "cookie_missing", "oauth_rejected",
                        "oauth_network", "oauth_response", "runtime_store", "account_unreadable", "missing_key", "invalid_key")
             if not (mode == "recheck" and exc.code in WAITING):
-                _fail.setdefault("paypay:" + order_id, []).append(time.time())
+                _note_fail("paypay:" + order_id)
             hold = bool(order.get("link_code")) and (exc.code in HOLDISH or (mode == "recheck" and exc.code in WAITING))
             # 再確認（同じリンク）で、待てば直る種類以外のエラー → 自動では進められないので管理者確認へ。
             # 「支払い待ち」に戻すと、台帳にこの注文のリンクが残っているため新しいリンクも受け付けられず行き詰まる。
@@ -3438,7 +3526,7 @@ def cancel_job(job_id: str):
     return jsonify(error="待機中の処理が見つかりません。"), 409
 
 
-# ---------------------------------------------------------------- 画面
+# ---------------------------------------------------------------- 画面のひな形（templates/）
 def _template(name: str) -> str:
     """画面の HTML（Jinja のひな形）。templates/ に置いてある（以前は app.py の中に直接書いていた）。"""
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", name), encoding="utf-8", newline="") as f:

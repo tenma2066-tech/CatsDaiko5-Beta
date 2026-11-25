@@ -61,6 +61,10 @@ TN SHOP は現在3部門（＋チケット購入・支援BOX。docs/TICKETS.md�
 - `/sitemap.xml` の paths に `/<dept>`。
 
 ## 5. 画面 `templates/<dept>.html`（`templates/puni.html` を複製）
+- 支払いパネル・「このブラウザの注文」・削除・注文番号での再開・完了後のクーポン表示は、共通の **`static/shop.js`**
+  （`ShopOrders({shop:'<dept>', …})`）が受け持つ。画面に書くのは「メニューの選び方」と「結果の見せ方」だけ。
+  `/api/orders/mine` の各注文に `<dept>: true` が付くよう `_public_order` に1行足すと、一覧の振り分けが効く。
+- 店名・問い合わせ先は `{{ shop_name }}`・`{{ shop_x }}`・`{{ contact }}` を使う（`site_config.py`。文字で直接書かない）。
 - デザインは**既存のトークンを踏襲**（`:root` の `--bg/--panel/--accent/...` と
   `@media (prefers-color-scheme:dark)`、角ゴシック、`.card/.btn/.menu/.bar/.pbar/.panel`）。
   現状トークンは各テンプレに同じ内容で複製されている（将来 `static/shop.css` に集約する余地）。

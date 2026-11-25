@@ -184,7 +184,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <button class="btn pri full">保存</button></form>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="restart_official">
 <button class="btn full" onclick="return confirm('公式リスタートパックと同じ中身（日本編1〜3章クリア・お宝金・基本キャラ9種＋もねこ・ネコヴァルキリー・ネコムートLv20・施設Lv20・レアチケ1・にゃんチケ10）を入れて、利用者が選べるようにします。よろしいですか？')">⭐ 公式と同じ中身を入れて公開する</button></form></div>
-<div class="card"><h2>クーポン</h2><p class="sub">支払額200円以上の注文の完了時に自動で発行（次回200円以上で10%引き・1回きり・30日）。新しい順に最大100件。</p>
+<div class="card"><h2>クーポン</h2><p class="sub">支払額{{ coupon_min }}円以上の注文の完了時に自動で発行（次回{{ coupon_min }}円以上で10%引き・1回きり・{{ coupon_days }}日）。チケット購入（1回無料・期間無料）と支援BOX（30%引き）で発行したコードもここに出ます。新しい順に最大100件。</p>
 <form method="post" style="margin:8px 0 14px;padding:10px;border:1px dashed var(--line);border-radius:10px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_free_issue">
 <b>🎁 無料クーポンを発行</b><p class="sub" style="margin:4px 0">1回だけ、どのメニューでも0円で実行できるコード（FR-XXXX-XXXX）を作ります。利用者は注文確認の画面でクーポン欄に入れます。</p>
 <label for="fcd">有効期限（日）</label><input id="fcd" name="days" inputmode="numeric" maxlength="3" value="30">

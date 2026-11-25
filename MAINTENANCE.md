@@ -11,7 +11,7 @@ This repository is intended to be maintained continuously, not updated only once
 - Keep the Japanese Battle Cats character encyclopedia / cat roster data aligned with the latest game-data release the project supports.
 - Verify that the selected game-data version is actually available from the upstream BCSFE game-data source before changing the pinned version. Do not assume every game patch changes encyclopedia data.
 - Update the BCSFE dependency when required for compatibility with the target data version.
-- Preserve existing application behavior, save compatibility, unlocked/owned cat state, and Render deployment support.
+- Preserve existing application behavior, save compatibility, unlocked/owned cat state, and VPS (Docker + Caddy) deployment support (`deploy/vps/`, `.github/workflows/vps-deploy.yml`).
 - Extend existing saves by adding only missing encyclopedia entries; do not overwrite existing cat records or duplicate entries.
 - Build the character-name catalog from a fresh `SaveFile(cc=jp, gv=target_version)`, not from the old `template_save.sav`.
 - Version the character-name cache schema as well as the game-data version.
@@ -50,7 +50,7 @@ For every new target game-data release:
 - Compare the entire catalog against the target-version Japanese upstream data, including IDs, names, alternate/form names, and additions.
 - A version label changing, one canary passing, or a GitHub commit existing is not sufficient evidence of a complete update.
 - Run repository self-tests after each code update.
-- Verify the Render build/deployment and real save behavior when those environments are available. Clearly record checks that could not be run.
+- Verify the VPS build/deployment and real save behavior when those environments are available. Clearly record checks that could not be run.
 
 ## Automatic BCSFE dependency updates
 
@@ -68,7 +68,7 @@ For every new target game-data release:
 
 <!-- coderabbit-ai-generated-section:v1:59e6d0868193e5aa50875f8051679b2a3cd87d99cff189ace15f5a7812c625fa -->
 
-- The workflow installs the candidate BCSFE version and runs `smoke_bcsfe.py`, `selftest.py`, the audit and repair tests, `test_parallel.py`, `test_improvements.py`, and `test_github_auth_store.py`. It commits the dependency pin only if all checks pass.
+- The workflow installs the candidate BCSFE version and runs `smoke_bcsfe.py`, `selftest.py`, the audit and repair tests, `test_parallel.py`, `test_improvements.py`, and `test_github_runtime_store.py`. It commits the dependency pin only if all checks pass.
 
 <!-- /coderabbit-ai-generated:v1 -->
 
@@ -191,7 +191,7 @@ The first implementation stage focuses on objective structural integrity. It doe
 
 ## Continuous verification and data updates
 
-- `.github/workflows/ci.yml` runs the smoke test, self-test, audit, repair, parallel, improvement, and GitHub-auth tests on pushes and pull requests.
+- `.github/workflows/ci.yml` runs the smoke test, self-test, audit, repair, parallel, improvement, and GitHub runtime-store tests on pushes and pull requests.
 - `.github/workflows/game-data-check.yml` checks the newest JP game-data version published by the pinned BCSFE source every Monday and on demand. It builds a fresh catalog using the same `_build_names` path as the app and reports the version, count, extraction method, and stale exclusion IDs.
 - A newer published version is a review signal, not permission to change the pinned version automatically. Perform the full-catalog comparison procedure above and update the app only after the full regression suite passes.
 - CI and the scheduled catalog check do not prove live PONOS server compatibility or real-device behavior.

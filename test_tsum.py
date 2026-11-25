@@ -7,6 +7,7 @@
 - 注文の保存・読み込み（アカウント情報の形が崩れないこと）
 - 画像認証（CAPTCHA）の受け渡し
 """
+import os
 import types
 import unittest
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from unittest.mock import patch
 import requests
 
 import app as A
+import site_config
 import paypay_gateway as G
 import pricing
 import tsum_service as T
@@ -833,7 +835,10 @@ class Page(unittest.TestCase):
         tsum = A.app.test_client().get("/tsum").get_data(as_text=True)
         self.assertIn('id="claimNo"', tsum)
         self.assertIn('id="claimGo"', tsum)
-        self.assertIn("/api/orders/'+encodeURIComponent(no)+'/claim", tsum)
+        # 再開の処理そのものは、ツムツム・ぷにぷに共通の static/shop.js にある（画面はそれを読み込む）
+        self.assertIn('src="/static/shop.js', tsum)
+        shop_js = A.app.test_client().get("/static/shop.js").get_data(as_text=True)
+        self.assertIn('"/api/orders/" + encodeURIComponent(no) + "/claim"', shop_js)
         # にゃんこ側にも元からある（両方の画面で再開できる）
         nyanko = A.app.test_client().get("/nyanko").get_data(as_text=True)
         self.assertIn('id="claimNo"', nyanko)
@@ -849,12 +854,16 @@ class Page(unittest.TestCase):
 class Images(unittest.TestCase):
     """画像（大メニュー・ツムツム画面・X のリンクプレビュー・アイコン）がそろっていて、画面から参照されていること。"""
 
-    FILES = ["game-nyanko.webp", "game-nyanko.jpg", "game-tsum.webp", "game-tsum.jpg", "tsum-flow.webp", "tsum-flow.jpg",
-             "ogp-nyanko.jpg", "ogp-tsum.jpg", "ogp-home.jpg", "favicon.ico", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]
+    FILES = ["game-nyanko.webp", "game-nyanko.jpg", "game-tsum.webp", "game-tsum.jpg",
+             "ogp-home.jpg", "favicon.ico", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]
+    # 店名や連絡先が描き込まれた画像。お店ごとに用意するもので、無くても画面は成り立つ（site_config.py）
+    SHOP_BRANDED = ["tsum-flow.webp", "tsum-flow.jpg", "flow.webp", "flow.jpg", "ogp-nyanko.jpg", "ogp-tsum.jpg"]
 
     def test_files_are_served(self):
         client = A.app.test_client()
-        for name in self.FILES:
+        static = os.path.join(os.path.dirname(os.path.abspath(A.__file__)), "static")
+        present = [n for n in self.SHOP_BRANDED if os.path.isfile(os.path.join(static, n))]
+        for name in self.FILES + present:
             r = client.get("/static/" + name)
             self.assertEqual(r.status_code, 200, name)
             self.assertGreater(len(r.data), 1000, name)
@@ -871,12 +880,13 @@ class Images(unittest.TestCase):
         self.assertIn("game-nyanko.webp", home)
         self.assertIn("game-tsum.webp", home)
         main = client.get("/nyanko", headers=headers).get_data(as_text=True)
-        self.assertIn('content="https://shop.example/static/ogp-nyanko.jpg?v=1"', main)
+        og = site_config.og_images()   # お店用の画像があればそれ、無ければゲームの絵
+        self.assertIn(f'content="https://shop.example{og["nyanko"]["src"]}"', main)
         self.assertIn('content="https://shop.example/nyanko"', main)
         tsum = client.get("/tsum", headers=headers).get_data(as_text=True)
-        self.assertIn('content="https://shop.example/static/ogp-tsum.jpg?v=1"', tsum)
+        self.assertIn(f'content="https://shop.example{og["tsum"]["src"]}"', tsum)
         self.assertIn('content="https://shop.example/tsum"', tsum)
-        self.assertIn("tsum-flow.webp", tsum)
+        self.assertEqual("tsum-flow.webp" in tsum, site_config.flow_images()["tsum"])   # 図解は、画像があるときだけ出す
         for page in (home, main, tsum):
             self.assertIn('rel="apple-touch-icon"', page)
             self.assertIn('name="twitter:card" content="summary_large_image"', page)

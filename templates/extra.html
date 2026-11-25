@@ -2,12 +2,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 {% if mode == 'ticket' %}
-<title>チケット購入｜何度でも無料・1回無料チケット｜TN SHOP</title>
-<meta name="description" content="TN SHOP の代行が1回まるごと無料になるチケットと、期間中ずっと無料になるチケット。クーポンコード式で全部門に使えます。">
+<title>チケット購入｜何度でも無料・1回無料チケット｜{{ shop_name }}</title>
+<meta name="description" content="{{ shop_name }} の代行が1回まるごと無料になるチケットと、期間中ずっと無料になるチケット。クーポンコード式で全部門に使えます。">
 <link rel="canonical" href="{{ site }}/ticket">
+{% elif mode == 'source' %}
+<title>ソースコード購入｜このお店の仕組みをまるごと｜{{ shop_name }}</title>
+<meta name="description" content="{{ shop_name }} と同じ仕組み（注文・PayPay 支払い・自動実行・管理画面）のソースコード一式と導入ガイド。買ったその場でダウンロードできます。">
+<link rel="canonical" href="{{ site }}/source">
 {% else %}
-<title>支援BOX｜TN SHOP の開発を応援する</title>
-<meta name="description" content="TN SHOP の開発・サーバー代を100円から支援できます。1回の支援ごとに30%引きクーポンをお送りします。">
+<title>支援BOX｜{{ shop_name }} の開発を応援する</title>
+<meta name="description" content="{{ shop_name }} の開発・サーバー代を100円から支援できます。1回の支援ごとに30%引きクーポンをお送りします。">
 <link rel="canonical" href="{{ site }}/support">
 {% endif %}
 <link rel="icon" href="/favicon.ico" sizes="any">
@@ -58,7 +62,7 @@ ul.pts li{margin:2px 0}
 .meter .days{font-size:34px;font-weight:800;line-height:1.1}
 .meter .per{font-size:13px;color:var(--muted);margin-top:2px}
 input[type=range]{width:100%;height:36px;margin:8px 0 0;accent-color:var(--pay);background:transparent;cursor:pointer}
-.ticks{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);font-weight:700;margin:-2px 2px 0}
+.ticks{font-size:11.5px;color:var(--muted);font-weight:700;margin:-2px 10px 0}
 .save{display:flex;gap:8px;align-items:center;margin:10px 0 0;padding:10px 12px;border-radius:12px;background:var(--okbg);font-size:13.5px;font-weight:700}
 .save b{font-size:17px;color:var(--ok)}
 .bars{display:flex;align-items:flex-end;gap:3px;height:46px;margin:12px 0 0}
@@ -123,6 +127,26 @@ svg.chart .lbl{font-weight:800}
 .claim input{flex:1;min-width:0;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-size:15px}
 .claim .btn{min-height:44px;padding:6px 14px}
 .foot{margin:24px 0 0;text-align:center;font-size:12.5px;color:var(--muted)}
+/* ソースコード購入 */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 12px}
+.stats div{padding:10px 6px;border:2px solid var(--line);border-radius:12px;background:var(--soft);text-align:center}
+.stats b{display:block;font-size:19px;font-weight:800;line-height:1.2}
+.stats small{font-size:11.5px;color:var(--muted)}
+.inbox{list-style:none;margin:8px 0 12px;padding:0;font-size:13.5px}
+.inbox li{display:flex;gap:8px;padding:7px 0;border-top:1px dashed var(--line)}
+.inbox li:first-child{border-top:0}
+.inbox i{flex:none;font-style:normal;width:1.4em;text-align:center}
+.inbox b{display:block}
+.inbox span{color:var(--muted);font-size:12.5px}
+.terms{font-size:12.5px;color:var(--muted);margin:10px 0 0;padding-left:1.2em}
+.terms li{margin:2px 0}
+.agree{display:flex;gap:8px;align-items:flex-start;margin:12px 0;font-size:13.5px;font-weight:700}
+.agree input{width:22px;height:22px;flex:none;accent-color:var(--ink)}
+a.dl{text-decoration:none;color:#17181c}
+.ticks{position:relative;height:16px}
+.ticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.ticks span:first-child{transform:none}
+.ticks span:last-child{transform:translateX(-100%)}
 @media (prefers-reduced-motion:reduce){.bars i{transition:none}}
 </style></head><body>
 <main class="wrap">
@@ -153,7 +177,7 @@ svg.chart .lbl{font-weight:800}
       <div class="price" style="text-align:center" id="pPrice">0円</div>
       <div class="per" style="text-align:center" id="pPer"></div>
       <input type="range" id="days" min="1" max="{{ periods|length }}" step="1" value="14" aria-label="期間（日数）">
-      <div class="ticks" aria-hidden="true"><span>1日</span><span>7日</span><span>14日</span><span>21日</span><span>30日</span><span>無制限</span></div>
+      <div class="ticks" aria-hidden="true">{% for d in [1, 7, 14, 21] %}<span style="left:{{ ((d - 1) / (periods|length - 1) * 100)|round(1) }}%">{{ d }}日</span>{% endfor %}<span style="left:100%">30日／無制限</span></div>
     </div>
     <div class="bars" id="bars" aria-hidden="true"></div>
     <p class="barcap">棒の高さ＝1日あたりの料金（右ほど安い）</p>
@@ -178,12 +202,45 @@ svg.chart .lbl{font-weight:800}
     </ul>
     <button class="btn primary" id="buyPeriod" type="button">このチケットを買う</button>
   </section>
+{% elif mode == 'source' %}
+  <h1>ソースコード購入📦</h1>
+  <p class="lead">このお店とまったく同じ仕組みを、<b>あなたのお店として</b>動かせるソースコード一式です。支払いが確認できたら、その場でダウンロードできます。</p>
+
+  <section class="card" aria-labelledby="h-src">
+    <h2 id="h-src">お店の仕組み まるごとセット</h2>
+    <p class="sub">いま動いている本番と同じコード（v{{ version }}）</p>
+    <div class="price">{{ "{:,}".format(prices.source_code) }}円<small>／買い切り</small></div>
+    {% if pack %}<div class="stats">
+      <div><b>{{ pack.files }}</b><small>ファイル</small></div>
+      <div><b>{{ "{:,}".format(pack.lines) }}</b><small>行のコード</small></div>
+      <div><b>{{ pack.tests }}</b><small>テストファイル</small></div>
+    </div>{% endif %}
+    <ul class="inbox">
+      <li><i>🛒</i><div><b>注文から受け取りまで全自動</b><span>メニュー選択 → PayPay 送金リンク → 入金確認 → 実行 → 結果表示。保留の自動再確認・注文番号での復旧つき</span></div></li>
+      <li><i>🎮</i><div><b>3つの代行部門＋チケット・支援BOX</b><span>にゃんこ・ツムツム・ぷにぷに。新しい部門の足し方の手順書つき</span></div></li>
+      <li><i>🛠️</i><div><b>管理画面</b><span>PayPay 接続・注文の確認・料金変更・クーポン発行・メンテ表示・バックアップ</span></div></li>
+      <li><i>💬</i><div><b>AI の質問チャット</b><span>いまの料金・混み具合・その人の注文状況に合わせて答える（Claude API）</span></div></li>
+      <li><i>🚀</i><div><b>サーバーへの自動デプロイ</b><span>GitHub に push するだけ。Docker + HTTPS まで自動。実行中の注文が終わるのを待って入れ替え</span></div></li>
+      <li><i>📘</i><div><b>導入ガイドとテスト</b><span>はじめての人向けの手順書（docs/SETUP.md）と、決済を含む自動テスト</span></div></li>
+    </ul>
+    <label class="agree"><input type="checkbox" id="srcAgree"><span>下の「ご利用条件」を読みました</span></label>
+    <p class="err" id="srcErr" role="alert"></p>
+    <button class="btn primary" id="buySource" type="button">購入してダウンロードする</button>
+    <ul class="terms">
+      <li>店名・問い合わせ先などは設定で変えられます（このお店の名前や連絡先は入っていません）。</li>
+      <li>動かすには、サーバー（VPS）・受け取り用の PayPay アカウント・GitHub のアカウントが必要です。</li>
+      <li>買ったご本人のお店用です。<b>再配布・転売・公開はできません。</b></li>
+      <li>PayPay・各ゲームの非公式な仕組みを使います。仕様変更で動かなくなることがあり、動作や収益の保証はありません。規約・法律の確認は運営するご本人でお願いします。</li>
+      <li>データの商品のため、ダウンロード後の返金はできません。導入の個別サポートは含まれません。</li>
+      <li>ダウンロードは購入から{{ source_days }}日間、注文番号で何度でもできます。その日のうちに保存してください。</li>
+    </ul>
+  </section>
 {% else %}
   <h1>支援BOX💝</h1>
-  <p class="lead">TN SHOP の開発を、100円から応援できます。</p>
+  <p class="lead">{{ shop_name }} の開発を、100円から応援できます。</p>
 
   <section class="card story">
-    <p>TN SHOP は、<b>ひとりで開発・運営</b>しています。代行の仕組みづくり、ゲームのアップデートへの対応、サーバー代、夜中の不具合修正…ぜんぶ手づくりです。</p>
+    <p>{{ shop_name }} は、<b>ひとりで開発・運営</b>しています。代行の仕組みづくり、ゲームのアップデートへの対応、サーバー代、夜中の不具合修正…ぜんぶ手づくりです。</p>
     <p>いただいた支援は、<b>サーバーの増強</b>・<b>新しい代行メニューの開発</b>・<b>より速く・安全に動かすための改良</b>に、大切に使わせていただきます。</p>
     <p style="margin:0">「いつも使ってるよ」「これからも続けてほしい」——そんな気持ちを、気軽に届けてもらえたらうれしいです。</p>
   </section>
@@ -200,25 +257,25 @@ svg.chart .lbl{font-weight:800}
       <div><b>お礼：{{ support_pct }}%引きクーポン 1枚</b>
         <small>1回の支援ごとに1枚。全部門の代行に使えて、金額の下限なし（{{ support_days }}日間・1回）。</small></div>
     </div>
-    <p class="err" id="supErr"></p>
+    <p class="err" id="supErr" role="alert"></p>
     <button class="btn primary" id="buySupport" type="button">支援する</button>
     <p class="note">支援は代行の代金ではないため、返金はできません。クーポンは入金を確認できたらすぐ表示されます。</p>
   </section>
 {% endif %}
 
   <section class="card mine" id="mine" aria-labelledby="h-mine" hidden>
-    <h2 id="h-mine">{{ 'あなたのチケット' if mode == 'ticket' else 'あなたの支援とクーポン' }}</h2>
+    <h2 id="h-mine">{{ {'ticket': 'あなたのチケット', 'source': 'あなたの購入'}.get(mode, 'あなたの支援とクーポン') }}</h2>
     <div id="mineList"></div>
   </section>
 
   <section class="card" aria-labelledby="h-claim">
     <h2 id="h-claim" style="font-size:15px">別の端末で買った・画面を閉じた</h2>
-    <p class="note" style="margin:2px 0 0">控えた<b>注文番号</b>で、支払い済みの注文の続きや、発行されたコードの再表示ができます（完了から3日間）。</p>
+    <p class="note" style="margin:2px 0 0">控えた<b>注文番号</b>で、支払い済みの注文の続きや、{{ 'もう一度ダウンロード（購入から' ~ source_days ~ '日間）' if mode == 'source' else '発行されたコードの再表示（完了から3日間）' }}ができます。</p>
     <div class="claim"><input id="claimNo" type="text" autocapitalize="off" spellcheck="false" placeholder="注文番号" aria-label="注文番号"><button class="btn" id="claimGo" type="button">呼び戻す</button></div>
-    <p class="err" id="claimErr"></p>
+    <p class="err" id="claimErr" role="alert"></p>
   </section>
 
-  <div class="foot">TN SHOP ／ お問い合わせ：X <b>@paysms1212</b> ／ v{{ version }}</div>
+  <div class="foot">{{ shop_name }}{% if shop_x %} ／ お問い合わせ：X <b>@{{ shop_x }}</b>{% endif %} ／ v{{ version }}</div>
 </main>
 
 <div class="panel" id="payPanel" hidden role="dialog" aria-modal="true" aria-labelledby="payTtl"><div class="inner">
@@ -235,7 +292,7 @@ svg.chart .lbl{font-weight:800}
 <script>
 "use strict";
 const $=s=>document.querySelector(s);
-const MODE={{ mode|tojson }}, PAYMENTS={{ payments|tojson }};
+const MODE={{ mode|tojson }}, CONTACT={{ contact|tojson }};
 const PERIODS={{ periods|tojson }};
 const yen=n=>Number(n||0).toLocaleString('ja-JP')+'円';
 const KEY='tn-codes';   // 発行されたコードをこの端末にも残す（サーバーの表示は完了から3日で消えるため）
@@ -345,6 +402,15 @@ if(MODE==='support'){
   });
 }
 
+/* ---------------- ソースコード購入 ---------------- */
+if(MODE==='source'){
+  $('#buySource').addEventListener('click',()=>{
+    if(!$('#srcAgree').checked){ $('#srcErr').textContent='「ご利用条件」を読んで、チェックを入れてください。'; return; }
+    $('#srcErr').textContent='';
+    buy('/api/source/order',{},'ソースコード一式');
+  });
+}
+
 /* ---------------- 購入〜支払い〜コード表示（全部共通） ---------------- */
 let payOrder=null, watchTimer=null;
 async function buy(url,body,what){
@@ -361,13 +427,14 @@ function openPay(order,amount,what,state){
   $('#payOrderNo').textContent='注文番号：'+order+'（控えておくと、別の端末からも続きを見られます）';
   const fresh=state==='unpaid';
   $('#payLinkField').hidden=!fresh; $('#paySteps').hidden=!fresh; $('#payInfo').hidden=!fresh;
-  $('#payGo').textContent=fresh?'支払う':(state==='paid'?'コードを発行する（再送金なし）':'今すぐ確認する');
+  $('#payGo').textContent=fresh?'支払う':(state==='paid'?PAID_BTN:'今すぐ確認する');
   $('#payErr').textContent=state==='hold'?HOLD_MSG:''; $('#payGo').disabled=false; $('#payLink').value='';
   $('#payPanel').hidden=false; document.body.style.overflow='hidden';
   if(fresh) $('#payLink').focus();
 }
 function closePay(){ $('#payPanel').hidden=true; document.body.style.overflow=''; loadMine(); }
-const HOLD_MSG='保留中です。送金した方がPayPayアプリで保留を解除すると、自動で確認してコードを発行します。同じリンクを送り直したり、再送金したりしないでください。この画面は閉じても大丈夫です。';
+const PAID_BTN=MODE==='source'?'ダウンロードを用意する（再送金なし）':'コードを発行する（再送金なし）';
+const HOLD_MSG='保留中です。送金した方がPayPayアプリで保留を解除すると、自動で確認して'+(MODE==='source'?'ダウンロードできるようになります':'コードを発行します')+'。同じリンクを送り直したり、再送金したりしないでください。この画面は閉じても大丈夫です。';
 $('#payCancel').addEventListener('click',closePay);
 $('#payPanel').addEventListener('click',e=>{ if(e.target===$('#payPanel')) closePay(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#payPanel').hidden) closePay(); });
@@ -385,32 +452,38 @@ async function payNow(link){
       $('#payErr').textContent=j.error||'決済を確認できませんでした。';
       if(j.hold){ $('#payLinkField').hidden=true; $('#paySteps').hidden=true; $('#payInfo').hidden=true; btn.textContent='今すぐ確認する'; btn.disabled=false;
                   $('#payErr').textContent=HOLD_MSG; startWatch(); return; }
-      if(j.paid){ $('#payLinkField').hidden=true; $('#paySteps').hidden=true; btn.textContent='コードを発行する（再送金なし）'; }
+      if(j.paid){ $('#payLinkField').hidden=true; $('#paySteps').hidden=true; btn.textContent=PAID_BTN; }
       btn.disabled=['dead','order_missing','done'].includes(j.code);
       return;
     }
-    if(j.result){ showDone(j.result); }
+    if(j.result){ showDone(j.result,j.order); }
   }catch(e){ $('#payErr').textContent='通信エラーです。もう一度お試しください（同じリンクのままで大丈夫です）。'; btn.disabled=false; }
 }
+/* 保留中の注文を見張る：解除されたら結果を出す。見張る注文が無くなったら止める（開き直したあとも同じ）。 */
+const WAITING=['hold','paying','starting'];
 function startWatch(){
   clearInterval(watchTimer);
   watchTimer=setInterval(async()=>{
-    const list=await fetchMine(); const o=list.find(x=>x.order===payOrder);
-    if(o&&o.state==='done'&&o.result){ clearInterval(watchTimer); showDone(o.result); }
+    const list=(await fetchMine()).filter(o=>WANT.includes(o.product));
+    const o=list.find(x=>x.order===payOrder);
+    if(o&&o.state==='done'&&o.result){ showDone(o.result,o.order); return; }
+    if(!list.some(x=>WAITING.includes(x.state))){ clearInterval(watchTimer); watchTimer=null; if($('#payPanel').hidden) loadMine(); }
   },6000);
 }
-function showDone(res){
-  clearInterval(watchTimer); keepCode(res);
+function showDone(res,order){
+  clearInterval(watchTimer); watchTimer=null;
+  if(res.coupon) keepCode(res);
   $('#payPanel').hidden=true; document.body.style.overflow='';
-  loadMine(res.coupon);
+  loadMine(res.coupon||order||payOrder);
 }
 async function fetchMine(){ try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); return r.ok?((await r.json()).orders||[]):[]; }catch(e){ return []; } }
 
 const PLAN_JA={ticket_once:'1回なんでも無料チケット',ticket_period:'期間無料チケット',support:'支援BOXのお礼（{{ support_pct }}%引き）'};
-const STATE_JA={unpaid:'お支払い待ち',hold:'保留中（自動で確認しています）',paid:'お支払い済み・発行待ち',dead:'確認が必要です'};
+const STATE_JA={unpaid:'お支払い待ち',paying:'確認中',hold:'保留中（自動で確認しています）',paid:'お支払い済み・'+(MODE==='source'?'準備待ち':'発行待ち'),starting:'処理中',dead:'自動では確認できませんでした'};
+const WANT={ticket:['ticket_once','ticket_period'],support:['support'],source:['source']}[MODE];
 function untilText(r){
   if(r.unlimited) return '期限なし（無制限）';
-  const d=new Date((r.expires||0)*1000); return d.toLocaleDateString('ja-JP')+' まで';
+  const d=new Date((r.expires||0)*1000); return d.toLocaleDateString('ja-JP')+' まで';   /* チケットは使える期限、ソースコードはダウンロードできる期限 */
 }
 function codeRow(r,hl){
   const box=el('div','item');
@@ -422,35 +495,53 @@ function codeRow(r,hl){
   if(hl) box.scrollIntoView && setTimeout(()=>box.scrollIntoView({behavior:'smooth',block:'center'}),50);
   return box;
 }
+/* 購入済みのソースコード：コードではなく、ダウンロードのボタンを出す */
+function downloadRow(o,hl){
+  const box=el('div','item');
+  box.append(el('div',null,'ソースコード一式（v'+(o.result.version||'')+'）'));
+  const a=el('a','btn primary dl','⬇ zip をダウンロード'); a.href='/api/source/download/'+encodeURIComponent(o.order); a.setAttribute('download','');
+  const act=el('div','act'); act.append(a); box.append(act);
+  box.append(el('div','meta',untilText(o.result)+' ダウンロードできます　／　注文番号：'+o.order));
+  box.append(el('div','meta','開いたら、まず中の docs/SETUP.md（導入ガイド）を読んでください。'));
+  if(hl) setTimeout(()=>box.scrollIntoView({behavior:'smooth',block:'center'}),50);
+  return box;
+}
 async function loadMine(highlight){
-  const want=MODE==='ticket'?['ticket_once','ticket_period']:['support'];
+  const want=WANT;
   const list=(await fetchMine()).filter(o=>want.includes(o.product));
   const root=$('#mineList'); root.textContent='';
   const shown=new Set();
   list.forEach(o=>{
+    if(o.state==='done'&&o.result&&o.result.download){ root.append(downloadRow(o,o.order===highlight)); return; }
     if(o.state==='done'&&o.result){ shown.add(o.result.coupon); root.append(codeRow(o.result,o.result.coupon===highlight)); return; }
     const box=el('div','item');
     box.append(el('div',null,(o.breakdown[0]||{}).label||'ご注文'), el('div','meta',yen(o.amount)+'　／　'+(STATE_JA[o.state]||o.state)));
     if(['unpaid','hold','paid'].includes(o.state)){
-      const a=el('div','act'); const b=el('button','btn',o.state==='unpaid'?'支払いへ進む':o.state==='hold'?'状況を確認する':'コードを発行する'); b.type='button';
+      const a=el('div','act'); const b=el('button','btn',o.state==='unpaid'?'支払い画面を開く':o.state==='hold'?'状況を確認する':PAID_BTN.replace('（再送金なし）','')); b.type='button';
       b.addEventListener('click',()=>{ openPay(o.order,o.amount,(o.breakdown[0]||{}).label,o.state); if(o.state==='hold') startWatch(); });
       a.append(b); box.append(a);
     }
-    if(o.state==='dead') box.append(el('div','meta','お支払い済みの場合は、注文番号 '+o.order+' を X @paysms1212 へお知らせください（再送金は不要です）。'));
+    if(o.state==='dead') box.append(el('div','meta','お支払い済みの場合は、注文番号 '+o.order+' を '+CONTACT+' へお知らせください（再送金は不要です）。'));
     root.append(box);
   });
   loadCodes().filter(r=>want.includes(r.product)&&!shown.has(r.coupon)).forEach(r=>root.append(codeRow(r,r.coupon===highlight)));
   $('#mine').hidden=!root.children.length;
-  if(list.some(o=>o.state==='hold')) startWatch();
+  if(list.some(o=>WAITING.includes(o.state))&&!watchTimer) startWatch();
 }
 $('#claimGo').addEventListener('click',async()=>{
-  const no=$('#claimNo').value.trim(); if(!no) return;
+  const no=$('#claimNo').value.trim();
+  if(!no){ $('#claimErr').textContent='注文番号を入力してください。'; return; }
   $('#claimErr').textContent='';
   try{
     const r=await post('/api/orders/'+encodeURIComponent(no)+'/claim'); const j=await r.json();
     if(!r.ok){ $('#claimErr').textContent=j.error||'見つかりませんでした。'; return; }
-    if(j.result) keepCode(j.result);
-    $('#claimNo').value=''; loadMine(j.result&&j.result.coupon);
+    if(!WANT.includes(j.product)){   /* ほかの画面の注文：呼び戻しはできているので、行き先を案内する */
+      const to=j.tsum?['/tsum','ツムツム代行']:j.puni?['/puni','ぷにぷに代行']:j.product==='support'?['/support','支援BOX']:j.product==='source'?['/source','ソースコード購入']:(j.product||'').startsWith('ticket')?['/ticket','チケット購入']:['/nyanko','にゃんこ代行'];
+      const a=el('a',null,to[1]+' の画面を開く →'); a.href=to[0];
+      $('#claimErr').textContent='この番号は「'+to[1]+'」の注文です。'; $('#claimErr').append(' ',a); return;
+    }
+    if(j.result&&j.result.coupon) keepCode(j.result);
+    $('#claimNo').value=''; loadMine((j.result&&j.result.coupon)||j.order);
   }catch(e){ $('#claimErr').textContent='通信エラーです。'; }
 });
 loadMine();

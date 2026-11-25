@@ -16,6 +16,11 @@ services:
       # Q&Aチャットの AI回答を使うなら、/opt/catsdaiko/.env に ANTHROPIC_API_KEY=sk-ant-... を書く。
       # 未設定（空）なら AI は呼ばれず、固定のFAQ案内にフォールバックする。
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # お店の名前・問い合わせ先など（docs/SETUP.md）。.env に書いたものだけ効く。空なら site_config.py の既定値。
+      SHOP_NAME: ${SHOP_NAME:-}
+      SHOP_X_ID: ${SHOP_X_ID:-}
+      REVIEW_POST_ID: ${REVIEW_POST_ID:-}
+      GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
       # LINEログインのIPローテーション。固定IPだと画像認証/reCAPTCHA が繰り返し出てログインできないことがある。
       # ホスト(Ubuntu)に入れた Tor を host.docker.internal（＝docker のホストゲートウェイ。この環境では
       # 192.168.0.1。remote-setup.sh が 0.0.0.0:9050 で待ち受けるのでゲートウェイIPに依存しない）:9050 経由で使い、
