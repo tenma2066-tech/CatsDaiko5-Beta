@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import datetime
 import hmac
 import importlib.metadata
 import json
@@ -40,7 +41,7 @@ from contextlib import ExitStack
 from collections import deque
 from types import SimpleNamespace
 
-from flask import Flask, Response, jsonify, redirect, render_template_string, request, session
+from flask import Flask, Response, g, jsonify, redirect, render_template_string, request, session
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape as xml_escape
 
@@ -54,6 +55,7 @@ import save_repair
 import tsum_service
 import puni_service
 import qa_bot
+import admin_2fa
 import review_filter
 import site_config
 import source_pack
@@ -65,7 +67,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.20"
+APP_VERSION = "1.21"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -139,7 +141,21 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
 @app.context_processor
 def _shop_context() -> dict:
     """すべての画面で使える値：店名・問い合わせ先など（site_config.py）。"""
-    return site_config.template_context()
+    return dict(site_config.template_context(), csp_nonce=_csp_nonce())
+
+
+def _csp_nonce() -> str:
+    """この応答のスクリプトだけに付ける合い言葉（毎回変わる）。これが付いていないスクリプトは、ブラウザが動かさない。"""
+    if not getattr(g, "csp_nonce", None):
+        g.csp_nonce = secrets.token_urlsafe(16)
+    return g.csp_nonce
+
+
+try:        # 使っているサーバーソフトの名前を、応答ヘッダーで教えない
+    import gunicorn.http.wsgi as _gunicorn_wsgi
+    _gunicorn_wsgi.SERVER = "web"
+except Exception:  # noqa: BLE001
+    pass
 
 
 # ---------------------------------------------------------------- 2. にゃんこのメニュー定義・キャラ名
@@ -591,8 +607,19 @@ def _private_response(response):
     if (request.path == "/admin" or request.path.startswith(("/api/", "/status/"))
             or request.path == "/health" or response.status_code >= 400):
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
-    if request.path.startswith("/status/") or request.path in ("/admin",) or request.path.startswith("/api/orders/"):
-        response.headers["Cache-Control"] = "no-store"
+    html = (response.mimetype or "") == "text/html"
+    if request.path.startswith(("/status/", "/api/")) or html:
+        # 画面と API の中身は、端末にもブラウザの「戻る」用の控えにも残さない（結果のコードが保存されないように）
+        response.headers.setdefault("Cache-Control", "no-store")
+    if html:
+        # 中身のセキュリティ方針（CSP）：自分のサイトのファイルと、合い言葉つきのスクリプトだけを動かす。
+        # ほかのサイトのスクリプト・埋め込み・送信先はすべて止める（書き込まれた文字がスクリプトとして動く攻撃を防ぐ）
+        nonce = getattr(g, "csp_nonce", None)
+        response.headers.setdefault("Content-Security-Policy", "; ".join((
+            "default-src 'self'", "script-src 'self'" + (f" 'nonce-{nonce}'" if nonce else ""),
+            "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "connect-src 'self'",
+            "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'")))
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
     # 基本の守り：ほかのサイトの枠の中に表示させない・種類のなりすましをさせない・行き先に URL の詳細を渡さない
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
@@ -1467,6 +1494,8 @@ def _run_job(job: dict, transfer: str, confirm: str, items, subs, others, qty=No
 # ---------------------------------------------------------------- 5. 認証・連打よけ・お店の設定
 _fail: dict[str, list[float]] = {}
 ADMIN_SESSION_SEC = 12 * 3600      # 管理者ログインの有効時間（そのあとは入り直し）
+ADMIN_IDLE_SEC = 60 * 60           # 管理画面にも何も触らないまま、この時間たったら自動でログアウト
+ADMIN_2FA_STEP_SEC = 5 * 60        # パスコードのあと、6桁を入れるまでの猶予
 
 
 def _too_many_fails(ip: str, limit: int = 5) -> bool:
@@ -1548,11 +1577,32 @@ def _is_admin() -> bool:
     if not isinstance(at, (int, float)):
         session["admin_at"] = time.time()      # 以前からのログイン：いまから数える
         return True
-    if time.time() - at > ADMIN_SESSION_SEC:
-        session.pop("admin", None)
-        session.pop("admin_at", None)
+    now = time.time()
+    seen = session.get("admin_seen")
+    if now - at > ADMIN_SESSION_SEC or (isinstance(seen, (int, float)) and now - seen > ADMIN_IDLE_SEC):
+        _admin_logout()
         return False
+    if not isinstance(seen, (int, float)) or now - seen > 60:      # 最後に使った時刻（1分に1回だけ書き直す）
+        session["admin_seen"] = now
     return True
+
+
+def _admin_logout() -> None:
+    for key in ("admin", "admin_at", "admin_seen", "admin_2fa_at"):
+        session.pop(key, None)
+
+
+def _admin_login() -> None:
+    session.pop("admin_2fa_at", None)
+    session["admin"] = True
+    session["admin_at"] = session["admin_seen"] = time.time()
+    session["admin_csrf"] = secrets.token_urlsafe(32)
+
+
+def _admin_2fa_waiting() -> bool:
+    """パスコードは通って、6桁の入力を待っているところか。"""
+    at = session.get("admin_2fa_at")
+    return isinstance(at, (int, float)) and time.time() - at <= ADMIN_2FA_STEP_SEC
 
 
 _RESTART_FILE = os.path.join(os.environ.get("PAYPAY_DATA_DIR", "instance/paypay"), "restart_pack.json")
@@ -1732,7 +1782,7 @@ def admin():
 
 
 ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
-             "maint_save": "settings", "price_save": "settings", "review_hide": "reviews", "review_show": "reviews", "review_words_save": "reviews", "order_recheck": "orders", "order_start": "orders",
+             "maint_save": "settings", "price_save": "settings", "review_hide": "reviews", "review_show": "reviews", "review_words_save": "reviews", "tfa_begin": "settings", "tfa_confirm": "settings", "tfa_cancel": "settings", "tfa_disable": "settings", "box_done": "box", "box_undo": "box", "box_delete": "box", "order_recheck": "orders", "order_start": "orders",
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
 
@@ -1781,14 +1831,33 @@ def _admin_post(token):
         if _too_many_fails("admin:" + ip) or _too_many_fails("admin:*", 30):   # 1つの IP で5回・全体で30回（10分）
             msg = "失敗が続いたので、10分ほど待ってください。"
         elif ADMIN_PASSWORD and hmac.compare_digest(request.form.get("passcode", "").encode(), ADMIN_PASSWORD.encode()):
-            session["admin"] = True
-            session["admin_at"] = time.time()
-            session["admin_csrf"] = secrets.token_urlsafe(32)
+            if admin_2fa.enabled():                       # 2段階認証：次に、認証アプリの6桁を入れてもらう
+                session["admin_2fa_at"] = time.time()
+                session["admin_csrf"] = secrets.token_urlsafe(32)
+                return redirect("/admin")
+            _admin_login()
             return redirect("/admin")
         else:
             _note_fail("admin:" + ip)
             _note_fail("admin:*")
             msg = "管理者パスコードが違うか、設定されていません。"
+    elif action == "unlock_2fa":
+        ip = _client_ip()
+        if not _admin_2fa_waiting():
+            session.pop("admin_2fa_at", None)
+            msg = "時間が過ぎました。もう一度パスコードから入れてください。"
+        elif _too_many_fails("admin:" + ip) or _too_many_fails("admin:*", 30):
+            msg = "失敗が続いたので、10分ほど待ってください。"
+        elif admin_2fa.verify(request.form.get("code", "")):
+            _admin_login()
+            return redirect("/admin")
+        else:
+            _note_fail("admin:" + ip)
+            _note_fail("admin:*")
+            msg = "6桁の番号が違います（番号は30秒ごとに変わります。同じ番号は一度しか使えません）。"
+    elif action == "unlock_cancel":
+        session.pop("admin_2fa_at", None)
+        return redirect("/admin")
     elif not _is_admin():
         return "管理者モードが必要です。", 403
     elif action == "pp_login":
@@ -1899,6 +1968,14 @@ def _admin_post(token):
             _log_orders.exception("review moderation failed")
             ok = False
         msg = ("実績を非表示にしました。" if action == "review_hide" else "実績をもう一度表示するようにしました。") if ok else "変更できませんでした。"
+    elif action in ("box_done", "box_undo", "box_delete"):
+        try:
+            fid = int(request.form.get("id") or 0)
+            ok = paypay_gateway.feedback_delete(fid) if action == "box_delete" else paypay_gateway.feedback_set_done(fid, action == "box_done")
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("feedback update failed")
+            ok = False
+        msg = {"box_done": "対応済みにしました。", "box_undo": "未対応に戻しました。", "box_delete": "削除しました。"}[action] if ok else "変更できませんでした。"
     elif action == "review_words_save":
         try:
             n = _save_review_words(request.form.get("words", ""))
@@ -1908,9 +1985,28 @@ def _admin_post(token):
     elif action == "backup_download":
         return _backup_response()
     elif action == "lock":
-        session.pop("admin", None)
-        session.pop("admin_at", None)
+        _admin_logout()
         return redirect("/admin")
+    elif action == "tfa_begin":
+        try:
+            admin_2fa.begin()
+            msg = "認証アプリに鍵を登録して、表示された6桁を入れてください。"
+        except paypay_gateway.PayPayError as exc:
+            msg = "2段階認証を始められませんでした：" + exc.message
+    elif action == "tfa_confirm":
+        try:
+            done = admin_2fa.confirm(request.form.get("code", ""))
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("2fa save failed")
+            done = False
+        msg = ("2段階認証を有効にしました。次のログインから、パスコードのあとに6桁を入れます。" if done
+               else "6桁の番号が合いませんでした。認証アプリの今の番号を入れてください。")
+    elif action == "tfa_cancel":
+        admin_2fa.cancel()
+        msg = "2段階認証の設定をやめました。"
+    elif action == "tfa_disable":
+        msg = ("2段階認証を無効にしました。" if admin_2fa.disable(request.form.get("code", ""))
+               else "6桁の番号が合わないので、無効にできませんでした。")
     elif action == "pp_refresh":
         try:
             asyncio.run(paypay_gateway.refresh_session())
@@ -2048,9 +2144,19 @@ def _admin_page(msg):
                                 "shop": SHOP_LABELS.get(r["shop"], ""), "when": time.strftime("%m/%d %H:%M", time.localtime(r["created"]))})
         except Exception:
             _log_orders.exception("review list failed")
+    box = []
+    if unlocked:
+        try:
+            for r in paypay_gateway.feedback_list(200):
+                box.append({"id": r["id"], "kind": BOX_KINDS.get(r["kind"], r["kind"]), "text": r["body"], "contact": r["contact"],
+                            "user": r["user_id"], "done": bool(r["done"]), "when": _jst(r["created"])})
+        except Exception:
+            _log_orders.exception("feedback list failed")
     rp = restart_pack()
     rp_text = "\n".join(f"{k}={v}" for k, v in rp["items"].items())
-    return render_template_string(ADMIN_HTML, coupons=coupons, reviews=reviews, review_words="\n".join(review_extra_words()), review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
+    tfa = {"on": admin_2fa.enabled(), "waiting": not unlocked and _admin_2fa_waiting(),
+           "setup": admin_2fa.pending("admin", site_config.SHOP_NAME) if unlocked and not admin_2fa.enabled() else None}
+    return render_template_string(ADMIN_HTML, tfa=tfa, coupons=coupons, reviews=reviews, box=box, box_open=sum(1 for b in box if not b["done"]), review_words="\n".join(review_extra_words()), review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
                                   maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED,
@@ -2415,7 +2521,7 @@ def robots_txt():
 @app.get("/sitemap.xml")
 def sitemap_xml():
     urls = "".join(f"<url><loc>{xml_escape(_site() + path)}</loc></url>"
-                   for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source")
+                   for path in ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source", "/box")
                    + (("/reviews",) if site_config.REVIEWS_ENABLED else ()))
     return Response(
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -3565,7 +3671,15 @@ def review_post():
 
 def _public_reviews(rows) -> list:
     return [{"id": r["id"], "stars": r["stars"], "text": r["body"], "shop": SHOP_LABELS.get(r["shop"], ""),
-             "date": time.strftime("%Y/%m/%d", time.localtime(r["created"]))} for r in rows]
+             "date": _jst(r["created"])} for r in rows]
+
+
+_JST = datetime.timezone(datetime.timedelta(hours=9))
+
+
+def _jst(ts) -> str:
+    """記入した日時（日本時間。サーバーの時計の地域に左右されない）。"""
+    return datetime.datetime.fromtimestamp(float(ts), _JST).strftime("%Y/%m/%d %H:%M")
 
 
 def _review_stats(shop: str | None = None) -> dict:
@@ -3600,6 +3714,45 @@ def _review_shop():
 
 
 REVIEW_PAGE = 20   # 実績を1回に出す件数
+
+# ---- 意見・質問箱（7つ目のメニュー）。書くのはだれでも・読めるのは管理者だけ
+BOX_MIN, BOX_MAX, BOX_CONTACT_MAX = 10, 1000, 100
+BOX_KINDS = {"opinion": "意見・要望", "question": "質問", "bug": "不具合の報告"}
+
+
+@app.get("/box")
+def box_page():
+    return render_template_string(BOX_HTML, kinds=BOX_KINDS, box_min=BOX_MIN, box_max=BOX_MAX, contact_max=BOX_CONTACT_MAX,
+                                  maint=_maint(), site=_site(), version=APP_VERSION)
+
+
+@app.post("/api/box")
+def box_post():
+    ip = _client_ip()
+    if not _rate_ok("box:" + ip, 3, 600) or not _rate_ok("boxday:" + ip, 10, 86400) or not _rate_ok("box:*", 60, 3600):
+        return jsonify(error="送信が続いています。少し時間をおいてからお試しください。", code="too_fast"), 429
+    data = _json_body()
+    if str(data.get("website") or "").strip():          # 人には見えない欄。埋めてくるのは自動投稿だけ → 受け取ったふりをして捨てる
+        return jsonify(ok=True)
+    kind = str(data.get("kind") or "")
+    if kind not in BOX_KINDS:
+        return jsonify(error="種類を選んでください。", code="kind"), 400
+    text = re.sub(r"[ \t\u3000]{2,}", " ", str(data.get("text") or "")).strip()
+    text = "".join(ch for ch in text if ch in "\n" or ch.isprintable())
+    contact = "".join(ch for ch in str(data.get("contact") or "").strip() if ch.isprintable())
+    if len(text) < BOX_MIN:
+        return jsonify(error=f"{BOX_MIN}文字以上でお書きください（いま {len(text)} 文字）。", code="too_short"), 400
+    if len(text) > BOX_MAX or len(contact) > BOX_CONTACT_MAX:
+        return jsonify(error="文章が長すぎます。", code="too_long"), 400
+    ok, code, message = review_filter.check(text, review_extra_words())
+    if not ok and code == "bad_words":                  # 連絡先・URL は書いてよい（返事や不具合の説明に要る）。暴言だけ断る
+        return jsonify(error=message, code=code), 400
+    try:
+        paypay_gateway.feedback_add(kind, text, contact, _uid(_owner()))
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("feedback save failed")
+        return jsonify(error="保存できませんでした。もう一度お試しください。", code="save_failed"), 503
+    return jsonify(ok=True)
 
 
 @app.get("/reviews")
@@ -4021,19 +4174,87 @@ def cancel_job(job_id: str):
                 _pending_jobs.remove(entry)
                 if entry[2] is not None:
                     _active_transfers.discard(entry[2])
-                _jobs[job_id].update(status="error", error="待機中の処理を取り消しました。", finished=time.time())
+                _jobs[job_id].update(status="error", error="順番待ちを取り消しました。お支払い済みの場合は、注文からそのまま（追加料金なしで）実行できます。", finished=time.time())
                 return jsonify(ok=True)
     return jsonify(error="待機中の処理が見つかりません。"), 409
 
 
 # ---------------------------------------------------------------- 画面のひな形（templates/）
-def _template(name: str) -> str:
-    """画面の HTML（Jinja のひな形）。templates/ に置いてある（以前は app.py の中に直接書いていた）。"""
+_COMMENT_BLOCK = re.compile(r"/\*(?:(?!\*/).)*\*/")
+_HTML_COMMENT = re.compile(r"<!--(?!\[if)(?:(?!-->).)*-->", re.S)
+_NON_ASCII = re.compile(r"[^\x00-\x7f]")
+_CODE_BLOCK = re.compile(r"(<(?:script|style)\b[^>]*>)(.*?)(</(?:script|style)>)", re.S)
+
+
+def strip_comments(text: str, html: bool = False) -> str:
+    """配る HTML・JavaScript・CSS から、説明のコメントを取り除く（仕組みの説明書を、見に来た人へ渡さない）。
+    動きを変えないよう、確実にコメントだと言えるものだけを消す：
+      ・行がまるごとコメント（// … や /* … */、複数行の /* … */）
+      ・行の途中・行末の /* … */ と、行末の // … のうち、日本語を含むもの（URL の // や文字列の中身を巻き込まない）
+      ・HTML の <!-- … -->
+    元のファイル（読む人のためのコメント）はそのまま。消すのは配るときだけ。"""
+    if html:        # HTML は、<script> と <style> の中身だけを対象にする（本文の「//」などに触らない）
+        text = _HTML_COMMENT.sub("", text)
+        return _CODE_BLOCK.sub(lambda m: m.group(1) + strip_comments(m.group(2)) + m.group(3), text)
+    out, in_block = [], False
+    for line in text.split("\n"):
+        bare = line.strip()
+        if in_block:
+            if "*/" in bare:
+                in_block = False
+            continue
+        if bare.startswith("/*") and "*/" not in bare:
+            in_block = True
+            continue
+        if bare.startswith("//") or (bare.startswith("/*") and bare.endswith("*/") and bare.count("*/") == 1):
+            continue
+        line = _COMMENT_BLOCK.sub(lambda m: "" if _NON_ASCII.search(m.group(0)) else m.group(0), line)
+        cut = re.search(r"(?:^|\s)//\s?[^'\"`]*$", line)
+        if cut and _NON_ASCII.search(cut.group(0)) and "}}" not in cut.group(0) and "%}" not in cut.group(0):
+            line = line[:cut.start()]
+        if line.strip() or not bare:
+            out.append(line.rstrip())
+    return "\n".join(out)
+
+
+def _template(name: str, guard: bool = True) -> str:
+    """画面の HTML（Jinja のひな形）。templates/ に置いてある（以前は app.py の中に直接書いていた）。
+    読み込むときに、コメントを取り除き、<script> に CSP の合い言葉（nonce）を付ける。"""
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", name), encoding="utf-8", newline="") as f:
-        return f.read()
+        text = strip_comments(f.read().replace("\r\n", "\n"), html=True)
+    if guard and "</body>" in text:    # のぞき見よけ（右クリック・保存・開発者ツールのキー）。管理画面には入れない
+        text = text.replace("</body>", '<script src="/static/guard.js?v=1" defer></script>\n</body>', 1)
+    return re.sub(r"<script(?=[\s>])", '<script nonce="{{ csp_nonce }}"', text)
 
 
-ADMIN_HTML = _template("admin.html")   # 管理画面
+_static_cache: dict = {}
+
+
+def _static(filename: str):
+    """/static のファイル。JavaScript と CSS は、コメントを取り除いたものを配る。"""
+    if not filename.endswith((".js", ".css")):
+        return app.send_static_file(filename)
+    from werkzeug.security import safe_join
+    path = safe_join(app.static_folder, filename)
+    try:
+        mtime = os.path.getmtime(path) if path else None
+    except OSError:
+        mtime = None
+    if mtime is None:
+        return app.send_static_file(filename)       # 無いファイルは、いつもの 404
+    hit = _static_cache.get(filename)
+    if not hit or hit[0] != mtime:
+        with open(path, encoding="utf-8") as f:
+            hit = _static_cache[filename] = (mtime, strip_comments(f.read()).encode("utf-8"))
+    resp = Response(hit[1], mimetype="text/javascript" if filename.endswith(".js") else "text/css")
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+app.view_functions["static"] = _static
+
+
+ADMIN_HTML = _template("admin.html", guard=False)   # 管理画面
 
 
 MAIN_HTML = _template("main.html")     # 利用者の画面（HTML・CSS・JavaScript）
@@ -4048,6 +4269,7 @@ PUNI_HTML = _template("puni.html")     # ぷにぷに代行の画面
 HOME_HTML = _template("home.html")     # トップ（大メニュー）
 EXTRA_HTML = _template("extra.html")   # チケット購入・支援BOX・ソースコード購入
 REVIEWS_HTML = _template("reviews.html")   # 実績（星と感想）
+BOX_HTML = _template("box.html")           # 意見・質問箱
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))

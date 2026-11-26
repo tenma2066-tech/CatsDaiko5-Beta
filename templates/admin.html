@@ -57,7 +57,13 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <header><h1>管理者</h1><a href="/">← サイトへ戻る</a></header>
 {% if msg %}<div class="msgbar" role="status">{{ msg }}</div>{% endif %}
 
-{% if not unlocked %}
+{% if not unlocked and tfa.waiting %}
+<div class="card gate"><h2>2段階認証</h2><p class="sub">認証アプリに出ている6桁の番号を入れてください。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="unlock_2fa">
+<label for="tc">6桁の番号</label><input id="tc" name="code" type="text" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" autocomplete="one-time-code" autofocus required>
+<button class="btn pri full">入る</button></form>
+<form method="post" style="margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="unlock_cancel"><button class="btn full">やめる</button></form></div>
+{% elif not unlocked %}
 <div class="card gate"><h2>管理者パスコード</h2><p class="sub">入るにはパスコードが必要です。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="unlock">
 <label for="pc">パスコード</label><input id="pc" name="passcode" type="password" autocomplete="current-password" required>
@@ -70,6 +76,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <button class="tab" role="tab" data-sec="history">履歴</button>
 <button class="tab" role="tab" data-sec="paypay">PayPay{% if not pp.ready %}<span class="badge">!</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="reviews">実績</button>
+<button class="tab" role="tab" data-sec="box">意見箱{% if box_open %}<span class="badge">{{ box_open }}</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="settings">設定{% if maint.on %}<span class="badge warn">ON</span>{% endif %}</button>
 </div></div>
 
@@ -115,9 +122,9 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 {% if o.state == "paid" and not o.has_link %}<div class="note">この注文には送金リンク（入金）の記録がありません。同じ人の別の注文と重複していないか確認してから開始してください。</div>{% endif %}
 <div class="row">
 {% if o.has_link and o.state in ("hold", "unpaid", "dead") %}<button class="btn" name="action" value="order_recheck">PayPayに再確認する</button>{% endif %}
-{% if o.state == "paid" %}<button class="btn pri" name="action" value="order_start" onclick="return confirm('この注文の実行を開始しますか？')">実行を開始する</button>{% endif %}
-{% if not o.superseded and o.state != "paid" %}<button class="btn {{ 'pri' if o.has_link else '' }}" name="action" value="order_paid" onclick="return confirm('{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）')">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
-{% if o.state != "dead" %}<button class="btn danger" name="action" value="order_dead" onclick="return confirm('この注文を停止しますか？')">停止する</button>{% endif %}
+{% if o.state == "paid" %}<button class="btn pri" name="action" value="order_start" data-confirm="この注文の実行を開始しますか？">実行を開始する</button>{% endif %}
+{% if not o.superseded and o.state != "paid" %}<button class="btn {{ 'pri' if o.has_link else '' }}" name="action" value="order_paid" data-confirm="{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
+{% if o.state != "dead" %}<button class="btn danger" name="action" value="order_dead" data-confirm="この注文を停止しますか？">停止する</button>{% endif %}
 </div></form></div>
 {% else %}<div class="empty">未完了の注文はありません 🎉</div>{% endfor %}
 </div></section>
@@ -144,8 +151,8 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <h3>手動での更新</h3>
 <p class="sub">それぞれ別々に使えます。押したあと画面を再読み込みしても、同じ操作がもう一度送られることはありません。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-<button class="btn full" name="action" value="pp_refresh" onclick="return confirm('保存済みの電話番号・パスワードでPayPayにログインし直します。SMS認証を求められることがあります。よろしいですか？')">🔄 PayPayの接続を更新（ログインし直す）</button>
-<button class="btn full" name="action" value="pp_recheck_all" onclick="return confirm('保留・要確認の注文を、いますぐ全部PayPayに確認します。入金済みのものは実行まで進みます。よろしいですか？')">🔍 保留中の注文をまとめて再確認</button>
+<button class="btn full" name="action" value="pp_refresh" data-confirm="保存済みの電話番号・パスワードでPayPayにログインし直します。SMS認証を求められることがあります。よろしいですか？">🔄 PayPayの接続を更新（ログインし直す）</button>
+<button class="btn full" name="action" value="pp_recheck_all" data-confirm="保留・要確認の注文を、いますぐ全部PayPayに確認します。入金済みのものは実行まで進みます。よろしいですか？">🔍 保留中の注文をまとめて再確認</button>
 </form>
 <a class="btn full" href="/admin#paypay" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">↻ 状態を表示し直す（何も送らない）</a>
 <p class="sub" style="margin-top:12px">初めて接続するとき・接続が切れたときは、① 電話番号とパスワードでログイン → ② SMS で届いた4桁のコードを入力、の順です。</p>
@@ -173,7 +180,33 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <label for="rvw">追加する言葉（1行に1つ）</label><textarea id="rvw" name="words" rows="5" style="width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:inherit">{{ review_words }}</textarea>
 <button class="btn pri full" style="margin-top:8px">保存する</button></form></div>
 </section>
+<section class="view" id="sec-box">
+<div class="card"><h2>意見・質問箱</h2>
+<p class="sub">トップの「意見・質問箱」から届いたものです（未対応 {{ box_open }}件）。お客さんには公開されません。返事は、書いてあれば連絡先へ。</p>
+{% for b in box %}<div class="h"><div class="l1"><span class="chip {{ '' if b.done else 'warn' }}">{{ '対応済み' if b.done else '未対応' }}</span><span class="chip">{{ b.kind }}</span><span class="chip">{{ b.when }}</span></div>
+<div class="sub" style="white-space:pre-wrap;word-break:break-word;margin:4px 0;color:var(--ink)">{{ b.text }}</div>
+<div class="sub">{% if b.contact %}連絡先：<b>{{ b.contact }}</b>　{% endif %}ユーザーID：{{ b.user }}</div>
+<form method="post" style="display:flex;gap:6px;margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ b.id }}">
+<button class="btn" name="action" value="{{ 'box_undo' if b.done else 'box_done' }}" style="padding:4px 10px;font-size:12px">{{ '未対応に戻す' if b.done else '対応済みにする' }}</button>
+<button class="btn danger" name="action" value="box_delete" style="padding:4px 10px;font-size:12px" data-confirm="この投稿を削除しますか？（元に戻せません）">削除</button></form></div>
+{% else %}<div class="empty">まだ届いていません</div>{% endfor %}</div>
+</section>
 <section class="view" id="sec-settings">
+<div class="card"><h2>2段階認証（管理画面）</h2>
+{% if tfa.on %}<p class="sub"><span class="chip">有効</span> ログインのとき、パスコードのあとに認証アプリの6桁を入れます。スマホをなくしたときは、サーバーのデータフォルダーの <code>admin_2fa.json</code> を消すと、パスコードだけに戻ります。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="tfa_disable">
+<label for="td">無効にするには、いまの6桁</label><input id="td" name="code" type="text" inputmode="numeric" maxlength="7" autocomplete="one-time-code" required>
+<button class="btn danger full" style="margin-top:8px" data-confirm="2段階認証を無効にしますか？">無効にする</button></form>
+{% elif tfa.setup %}<p class="sub">① 認証アプリ（Google Authenticator・Microsoft Authenticator・1Password など）に、下の鍵を登録します。iPhone なら「アプリで開く」を押すだけです。</p>
+<p><a class="btn full" href="{{ tfa.setup.uri }}">認証アプリで開く</a></p>
+<p class="sub">手で入れる場合の鍵（種類：時間ベース）：<br><code style="font-size:15px;word-break:break-all;user-select:all">{{ tfa.setup.secret }}</code></p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="tfa_confirm">
+<label for="tn">② アプリに出た6桁を入れて、確認</label><input id="tn" name="code" type="text" inputmode="numeric" maxlength="7" autocomplete="one-time-code" required>
+<button class="btn pri full" style="margin-top:8px">有効にする</button></form>
+<form method="post" style="margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="tfa_cancel"><button class="btn full">やめる</button></form>
+{% else %}<p class="sub">パスコードが漏れても、あなたのスマホが無ければ入れないようにできます（おすすめ）。使うのは無料の認証アプリです。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="tfa_begin"><button class="btn pri full">設定を始める</button></form>{% endif %}
+</div>
 <div class="card"><h2>メンテナンス表示</h2>
 <p class="sub">オンの間は新規の注文・新しい支払いを止めます。すでに支払い済み・保留中の注文は最後まで進みます。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="maint_save">
@@ -187,7 +220,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 {% for k, label in price_labels.items() %}
 <label for="pr-{{ k }}">{{ label }}（円）</label><input id="pr-{{ k }}" name="{{ k }}" type="text" inputmode="numeric" pattern="[0-9]*" value="{{ prices[k] }}" required maxlength="6">
 {% endfor %}
-<button class="btn pri full" onclick="return confirm('料金を変更します。これからの新しい注文から反映されます。よろしいですか？')">料金を保存</button></form></div>
+<button class="btn pri full" data-confirm="料金を変更します。これからの新しい注文から反映されます。よろしいですか？">料金を保存</button></form></div>
 <div class="card"><h2>初期垢作成（リスタートパック）</h2>
 <p class="sub">新しいアカウントに入れる中身です。1行に「項目名=数量」（例：<code>猫缶=1500</code>、<code>レアチケ=10</code>、種類ごとは <code>マタタビ#1=5</code>）。キャラは番号で（例：<code>1-9, 25</code>）。料金は「設定」の料金欄の「初期垢作成」で変えられます。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="restart_save">
@@ -201,22 +234,29 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <label for="rpn">利用者に見せる説明（任意）</label><input id="rpn" name="note" value="{{ rp.note }}" maxlength="300" placeholder="例：公式リスタートパックと同じ内容">
 <button class="btn pri full">保存</button></form>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="restart_official">
-<button class="btn full" onclick="return confirm('公式リスタートパックと同じ中身（日本編1〜3章クリア・お宝金・基本キャラ9種＋もねこ・ネコヴァルキリー・ネコムートLv20・施設Lv20・レアチケ1・にゃんチケ10）を入れて、利用者が選べるようにします。よろしいですか？')">⭐ 公式と同じ中身を入れて公開する</button></form></div>
+<button class="btn full" data-confirm="公式リスタートパックと同じ中身（日本編1〜3章クリア・お宝金・基本キャラ9種＋もねこ・ネコヴァルキリー・ネコムートLv20・施設Lv20・レアチケ1・にゃんチケ10）を入れて、利用者が選べるようにします。よろしいですか？">⭐ 公式と同じ中身を入れて公開する</button></form></div>
 <div class="card"><h2>クーポン</h2><p class="sub">支払額{{ coupon_min }}円以上の注文の完了時に自動で発行（次回{{ coupon_min }}円以上で10%引き・1回きり・{{ coupon_days }}日）。チケット購入（1回無料・期間無料）と支援BOX（30%引き）で発行したコードもここに出ます。新しい順に最大100件。</p>
 <form method="post" style="margin:8px 0 14px;padding:10px;border:1px dashed var(--line);border-radius:10px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_free_issue">
 <b>🎁 無料クーポンを発行</b><p class="sub" style="margin:4px 0">1回だけ、どのメニューでも0円で実行できるコード（FR-XXXX-XXXX）を作ります。利用者は注文確認の画面でクーポン欄に入れます。</p>
 <label for="fcd">有効期限（日）</label><input id="fcd" name="days" inputmode="numeric" maxlength="3" value="30">
 <label for="fcn">メモ（任意・自分用。例：誰に渡したか）</label><input id="fcn" name="note" maxlength="60" placeholder="例：お詫び用">
-<button class="btn pri full" onclick="return confirm('1回だけ無料で使えるクーポンを発行します。よろしいですか？')">発行する</button></form>
+<button class="btn pri full" data-confirm="1回だけ無料で使えるクーポンを発行します。よろしいですか？">発行する</button></form>
 {% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code>{% if c.kind_ja %}<span class="chip ok">{{ c.kind_ja }}</span>{% endif %}<span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div>
 {% if c.free and c.note %}<div class="sub" style="font-size:12px">メモ：{{ c.note }}</div>{% endif %}
-{% if c.free and c.state_ja=='未使用' %}<form method="post" style="margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_revoke"><input type="hidden" name="code" value="{{ c.code }}"><button class="btn" style="padding:4px 10px;font-size:12px" onclick="return confirm('このクーポンを取り消します。よろしいですか？')">取り消す</button></form>{% endif %}</div>
+{% if c.free and c.state_ja=='未使用' %}<form method="post" style="margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_revoke"><input type="hidden" name="code" value="{{ c.code }}"><button class="btn" style="padding:4px 10px;font-size:12px" data-confirm="このクーポンを取り消します。よろしいですか？">取り消す</button></form>{% endif %}</div>
 {% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div>
 <div class="card"><h2>バックアップ</h2><p class="sub">注文（暗号化されたまま）・支払いの台帳・料金や設定を、1つのファイルにまとめてダウンロードします。iPhone の「ファイル」や iCloud に保存しておいてください。サーバーでも毎日自動で保存しています（14日分）。暗号の鍵は入りません。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="backup_download"><button class="btn full">⬇️ バックアップをダウンロード</button></form></div>
 <div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button class="btn full">管理者モードを終了</button></form></div>
 </section>
 
+<script>
+/* data-confirm の付いたボタンは、押したときに確認する（CSP のため、HTML に直接 onclick を書かない） */
+document.addEventListener('click',function(e){
+  var b=e.target.closest&&e.target.closest('[data-confirm]');
+  if(b&&!confirm(b.getAttribute('data-confirm').replace(/\\n/g,'\n'))){ e.preventDefault(); e.stopPropagation(); }
+},true);
+</script>
 <script>
 (function(){
   var secs=['home','orders','history','paypay','reviews','settings'];

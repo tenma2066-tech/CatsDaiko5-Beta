@@ -637,6 +637,49 @@ def _review_table(db):
                   hidden INTEGER NOT NULL DEFAULT 0)""")
 
 
+# ---- 意見・質問箱（お客さんからの意見・質問・不具合の報告。読めるのは管理者だけ）
+FEEDBACK_KINDS = ("opinion", "question", "bug")
+
+
+def _feedback_table(db) -> None:
+    db.execute("""CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, created REAL NOT NULL,
+                  kind TEXT NOT NULL, body TEXT NOT NULL, contact TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL DEFAULT '',
+                  done INTEGER NOT NULL DEFAULT 0)""")
+
+
+def feedback_add(kind: str, body: str, contact: str = "", user_id: str = "") -> int:
+    with _ledger() as db:
+        _feedback_table(db)
+        cur = db.execute("INSERT INTO feedback(created, kind, body, contact, user_id) VALUES(?,?,?,?,?)",
+                         (time.time(), kind, body, contact, user_id))
+        return int(cur.lastrowid)
+
+
+def feedback_list(limit: int = 200) -> list:
+    """未対応を先に、その中では新しい順。"""
+    with _ledger() as db:
+        _feedback_table(db)
+        return [dict(r) for r in db.execute("SELECT * FROM feedback ORDER BY done, id DESC LIMIT ?", (max(1, min(int(limit), 500)),)).fetchall()]
+
+
+def feedback_open_count() -> int:
+    with _ledger() as db:
+        _feedback_table(db)
+        return int(db.execute("SELECT COUNT(*) FROM feedback WHERE done=0").fetchone()[0])
+
+
+def feedback_set_done(fid: int, done: bool) -> bool:
+    with _ledger() as db:
+        _feedback_table(db)
+        return db.execute("UPDATE feedback SET done=? WHERE id=?", (1 if done else 0, int(fid))).rowcount > 0
+
+
+def feedback_delete(fid: int) -> bool:
+    with _ledger() as db:
+        _feedback_table(db)
+        return db.execute("DELETE FROM feedback WHERE id=?", (int(fid),)).rowcount > 0
+
+
 def review_add(order_id: str, shop: str, stars: int, body: str) -> bool:
     """実績を1件保存する。1つの注文につき1件だけ（すでにあれば False）。"""
     with _ledger() as db:

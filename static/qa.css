@@ -12,14 +12,24 @@
 .qa-fab.qa-mini{padding:0 12px}
 .qa-fab.qa-mini .qa-lbl{max-width:0;opacity:0}
 .qa-fab.qa-hide{opacity:0;transform:scale(.6);pointer-events:none}
+.qa-fab.qa-float.qa-in{animation:qa-float 3.2s ease-in-out infinite}
+.qa-fab.qa-float .qa-ico{animation:qa-blink 3.2s ease-in-out infinite}
 .qa-fab.qa-nudge .qa-ico{animation:qa-wiggle .9s ease}
-.qa-fab.qa-nudge{animation:qa-hop .9s ease}
+.qa-fab.qa-nudge.qa-in{animation:qa-hop 1.1s ease}
+.qa-tip{position:fixed;right:14px;bottom:calc(144px + env(safe-area-inset-bottom,0px));z-index:7;max-width:min(260px,calc(100vw - 28px));
+  padding:9px 13px;border:2px solid var(--line,#17181c);border-radius:14px 14px 4px 14px;background:var(--panel,#fff);color:var(--ink,#17181c);
+  font-size:13.5px;font-weight:800;box-shadow:0 3px 0 var(--line,#17181c);cursor:pointer;
+  opacity:0;transform:translateY(10px) scale(.9);transform-origin:100% 100%;pointer-events:none;
+  transition:opacity .3s ease,transform .3s cubic-bezier(.2,1.4,.4,1)}
+.qa-tip.qa-tip-in{opacity:1;transform:none;pointer-events:auto}
+@keyframes qa-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@keyframes qa-blink{0%,86%,100%{transform:scale(1)}90%{transform:scale(1.25) rotate(-8deg)}94%{transform:scale(1.1) rotate(6deg)}}
 .qa-fab::after{content:"";position:absolute;inset:-2px;border-radius:inherit;pointer-events:none;
   box-shadow:0 0 0 0 rgba(255,196,46,.55)}
 .qa-fab.qa-nudge::after{animation:qa-ring 1.1s ease-out}
 @keyframes qa-wiggle{0%,100%{transform:rotate(0)}20%{transform:rotate(-16deg)}40%{transform:rotate(12deg)}60%{transform:rotate(-8deg)}80%{transform:rotate(4deg)}}
-@keyframes qa-hop{0%,100%{transform:none}30%{transform:translateY(-6px)}55%{transform:translateY(0)}70%{transform:translateY(-2px)}}
-@keyframes qa-ring{0%{box-shadow:0 0 0 0 rgba(255,196,46,.6)}100%{box-shadow:0 0 0 14px rgba(255,196,46,0)}}
+@keyframes qa-hop{0%,100%{transform:none}18%{transform:translateY(-14px) scale(1.06)}36%{transform:translateY(0) scale(.97,1.03)}52%{transform:translateY(-7px)}70%{transform:translateY(0)}84%{transform:translateY(-2px)}}
+@keyframes qa-ring{0%{box-shadow:0 0 0 0 rgba(255,196,46,.75)}100%{box-shadow:0 0 0 22px rgba(255,196,46,0)}}
 
 .qa-panel{position:fixed;inset:0;z-index:10;display:flex;align-items:flex-end;justify-content:center;
   background:rgba(0,0,0,0);transition:background .25s ease}
@@ -63,5 +73,6 @@
 .qa-form button:disabled{opacity:.45}
 @media (prefers-reduced-motion:reduce){
   .qa-fab,.qa-sheet,.qa-panel,.qa-fab .qa-lbl{transition:none}
-  .qa-fab.qa-nudge,.qa-fab.qa-nudge .qa-ico,.qa-fab.qa-nudge::after,.qa-msg,.qa-typing i{animation:none}
+  .qa-fab.qa-nudge,.qa-fab.qa-nudge .qa-ico,.qa-fab.qa-nudge::after,.qa-msg,.qa-typing i,.qa-fab.qa-float.qa-in,.qa-fab.qa-float .qa-ico{animation:none}
+  .qa-tip{transition:none}
 }

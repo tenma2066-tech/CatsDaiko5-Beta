@@ -264,6 +264,10 @@ input.q.over{border-color:var(--bad)!important;background:var(--badbg)!important
 
 .tab.locked{opacity:.4;cursor:not-allowed}
 .maintbar{position:sticky;top:0;z-index:50;background:var(--accent);color:#17181c;border-bottom:2px solid #17181c;padding:8px 14px;font-size:13.5px;line-height:1.5;text-align:center}
+.firsttip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px;padding:8px 10px 8px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-size:13.5px}
+.firsttip button{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:4px}
+.firsttip #firstTipOpen{font-weight:800;text-decoration:underline;flex:1;text-align:left}
+.firsttip #firstTipX{font-size:20px;line-height:1;min-width:36px;min-height:36px}
 .maintbar b{margin-right:8px}.maintbar a{color:#17181c;font-weight:800;margin-left:6px}
 .maintwall{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
 .maintwall[hidden],.maintbar[hidden]{display:none}
@@ -394,7 +398,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 .toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;font-weight:700;max-width:90vw}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
-</style><link rel="stylesheet" href="/static/qa.css?v=2">
+</style><link rel="stylesheet" href="/static/qa.css?v=3">
 </head><body>
 
 <div class="wrap"><header>
@@ -424,6 +428,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <main class="wrap">
 {% if shop_reviews %}<a class="rvstrip" href="/reviews?shop=nyanko"><span aria-hidden="true">⭐</span><b>{{ "%.1f"|format(shop_reviews.average) }}</b><span>お客さまの実績 {{ "{:,}".format(shop_reviews.count) }}件</span><i>見る →</i></a>{% endif %}
 <a class="gameback" href="/">← メニューへ</a>
+<div class="firsttip" id="firstTip" hidden><span>はじめての方へ：</span><button type="button" id="firstTipOpen">使い方・料金を見る →</button><button type="button" id="firstTipX" aria-label="閉じる">×</button></div>
 
   <section class="view" id="v-start" role="tabpanel" aria-labelledby="t-menu">
     <div class="panel resume" id="resumePanel" hidden>
@@ -631,7 +636,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
         <div>最終更新<b id="updated">--:--:--</b></div>
       </div>
       <details class="logbox"><summary>くわしい記録</summary><div id="log" aria-live="polite"></div></details>
-      <button class="btn" id="cancel-queue" type="button" hidden>待機を取り消す</button>
+      <button class="btn" id="cancel-queue" type="button" hidden>やっぱりやめる（順番待ちを取り消す）</button>
       <div class="warnbox" id="warn" hidden></div>
       <div class="rep" id="rep" hidden></div>
       <div class="fail" id="fail" hidden></div>
@@ -810,7 +815,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="/static/review.js?v=2"></script>
+<script src="/static/review.js?v=3"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAINT={{ maint|tojson }};
@@ -1471,7 +1476,7 @@ function renderJob(j){
   renderSteps(j); renderNow(j);
   $('#log').textContent=j.status==='queued'?'待機中（順番: '+j.queue_position+'）':j.log.join('\n');
   $('#job-slot').textContent=j.status==='running'&&j.slot?'実行枠 '+j.slot+'/'+j.max_concurrent_jobs+' を使用中':j.status==='queued'?'空き枠待ち（順番: '+j.queue_position+'）':'実行枠は使用していません';
-  $('#cancel-queue').hidden=j.status!=='queued';
+  $('#cancel-queue').hidden=IS_ADMIN||j.status!=='queued';
   $('#log').scrollTop=$('#log').scrollHeight;
   $('#updated').textContent=clock(new Date());
   jobStart=Date.now()-j.elapsed*1000;
@@ -1541,7 +1546,7 @@ async function poll(){
   }catch(e){fails++; renderState();} /* 一時的な通信エラーは次回に再試行 */
 }
 $('#cancel-queue').addEventListener('click',async()=>{
-  if(!curJob) return;
+  if(!curJob||!confirm('順番待ちを取り消しますか？\nお支払い済みの場合、お金は注文に残ります。あとで「未完了の注文」から、追加料金なしで実行できます。')) return;
   try{ await fetch('/cancel/'+curJob,{method:'POST'}); await poll(); }catch(e){ toast('接続できませんでした'); }
 });
 $('#download-result').addEventListener('click',async()=>{
@@ -2043,9 +2048,15 @@ const draft0=restoreDraft();
 applyMaint(MAINT,false);
 show(draft0&&draft0.view&&draft0.view!=='status'&&TABS.includes(draft0.view)?draft0.view:'start'); refresh(); ping(); tabMore(); renderPresets(); renderHist(); loadResume();
 draftReady=true;
-openHelp(); /* 開くたびに確認と使い方を表示 */
+/* 使い方の大きな画面は、自分で開いたときだけ。はじめての人には、細い案内を1回だけ出す */
+(function(){ let seen=false; try{ seen=!!localStorage.getItem('help-seen'); }catch(e){}
+  const tip=$('#firstTip'); if(!tip||seen) return; tip.hidden=false;
+  const done=()=>{ tip.hidden=true; try{ localStorage.setItem('help-seen','1'); }catch(e){} };
+  $('#firstTipOpen').addEventListener('click',()=>{ done(); openHelp(); });
+  $('#firstTipX').addEventListener('click',done);
+})();
 const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
 
-</script><script src="/static/qa.js?v=2" data-shop="nyanko" defer></script>
+</script><script src="/static/qa.js?v=3" data-shop="nyanko" defer></script>
 </body></html>

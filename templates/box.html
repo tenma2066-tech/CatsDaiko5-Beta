@@ -1,0 +1,116 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>意見・質問箱｜{{ shop_name }}</title>
+<meta name="description" content="{{ shop_name }} へのご意見・ご質問・不具合の報告を送れます。">
+<link rel="canonical" href="{{ site }}/box">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/static/icon-192.png?v=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<meta name="theme-color" content="#ffd400">
+<style>
+:root{
+  --bg:#e8edf2;--panel:#fff;--ink:#17181c;--muted:#5b6472;--line:#17181c;--soft:#f1f4f8;
+  --accent:#ffc42e;--star:#f5a623;--bar:#d5dbe3;--ok:#12a05c;--bad:#d93636;--badbg:#fdebeb;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121418;--panel:#1d2026;--ink:#f1f3f6;--muted:#9aa4b2;--line:#444b57;--soft:#262a32;--bar:#333943;--badbg:#321a1a;
+;--link:#8ab4ff}}
+/* 文中のリンク：明るい画面・暗い画面のどちらでも読める色 */
+a{color:var(--link,#1a56c4)}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;
+  font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+.wrap{max-width:600px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top,0px)) 14px calc(32px + env(safe-area-inset-bottom,0px))}
+a:focus-visible,button:focus-visible{outline:3px solid #2f7df6;outline-offset:2px}
+[hidden]{display:none!important}
+.top{margin:0 0 10px}
+.top a{font-size:14px;color:var(--muted);text-decoration:none;font-weight:700}
+h1{margin:0 0 4px;font-size:24px;font-weight:800}
+.lead{margin:0 0 16px;font-size:14px;color:var(--muted)}
+.maint{margin:0 0 14px;padding:12px;border:2px solid var(--bad);border-radius:14px;background:var(--badbg);font-size:14px;font-weight:700}
+.card{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px;margin:0 0 14px;box-shadow:0 4px 0 var(--line)}
+.kinds{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 14px}
+.kinds label{display:block;position:relative;cursor:pointer}
+.kinds input{position:absolute;opacity:0;inset:0}
+.kinds span{display:block;text-align:center;padding:10px 4px;border:2px solid var(--line);border-radius:12px;background:var(--panel);font-size:13.5px;font-weight:800}
+.kinds input:checked+span{background:var(--accent);color:#17181c}
+.kinds input:focus-visible+span{outline:3px solid #2f7df6;outline-offset:2px}
+label.f{display:block;font-size:13.5px;font-weight:800;margin:0 0 4px}
+textarea,input[type=text]{display:block;width:100%;padding:11px 12px;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:inherit;font:inherit;font-size:16px;line-height:1.6}
+textarea{min-height:150px;resize:vertical}
+.count{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin:4px 2px 12px}
+.count b.ok{color:var(--ok)}
+.err{color:var(--bad);font-size:13.5px;font-weight:700;min-height:1.2em;margin:8px 0}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:50px;padding:10px 18px;border:2px solid var(--line);
+  border-radius:14px;background:var(--panel);color:inherit;font:inherit;font-weight:800;font-size:16px;cursor:pointer;box-shadow:0 3px 0 var(--line);text-decoration:none}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--line)}
+.btn.primary{background:var(--accent);color:#17181c}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.how{font-size:13px;color:var(--muted);margin:10px 0 0}
+.thanks{text-align:center;padding:26px 16px}
+.thanks .big{font-size:44px;line-height:1}
+.thanks h2{margin:8px 0 6px;font-size:20px}
+.foot{margin:24px 0 0;text-align:center;font-size:12.5px;color:var(--muted)}
+</style></head><body>
+<main class="wrap">
+  <div class="top"><a href="/">← メニューへ</a></div>
+  {% if maint.on %}<div class="maint">{{ maint.message or "ただいまメンテナンス中です。" }}</div>{% endif %}
+  <h1>意見・質問箱📮</h1>
+  <p class="lead">「こうしてほしい」「ここが分からない」「うまく動かない」など、なんでもお送りください。<b>読むのはお店の人だけ</b>で、公開されません。</p>
+
+  <section class="card" id="formCard">
+    <div class="kinds" role="radiogroup" aria-label="種類">
+      {% for key, label in kinds.items() %}<label><input type="radio" name="kind" value="{{ key }}" {% if loop.first %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}
+    </div>
+    <label class="f" for="text">内容（{{ box_min }}文字以上）</label>
+    <textarea id="text" maxlength="{{ box_max }}" placeholder="例：ぷにぷにの周回で、途中経過がもう少し細かく見えると助かります。"></textarea>
+    <div class="count"><b id="left"></b><span>最大 {{ box_max }} 文字</span></div>
+    <label class="f" for="contact">返事がほしい方は、連絡先（任意）</label>
+    <input type="text" id="contact" maxlength="{{ contact_max }}" placeholder="例：X の @ユーザー名 / メールアドレス" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="hp" aria-hidden="true"><label>ここは空のままにしてください<input type="text" id="website" tabindex="-1" autocomplete="off"></label></div>
+    <p class="err" id="err" role="alert"></p>
+    <button class="btn primary" id="send" type="button" disabled>送信する</button>
+    <p class="how">注文についてのお問い合わせは、<b>注文番号</b>も書いていただくと早く確認できます。引継ぎコード・暗証番号・パスワードは書かないでください。{% if shop_x %}急ぎのときは X（<a href="{{ contact_url }}" target="_blank" rel="noopener">@{{ shop_x }}</a>）のDMへ。{% endif %}</p>
+  </section>
+  <section class="card thanks" id="thanks" hidden>
+    <div class="big" aria-hidden="true">📮</div>
+    <h2>受け取りました</h2>
+    <p class="how" style="margin:0 0 16px">ありがとうございます。いただいた内容は、お店の改善に使います。</p>
+    <button class="btn" id="again" type="button">もう1通送る</button>
+    <a class="btn primary" href="/" style="margin-top:10px">メニューへ戻る</a>
+  </section>
+
+  <div class="foot">{{ shop_name }}{% if shop_x %} ／ お問い合わせ：X <b>@{{ shop_x }}</b>{% endif %} ／ v{{ version }}</div>
+</main>
+<script>
+"use strict";
+(function(){
+  const MIN={{ box_min|tojson }}, $=s=>document.querySelector(s);
+  const text=$('#text'), send=$('#send'), left=$('#left'), err=$('#err'); let busy=false;
+  function length(){ return Array.from(text.value.replace(/[ \t\u3000]{2,}/g,' ').trim()).length; }
+  function refresh(){
+    const n=length();
+    left.className=n>=MIN?'ok':''; left.textContent=n>=MIN?'✓ '+n+' 文字':'あと '+(MIN-n)+' 文字';
+    send.disabled=busy||n<MIN;
+  }
+  text.addEventListener('input',()=>{ err.textContent=''; refresh(); try{ sessionStorage.setItem('box-draft',text.value); }catch(e){} });
+  try{ text.value=sessionStorage.getItem('box-draft')||''; }catch(e){}
+  refresh();
+  send.addEventListener('click',async()=>{
+    if(busy) return; busy=true; refresh(); send.textContent='送信しています…'; err.textContent='';
+    try{
+      const r=await fetch('/api/box',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({kind:(document.querySelector('input[name=kind]:checked')||{}).value||'',text:text.value,contact:$('#contact').value,website:$('#website').value})});
+      const j=await r.json().catch(()=>({}));
+      if(r.ok){ text.value=''; try{ sessionStorage.removeItem('box-draft'); }catch(e){} $('#formCard').hidden=true; $('#thanks').hidden=false; window.scrollTo(0,0); }
+      else err.textContent=j.error||'送信できませんでした。もう一度お試しください。';
+    }catch(e){ err.textContent='通信できませんでした。電波の良いところでもう一度お試しください。'; }
+    busy=false; send.textContent='送信する'; refresh();
+  });
+  $('#again').addEventListener('click',()=>{ $('#thanks').hidden=true; $('#formCard').hidden=false; refresh(); text.focus(); });
+})();
+</script>
+</body></html>

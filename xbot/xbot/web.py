@@ -116,6 +116,8 @@ def index():
         p["rep"] = logic.describe_repeat(json.loads(p["repeat"])) if p.get("repeat") else ""
         p["imgs"] = json.loads(p["images"] or "[]")
         p["when"] = logic.fmt_jst(p["at"])
+        p["at_local"] = datetime.fromtimestamp(p["at"], logic.JST).strftime("%Y-%m-%dT%H:%M")
+        p["editable"] = p["state"] in EDITABLE and not p.get("parent")
         p["done"] = logic.fmt_jst(p["done_at"])
     for e in events:
         e["when"] = logic.fmt_jst(e["at"])
@@ -286,6 +288,60 @@ def post_new():
         d.execute("INSERT INTO posts(text, images, at, created, repeat) VALUES(?,?,?,?,?)",
                   (text, json.dumps(names), at, time.time(), json.dumps(rep, ensure_ascii=False) if rep else None))
     flash(f"予約しました（{'定期：' + logic.describe_repeat(rep) + '・初回 ' if rep else ''}{logic.fmt_jst(at)}）。" + ("いまは下書きモードなので、実際には投稿されません。" if store.get("dry_run") else ""))
+    return back("posts")
+
+
+EDITABLE = ("scheduled", "canceled", "failed", "dry")   # 投稿の最中（posting）と投稿済みは編集できない
+
+
+@app.post("/post/<int:pid>/edit")
+def post_edit(pid):
+    """予約の編集：本文・日時・画像を外す。状態（予約中／取り消し など）は変えない。"""
+    text = (request.form.get("text") or "").strip()
+    drop = set(request.form.getlist("drop"))
+    with store.db() as d:
+        row = d.execute("SELECT * FROM posts WHERE id=?", (pid,)).fetchone()
+    if not row:
+        abort(404)
+    if row["state"] not in EDITABLE or row["parent"]:
+        flash("この投稿は編集できません（投稿の最中・投稿済み・定期の記録）。")
+        return back("posts")
+    images = [n for n in json.loads(row["images"] or "[]") if n not in drop]
+    if not text and not images:
+        flash("本文か画像のどちらかは残してください。")
+        return back("posts")
+    if logic.post_length(text) > logic.MAX_POST_LEN:
+        flash(f"本文が長すぎます（全角は2文字として {logic.MAX_POST_LEN} まで）。")
+        return back("posts")
+    at, rep = row["at"], json.loads(row["repeat"]) if row["repeat"] else None
+    if request.form.get("at"):
+        try:
+            new_at = logic.parse_jst(request.form["at"])
+        except ValueError:
+            flash("日時の形が正しくありません。")
+            return back("posts")
+        if abs(new_at - at) >= 60:                 # 日時を変えたときだけ（分より細かい違いは、変えていないとみなす）
+            at = new_at
+            if rep:                                # 定期：時刻（と「〇時間ごと」の起点）も合わせ、次の回を計算し直す
+                rep["time"] = datetime.fromtimestamp(at, logic.JST).strftime("%H:%M")
+                if rep["type"] == "hours":
+                    rep["anchor"] = at
+                if at < time.time() - 60 or (rep["type"] == "weekly" and datetime.fromtimestamp(at, logic.JST).weekday() not in rep["days"]):
+                    at = logic.next_time(rep, max(time.time(), at)) or at
+    with store.db() as d:
+        n = d.execute(f"UPDATE posts SET text=?, images=?, at=?, repeat=?, error=NULL WHERE id=? AND state IN ({','.join('?' * len(EDITABLE))})",
+                      (text, json.dumps(images), at, json.dumps(rep, ensure_ascii=False) if rep else None, pid, *EDITABLE)).rowcount
+        others = " ".join(r["images"] for r in d.execute("SELECT images FROM posts")) if n else ""
+    if not n:
+        flash("保存できませんでした（ちょうど投稿が始まったところです）。")
+        return back("posts")
+    for name in drop & set(json.loads(row["images"] or "[]")):   # 外した画像のファイルを消す（ほかの予約が使っていなければ）
+        if name not in others:
+            try:
+                os.remove(os.path.join(store.UPLOAD_DIR, os.path.basename(name)))
+            except OSError:
+                pass
+    flash(f"予約を保存しました（{logic.fmt_jst(at)}）。")
     return back("posts")
 
 

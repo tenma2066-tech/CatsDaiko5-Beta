@@ -128,7 +128,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .hero{display:block;width:100%;height:auto;aspect-ratio:2/1;object-fit:cover;border:2px solid var(--line);border-radius:16px;margin:0 0 14px;background:var(--soft)}
 .tagline{display:inline-block;margin:4px 0 0;padding:1px 8px;border:1.5px solid var(--line);border-radius:999px;font-size:11.5px;font-weight:800;background:var(--hit)}
 [hidden]{display:none!important}
-</style><link rel="stylesheet" href="/static/qa.css?v=2">
+</style><link rel="stylesheet" href="/static/qa.css?v=3">
 </head><body>
 <header><div class="wrap top">
   <div class="brand"><h1>ぷにぷに代行</h1><small>{{ shop_name }} ／ <b>妖怪ウォッチ ぷにぷに</b></small></div>
@@ -203,6 +203,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 <section id="s-status" class="card" hidden>
   <h2>状況</h2>
   <p class="nowmsg" id="now">準備しています…</p>
+  <button class="btn" id="cancelQueue" type="button" hidden>やっぱりやめる（順番待ちを取り消す）</button>
   <div class="pbar"><i id="pbar"></i></div>
   <div class="longbox" id="longBox" hidden>
     <p class="note" style="margin:0 0 8px">⏳ 長時間メニューです。<b>この画面は閉じても大丈夫</b>です（専用の枠で動き続けます）。あとで「このブラウザの注文」か注文番号から、状況と結果を見られます。サーバーの更新で一時的に止まっても、<b>続きから自動で再開</b>します。</p>
@@ -264,8 +265,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="note" id="payOrderNo"></p>
 </div></div>
 
-<script src="/static/review.js?v=2"></script>
-<script src="/static/shop.js?v=6"></script>
+<script src="/static/review.js?v=3"></script>
+<script src="/static/shop.js?v=7"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
@@ -487,7 +488,7 @@ async function poll(){
     return;
   }
   const st=j.status;
-  $('#now').dataset.s=st;
+  $('#now').dataset.s=st; $('#cancelQueue').hidden=IS_ADMIN||st!=='queued';
   isLong=!!j.long;
   $('#now').textContent=st==='queued'?(isLong?('長時間メニューの順番待ちです（'+(j.queue_position||1)+'番目）。前の方の周回が終わると自動で始まります。画面は閉じても大丈夫です')
                                               :('順番待ちです（'+(j.queue_position||1)+'番目）。そのままお待ちください')):
@@ -509,6 +510,14 @@ async function poll(){
     if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }
 }
+/* 順番待ちのあいだだけ「やっぱりやめる」。お支払いは注文に残り、あとで無料でやり直せる。管理者の画面には出さない */
+$('#cancelQueue').addEventListener('click',async()=>{
+  if(!curJob||!confirm('順番待ちを取り消しますか？\nお支払い済みの場合、お金は注文に残ります。あとで「注文」から、追加料金なしで実行できます。')) return;
+  $('#cancelQueue').disabled=true;
+  try{ const r=await fetch('/cancel/'+curJob,{method:'POST'}); if(!r.ok) alert('取り消せませんでした（もう始まっています）。'); }
+  catch(e){ alert('接続できませんでした。'); }
+  $('#cancelQueue').disabled=false; poll();
+});
 function showAccounts(accounts, failed){
   const box=$('#codes'); if(box.dataset.done==='1') return;
   box.textContent=''; box.dataset.done='1';
@@ -542,5 +551,5 @@ window.addEventListener('beforeunload',e=>{ if(curJob&&!isLong){ e.preventDefaul
 syncMode(); renderCart(); orders.loadResume();
 
 </script>
-<script src="/static/qa.js?v=2" data-shop="puni" defer></script>
+<script src="/static/qa.js?v=3" data-shop="puni" defer></script>
 </body></html>

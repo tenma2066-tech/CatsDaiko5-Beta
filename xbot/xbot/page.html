@@ -184,6 +184,13 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 {% if p.imgs %}<div class="thumbs">{% for n in p.imgs %}<img src="/img/{{ n }}" alt="">{% endfor %}</div>{% endif %}
 {% if p.error %}<div class="err">{{ p.error }}</div>{% endif %}
 {% if p.shot %}<details><summary>画面の記録</summary><img src="/shot/{{ p.shot }}" style="width:100%;border-radius:10px;margin-top:6px" alt=""></details>{% endif %}
+{% if p.editable %}<details class="edit"><summary>編集する</summary>
+<form method="post" action="/post/{{ p.id }}/edit"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="et{{ p.id }}">本文</label><textarea id="et{{ p.id }}" name="text" maxlength="25000">{{ p.text }}</textarea>
+<label for="ea{{ p.id }}">投稿する日時（日本時間{{ '・定期は次回' if p.rep }}）</label><input id="ea{{ p.id }}" type="datetime-local" name="at" value="{{ p.at_local }}">
+{% if p.imgs %}<div class="days">{% for n in p.imgs %}<label><input type="checkbox" name="drop" value="{{ n }}">画像{{ loop.index }}を外す</label>{% endfor %}</div>{% endif %}
+<p class="sub" style="margin-top:6px">画像を足したいときは、この予約を削除して作り直してください。{% if p.rep %}くり返し（{{ p.rep }}）の種類はそのままです。{% endif %}</p>
+<button class="btn pri full">保存する</button></form></details>{% endif %}
 <div class="row">
 {% if p.state == 'scheduled' %}<form method="post" action="/post/{{ p.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">取り消す</button></form>{% endif %}
 {% if p.state in ('failed','canceled','dry') %}<form method="post" action="/post/{{ p.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">もう一度予約</button></form>{% endif %}

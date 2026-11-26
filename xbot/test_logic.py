@@ -1,5 +1,6 @@
 """ブラウザを使わない部分のテスト。python test_logic.py で実行（Xには接続しない）。"""
 import io
+import json
 import os
 import sys
 import tempfile
@@ -189,6 +190,30 @@ class Web(unittest.TestCase):
         r = self.c.post("/action/check_dm", data={"csrf": csrf, "back": "dm"})
         self.assertEqual((store.get("request"), r.headers["Location"]), ("check_dm", "/?tab=dm"))
         store.put("request", "")
+
+    def test_edit_scheduled_post(self):
+        csrf = self.login()
+        self.c.post("/post/new", data={"csrf": csrf, "text": "はじめの文", "at": "2030-01-01T09:00",
+                                       "images": [(io.BytesIO(b"\x89PNG"), "a.png"), (io.BytesIO(b"\x89PNG"), "b.png")]}, content_type="multipart/form-data")
+        with store.db() as d:
+            row = dict(d.execute("SELECT * FROM posts ORDER BY id DESC LIMIT 1").fetchone())
+        imgs = json.loads(row["images"])
+        self.assertIn("編集する", self.c.get("/?tab=posts").get_data(as_text=True))
+        self.c.post(f"/post/{row['id']}/edit", data={"csrf": csrf, "text": "直した文", "at": "2030-02-03T21:30", "drop": [imgs[0]]})
+        with store.db() as d:
+            got = dict(d.execute("SELECT * FROM posts WHERE id=?", (row["id"],)).fetchone())
+        self.assertEqual((got["text"], got["state"], json.loads(got["images"])), ("直した文", "scheduled", [imgs[1]]))
+        self.assertEqual(logic.fmt_jst(got["at"]), "02/03 21:30")
+        self.assertFalse(os.path.exists(os.path.join(store.UPLOAD_DIR, imgs[0])))
+        self.assertTrue(os.path.exists(os.path.join(store.UPLOAD_DIR, imgs[1])))
+        self.c.post(f"/post/{row['id']}/edit", data={"csrf": csrf, "text": "", "drop": [imgs[1]]})      # 空にはできない
+        with store.db() as d:
+            self.assertEqual(d.execute("SELECT text FROM posts WHERE id=?", (row["id"],)).fetchone()["text"], "直した文")
+            d.execute("UPDATE posts SET state='posting' WHERE id=?", (row["id"],))
+        self.c.post(f"/post/{row['id']}/edit", data={"csrf": csrf, "text": "投稿中は変えない"})
+        with store.db() as d:
+            self.assertEqual(d.execute("SELECT text FROM posts WHERE id=?", (row["id"],)).fetchone()["text"], "直した文")
+        self.assertEqual(self.c.post(f"/post/{row['id']}/edit", data={"text": "x"}).status_code, 400)   # CSRF なしは不可
 
     def test_post_with_image_and_validation(self):
         csrf = self.login()

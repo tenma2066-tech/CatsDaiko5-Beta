@@ -118,7 +118,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .rvstrip b{font-size:16px}
 .rvstrip i{margin-left:auto;font-style:normal;font-weight:800;font-size:13px}
 [hidden]{display:none!important}
-</style><link rel="stylesheet" href="/static/qa.css?v=2">
+</style><link rel="stylesheet" href="/static/qa.css?v=3">
 </head><body>
 <header><div class="wrap top">
   <div class="brand"><h1>ツムツム代行</h1><small>{{ shop_name }} ／ <b>LINE：ディズニー ツムツム</b></small></div>
@@ -185,6 +185,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 <section id="s-status" class="card" hidden>
   <h2>状況</h2>
   <p class="nowmsg" id="now">準備しています…</p>
+  <button class="btn" id="cancelQueue" type="button" hidden>やっぱりやめる（順番待ちを取り消す）</button>
   <div class="pbar"><i id="pbar"></i></div>
   <p class="lines" id="resultLines"></p>
   <div id="codes"></div>
@@ -250,8 +251,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <div class="row"><button class="btn primary" id="capGo" type="button">送信する</button></div>
 </div></div>
 
-<script src="/static/review.js?v=2"></script>
-<script src="/static/shop.js?v=6"></script>
+<script src="/static/review.js?v=3"></script>
+<script src="/static/shop.js?v=7"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
@@ -426,7 +427,7 @@ async function poll(){
     return;
   }
   const st=j.status;
-  $('#now').dataset.s=st;
+  $('#now').dataset.s=st; $('#cancelQueue').hidden=IS_ADMIN||st!=='queued';
   $('#now').textContent=st==='queued'?('順番待ちです（'+(j.queue_position||1)+'番目）。そのままお待ちください'):
     st==='done'?'完了しました':st==='error'?('エラー：'+(j.error||'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
   const pct=st==='done'?100:Math.round(Math.min(1,(j.step||0)/TOTAL_STEPS)*100);
@@ -442,6 +443,14 @@ async function poll(){
     if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }
 }
+/* 順番待ちのあいだだけ「やっぱりやめる」。お支払いは注文に残り、あとで無料でやり直せる。管理者の画面には出さない */
+$('#cancelQueue').addEventListener('click',async()=>{
+  if(!curJob||!confirm('順番待ちを取り消しますか？\nお支払い済みの場合、お金は注文に残ります。あとで「注文」から、追加料金なしで実行できます。')) return;
+  $('#cancelQueue').disabled=true;
+  try{ const r=await fetch('/cancel/'+curJob,{method:'POST'}); if(!r.ok) alert('取り消せませんでした（もう始まっています）。'); }
+  catch(e){ alert('接続できませんでした。'); }
+  $('#cancelQueue').disabled=false; poll();
+});
 function showCodes(result, failed){
   const box=$('#codes'); if(box.dataset.done==='1') return;
   box.textContent=''; box.dataset.done='1';
@@ -503,5 +512,5 @@ $('#capGo').addEventListener('click',async()=>{
 syncMode(); renderCart(); orders.loadResume();
 
 </script>
-<script src="/static/qa.js?v=2" data-shop="tsum" defer></script>
+<script src="/static/qa.js?v=3" data-shop="tsum" defer></script>
 </body></html>

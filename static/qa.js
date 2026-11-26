@@ -150,13 +150,28 @@
   /* ---- 動き：登場 → ときどき揺れて気づかせる（開くまで・最大3回）→ スクロールで縮む ---- */
   var nudges = 0, nudgeTimer = null;
   function nudge() {
-    if (!panel.hidden || nudges >= 3) { stopNudge(); return; }
+    if (!panel.hidden) return;
+    if (busyElsewhere()) return;                    /* 入力中・支払い中・評価の入力中は、邪魔をしない */
     nudges += 1;
     fab.classList.remove("qa-nudge");
     void fab.offsetWidth;
     fab.classList.add("qa-nudge");
   }
-  function stopNudge() { if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; } }
+  function stopNudge() { if (nudgeTimer) { clearInterval(nudgeTimer); nudgeTimer = null; } hideTip(); }
+  function busyElsewhere() {
+    var a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
+    return !!document.querySelector('[role="dialog"]:not([hidden]):not(.qa-panel)');
+  }
+  /* 吹き出し：開いて少ししたら「聞いてね」と一度だけ声をかける */
+  var tip = el("div", "qa-tip", "わからないことは聞いてね 👇");
+  function showTip() {
+    if (!panel.hidden || busyElsewhere() || fab.classList.contains("qa-mini")) return;
+    tip.classList.add("qa-tip-in");
+    setTimeout(hideTip, 6500);
+  }
+  function hideTip() { tip.classList.remove("qa-tip-in"); }
+  tip.addEventListener("click", function () { hideTip(); open(); });
   fab.addEventListener("animationend", function (e) {
     if (e.target === fab && e.animationName === "qa-hop") fab.classList.remove("qa-nudge");
   });
@@ -164,19 +179,21 @@
   var lastY = window.scrollY;
   window.addEventListener("scroll", function () {
     var y = window.scrollY;
-    if (y > 120 && y > lastY + 4) fab.classList.add("qa-mini");
+    if (y > 120 && y > lastY + 4) { fab.classList.add("qa-mini"); hideTip(); }
     else if (y < lastY - 4 || y < 60) fab.classList.remove("qa-mini");
     lastY = y;
   }, { passive: true });
 
   function mount() {
-    document.body.append(fab, panel);
+    document.body.append(fab, tip, panel);
     setTimeout(function () { fab.classList.add("qa-in"); }, 600);
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!reduce && !store(SEEN)) {
-      setTimeout(nudge, 2500);
-      nudgeTimer = setInterval(nudge, 9000);
-    }
+    if (reduce) return;
+    var seen = !!store(SEEN);                       /* 一度開いた人には控えめに（吹き出しなし・間隔を長く） */
+    fab.classList.add("qa-float");                  /* いつも、ゆっくり浮き沈みする */
+    setTimeout(nudge, 2500);
+    if (!seen) setTimeout(showTip, 4200);
+    nudgeTimer = setInterval(nudge, seen ? 45000 : 14000);
   }
   if (document.body) mount(); else document.addEventListener("DOMContentLoaded", mount);
 })();
