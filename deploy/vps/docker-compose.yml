@@ -16,6 +16,8 @@ services:
       # Q&Aチャットの AI回答を使うなら、/opt/catsdaiko/.env に ANTHROPIC_API_KEY=sk-ant-... を書く。
       # 未設定（空）なら AI は呼ばれず、固定のFAQ案内にフォールバックする。
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # 実績（感想）を保存する前の AI の確認。.env に REVIEW_AI=0 と書くと止まる（決まった検査だけになる）。
+      REVIEW_AI: ${REVIEW_AI:-}
       # 購入時の人間確認（Cloudflare Turnstile）。2つともあるときだけ有効。空なら確認なしで動く。
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}

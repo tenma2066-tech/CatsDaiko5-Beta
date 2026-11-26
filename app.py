@@ -57,6 +57,7 @@ import puni_service
 import qa_bot
 import admin_2fa
 import human
+import review_ai
 import review_filter
 import site_config
 import source_pack
@@ -68,7 +69,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.22"
+APP_VERSION = "1.23"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -3644,8 +3645,19 @@ def review_post():
     if not _rate_ok("review:" + _client_ip(), 8, 600):
         return _too_fast()
     me = _owner()
+    want = (str(data.get("order") or "").strip(), str(data.get("job") or "").strip())
     with _orders_lock:
-        oid = _review_target(me, str(data.get("order") or "").strip(), str(data.get("job") or "").strip())
+        target = _review_target(me, *want)
+    if not target:
+        return jsonify(ok=True, saved=False)
+    # AI（Haiku・エフォート低）の確認：でたらめな入力・感想になっていない文・危険な内容。判断できないときは通す
+    if not _rate_ok("reviewai:" + _client_ip(), 6, 600):
+        return _too_fast()
+    verdict, message = review_ai.judge(text, stars)
+    if verdict not in (None, "ok"):
+        return jsonify(error=message, code=verdict), 400
+    with _orders_lock:
+        oid = _review_target(me, *want)
         if oid:
             _orders[oid]["reviewed"] = True          # 先に印を付ける（二度押しで2件にならない）
             shop = _order_shop(_orders[oid])
