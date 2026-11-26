@@ -259,7 +259,8 @@ document.addEventListener('click',function(e){
 </script>
 <script>
 (function(){
-  var secs=['home','orders','history','paypay','reviews','settings'];
+  /* タブの一覧は、画面のタブから作る（タブを足したときに、ここの書き足し忘れで開けなくならないように） */
+  var secs=Array.prototype.map.call(document.querySelectorAll('.tab[data-sec]'),function(b){ return b.dataset.sec; });
   function show(id,push){
     if(secs.indexOf(id)<0) id='home';
     secs.forEach(function(s){ var e=document.getElementById('sec-'+s); if(e) e.classList.toggle('on',s===id); });

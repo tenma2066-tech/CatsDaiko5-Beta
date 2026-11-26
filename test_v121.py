@@ -77,6 +77,9 @@ class FeedbackBox(Base):
         self.assertIn(GOOD, page)
         self.assertIn("@someone_x", page)
         self.assertIn('意見箱<span class="badge">1</span>', page)
+        for sec in re.findall(r'data-sec="([a-z]+)"', page):                   # どのタブにも、開く中身がある
+            self.assertIn(f'id="sec-{sec}"', page, sec)
+        self.assertNotRegex(page, r"var secs=\['home'")                         # タブの一覧を手で書かない（足し忘れで開けなくなる）
 
     def test_validation(self):
         self.assertEqual(self.send(text="短い").get_json()["code"], "too_short")
