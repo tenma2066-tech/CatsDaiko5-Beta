@@ -348,7 +348,8 @@ for _ in range(60):
     if j["state"] != "loading":
         break
     time.sleep(0.05)
-check("取得完了", j["state"] == "ready" and j["count"] == 300, (j["state"], j["count"], j["error"]))
+# 件数には、配布元にまだ無い新キャラの補足（engine.SUPPLEMENT_CATS）が足される
+check("取得完了", j["state"] == "ready" and j["count"] == 300 + len(A.engine.SUPPLEMENT_CATS), (j["state"], j["count"], j["error"]))
 check("名前一覧は対象バージョンの空セーブから構築", bool(catalog_versions) and catalog_versions[-1] == "gv:15.7.2", catalog_versions)
 check("番号は内部ID+1", j["items"][0]["n"] == 1 and j["items"][0]["name"] == "キャラ1")
 check("第2形態以降はaltに入る", j["items"][4]["alt"] == "キャラ5進化")
@@ -499,7 +500,7 @@ A._names.update(updated=0.0, tried=0.0, refreshing=False, version="15.7.2")
 A._start_names()
 ok = wait_names(lambda: A._names["updated"] > 0 and not A._names["refreshing"] and not A._run_lock.locked())
 check("新しい版で作れなければ固定版で作り直す", ok and "gv:15.7.2" in catalog_versions and A._names["version"] == "15.7.2", (catalog_versions, A._names["version"]))
-check("その間も一覧は使える", A._names["state"] == "ready" and len(A._names["items"]) == 300)
+check("その間も一覧は使える", A._names["state"] == "ready" and len([i for i in A._names["items"] if not i.get("new")]) == 300)
 n_before = len(catalog_versions)
 A._start_names()
 time.sleep(0.2)
