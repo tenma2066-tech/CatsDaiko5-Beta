@@ -637,3 +637,15 @@ class AppIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AccountModeFollowsMenus(unittest.TestCase):
+    """新規垢作成なのに「メールアドレスを入れて」と出ていた不具合（画面側）。入力方法は選んだメニューで決める。"""
+
+    def test_page(self):
+        import app as A
+        html = A.app.test_client().get("/puni").get_data(as_text=True)
+        self.assertIn("function mode(){ return isCreate()?'new':'email'; }", html)   # ラジオではなくメニューで決める
+        self.assertIn('id="acctPickNote"', html)                                       # 「新しい垢を作る」だけ選んだときの案内
+        self.assertIn("if(!isCreate()&&(!$('#login').value.trim()", html)             # メールを求めるのは、作成系でないときだけ
+        self.assertNotIn("if(mode()!=='new'&&", html)

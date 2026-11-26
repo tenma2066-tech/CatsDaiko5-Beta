@@ -129,6 +129,10 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .tagline{display:inline-block;margin:4px 0 0;padding:1px 8px;border:1.5px solid var(--line);border-radius:999px;font-size:11.5px;font-weight:800;background:var(--hit)}
 [hidden]{display:none!important}
 .humanbox{display:flex;justify-content:center;min-height:65px;margin:10px 0 4px}
+.linkbtn{border:0;background:none;padding:6px 0 0;color:var(--link,#1a56c4);font:inherit;font-weight:800;text-decoration:underline;cursor:pointer}
+#menuList label.hl{animation:hlpulse 1.6s ease 2}
+@keyframes hlpulse{0%,100%{box-shadow:0 0 0 0 rgba(255,196,46,0)}40%{box-shadow:0 0 0 5px rgba(255,196,46,.9)}}
+@media (prefers-reduced-motion:reduce){ #menuList label.hl{animation:none;outline:3px solid #ffc42e} }
 </style><link rel="stylesheet" href="/static/qa.css?v=3">
 </head><body>
 <header><div class="wrap top">
@@ -185,6 +189,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
     <label><input type="radio" name="mode" value="email" checked><span><b>メールでログイン</b><small>LEVEL5 ID のメール・パスワード。</small></span></label>
     <label><input type="radio" name="mode" value="new"><span><b>新しい垢を作る</b><small>作成系メニュー用。作成後の情報をお渡し。</small></span></label>
   </div>
+  <p class="acctnote" id="acctPickNote" hidden>新しい垢を作るときは、上のメニューで<b>「アカウント作成」</b>か<b>「久垢作成」</b>を選んでください（入力は不要です）。周回・ガチャなどほかのメニューは、ログインできるアカウント（メール・パスワード）が必要です。<br><button type="button" class="linkbtn" id="pickCreate">作成メニューを選ぶ →</button></p>
   <p class="acctnote" id="acctCreateNote" hidden>新しいアカウントを作成します（入力不要）。完了後に<b>メール・パスワード</b>をお渡しします。使い捨てメールのため再発行不可、必ず控えてください。</p>
   <label class="field" id="f-login"><span id="loginLabel">メールアドレス</span><input id="login" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email"></label>
   <label class="field" id="f-pw"><span>パスワード</span><input id="password" type="password" autocomplete="off"></label>
@@ -351,18 +356,22 @@ function soloError(){
   if(s.length&&p.length>1) return '「'+BY_KEY[s[0]].label+'」はほかのメニューと同時に選べません。';
   return '';
 }
-function mode(){ return ($$('#modeList input[name=mode]:checked')[0]||{}).value||'email'; }
+/* 入力方法は「選んだメニュー」で決まる（サーバーも同じ）：作成系なら new（入力不要）、それ以外は email（ログイン）。
+   ラジオの「新しい垢を作る」は、作成メニューへ案内するためのもの */
+function wantsNew(){ return (($$('#modeList input[name=mode]:checked')[0]||{}).value)==='new'; }
+function mode(){ return isCreate()?'new':'email'; }
 function setMode(v){ $$('#modeList input[name=mode]').forEach(i=>{ i.checked=i.value===v; }); syncMode(); }
 function isCreate(){ return picked().some(k=>SOLO.includes(k)); }
 function syncMode(){
   const create=isCreate();
-  const m=create?'new':mode(), isNew=m==='new';
+  const isNew=create, guide=!create&&wantsNew();
   $$('#modeList label').forEach(l=>l.classList.toggle('on',l.querySelector('input').checked));
   /* 作成系メニューを選んだときは、入力方法の選択を隠して「作成します」の案内だけ出す（操作フローを簡潔に） */
   $('#modeList').hidden=create;
   $('#acctIntro').hidden=create;
   $('#acctCreateNote').hidden=!create;
-  $('#f-login').hidden=isNew; $('#f-pw').hidden=isNew;
+  $('#acctPickNote').hidden=!guide;
+  $('#f-login').hidden=isNew||guide; $('#f-pw').hidden=isNew||guide;
 }
 function total(){ return rows().reduce((a,r)=>a+r[1],0); }
 let _cartSig='';
@@ -398,7 +407,7 @@ function renderCart(){
     const s=l.querySelector('.stage'); if(s) s.hidden=!on;
   });
   if(isCreate()) setMode('new');   /* 作成系：入力方法を new に固定して案内に切替 */
-  else syncMode();                 /* 作成系を外したら入力方法の選択を戻す */
+  else{ if(wantsNew()&&picked().length) setMode('email'); else syncMode(); }   /* ログインが要るメニューを選んだら、メール入力に戻す */
 }
 $('#menuList').addEventListener('change',renderCart);
 if($('#coupon')) $('#coupon').addEventListener('input',renderCart);
@@ -408,7 +417,15 @@ $('#menuList').addEventListener('click',e=>{
   const box=e.target.parentElement.querySelector('input');
   box.value=box.dataset.max; renderCart();
 });
-$('#modeList').addEventListener('change',syncMode);
+$('#modeList').addEventListener('change',()=>{ $('#acctErr').textContent=''; syncMode(); if(wantsNew()&&!isCreate()) showCreateMenus(); });
+/* 作成メニューの場所へ移動して、目立たせる */
+function showCreateMenus(){
+  const items=SOLO.map(k=>document.querySelector('#menuList label[data-key="'+k+'"]')).filter(Boolean);
+  if(!items.length) return;
+  items[0].scrollIntoView({behavior:'smooth',block:'center'});
+  items.forEach(l=>{ l.classList.remove('hl'); void l.offsetWidth; l.classList.add('hl'); });
+}
+$('#pickCreate').addEventListener('click',showCreateMenus);
 
 /* ---------- 注文まわり（支払い・一覧・再開）は共通の static/shop.js ---------- */
 const orders=ShopOrders({
@@ -432,7 +449,11 @@ $('#go').addEventListener('click',async()=>{
   $('#runErr').textContent=''; $('#acctErr').textContent='';
   const qe=qtyError()||soloError();
   if(qe){ $('#runErr').textContent=qe; return; }
-  if(mode()!=='new'&&(!$('#login').value.trim()||!$('#password').value)){
+  if(!isCreate()&&wantsNew()){
+    $('#acctErr').textContent='新しい垢を作るときは、メニューの「アカウント作成」か「久垢作成」を選んでください。';
+    showCreateMenus(); return;
+  }
+  if(!isCreate()&&(!$('#login').value.trim()||!$('#password').value)){
     $('#acctErr').textContent='メールアドレスとパスワードを入力してください。';
     $('#login').focus();
     return;
