@@ -314,6 +314,32 @@ ERROR_CAT_IDS = frozenset({
 })
 
 
+# 配布元（BCData）のゲームデータにまだ載っていない新キャラ。内部ID（0始まり）→ 形態名。
+# [Ver16.0（日本版 2026-11-09）| 出典 battlecats-db.com No.883〜887（DB番号＝内部ID＋1）・battlecatsstats.com 16.0・
+#  Miraheze「Version 16.0 Update」の3つで一致 | 2026-11-26 確認 | ゲームでの動作は未確認]
+# 887（精霊：エターニスの召喚ユニット）は図鑑に出ないので入れない（解放するとエラーキャラになる）。
+# 使う条件は2つ：①読み込んだゲームデータの図鑑にそのIDが無い（＝データが古い）②セーブが MIN_VERSION 以降で、
+# そのキャラの枠がセーブにある。配布元のデータに載ったら、そちらの「図鑑に出るか」が優先され、ここは使われない。
+SUPPLEMENT_MIN_VERSION = "16.0.0"
+SUPPLEMENT_CATS = {
+    882: ("監獄ネコ", "脱獄ネコ"),
+    883: ("監獄ネコガール", "脱獄ネコガール"),
+    884: ("監獄タンクネコ", "脱獄ネコカベ"),
+    885: ("監獄ちびネコ", "脱獄ちびネコアーマー"),
+    886: ("悠久の冒険者エターニス", "真理の探究者エターニス"),
+}
+
+
+def obtainable_cat_ids(save, picture_book_entries) -> set:
+    """解放してよいキャラ（図鑑に出るもの）。ゲームデータが古いときは、補足リストの新キャラも足す。"""
+    shown = _picture_book_ids(picture_book_entries)
+    known = _picture_book_ids(picture_book_entries, displayed_only=False)
+    extra = {cid for cid in SUPPLEMENT_CATS if cid not in known}
+    if extra and version_key(version_to_string(getattr(save, "game_version", None))) >= version_key(SUPPLEMENT_MIN_VERSION):
+        shown |= extra
+    return shown
+
+
 def _integer_id(value):
     """Normalize BCSFE integer IDs, including wrappers exposing .value."""
     raw = getattr(value, "value", value)
@@ -348,7 +374,7 @@ def unlock_cats_by_ids(save, ids) -> dict:
     res = {k: [] for k in ("unlocked", "already", "missing", "error_chars", "hidden", "failed")}
     try:
         pb = save.cats.read_nyanko_picture_book(save)
-        obtainable = _picture_book_ids(pb.cats if pb and pb.cats else ())
+        obtainable = obtainable_cat_ids(save, pb.cats) if pb and pb.cats else set()
     except Exception:
         # Never unlock against an unverified/unknown catalog.
         obtainable = set()
@@ -1060,7 +1086,7 @@ def apply_subs_and_others(save, subs_to_apply, others_to_apply):
                         pb = save.cats.read_nyanko_picture_book(save)
                         if not pb or not pb.cats:
                             raise RuntimeError("picture book unavailable")
-                        obtainable_ids = _picture_book_ids(pb.cats)
+                        obtainable_ids = obtainable_cat_ids(save, pb.cats)
                     except Exception:
                         obtainable_ids = set()
                         failures.append(sub)

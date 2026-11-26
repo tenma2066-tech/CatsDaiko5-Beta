@@ -169,6 +169,7 @@ input.search{width:100%;margin-top:12px;font-size:17px;padding:12px 13px;border:
 .cr .no{flex:none;min-width:44px;padding:2px 6px;border-radius:8px;background:var(--soft);font-size:13px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
 .cr .nm{flex:1;min-width:0;font-size:15px;line-height:1.3}
 .cr .nm small{display:block;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr .nm small.cnew{white-space:normal;color:var(--ok,#12a05c);font-weight:700}
 .cr .st{flex:none;font-size:12px;font-weight:800;color:var(--muted)}
 .cr[aria-pressed=true]{background:var(--hit)}
 .cr[aria-pressed=true] .st{color:var(--ok)}
@@ -1100,6 +1101,7 @@ function renderResults(){
   shown.forEach(c=>{
     const b=el('button','cr'); b.type='button'; b.dataset.n=String(c.n); b.setAttribute('aria-pressed',sel.has(c.n)?'true':'false');
     const nm=el('span','nm',c.name); if(c.alt) nm.append(el('small',null,c.alt));
+    if(c.isNew) nm.append(el('small','cnew','NEW：ゲームを最新版にしたアカウントの引き継ぎで解放できます'));
     b.append(el('span','no',String(c.n)),nm,el('span','st',sel.has(c.n)?'選択中 ✓':'追加'));
     b.addEventListener('click',()=>toggleNum(c.n));
     box.append(b);
@@ -1155,7 +1157,7 @@ async function loadCats(){
     const j=await r.json(); CATSTATE=j.state; CATSERR=j.error||'';
     if(j.state==='ready'&&catalogSignature!==JSON.stringify([j.version,j.updated,j.items])){
       catalogSignature=JSON.stringify([j.version,j.updated,j.items]);
-      CATS=j.items.map(c=>({n:c.n,name:c.name,alt:c.alt,key:kana(c.name+' '+c.alt)}));
+      CATS=j.items.map(c=>({n:c.n,name:c.name,alt:c.alt,isNew:!!c.new,key:kana(c.name+' '+c.alt)}));
       NAMEOF.clear(); CATS.forEach(c=>NAMEOF.set(c.n,c.name));
       chipSig=null;
     }

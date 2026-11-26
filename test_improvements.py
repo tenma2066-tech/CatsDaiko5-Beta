@@ -263,7 +263,7 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(build.call_args.args[2], '15.10.0')
             self.assertEqual(A._catalog_update['status'], 'ready')
             self.assertEqual(A._names['version'], '15.10.0')
-            self.assertEqual(len(A._names['items']), 2)
+            self.assertEqual(len([i for i in A._names['items'] if not i.get('new')]), 2)   # new＝配布元にまだ無い新キャラの補足（engine.SUPPLEMENT_CATS）
             before = A._names.copy()
             build.side_effect = ValueError('SECRET_RESPONSE')
             A._run_lock.acquire()

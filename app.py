@@ -65,9 +65,9 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.19"
+APP_VERSION = "1.20"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
-CAT_NAMES_CACHE_SCHEMA = 2
+CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
 # ---------------------------------------------------------------- 1. 設定・料金の読み込み
 def _read_admin_password() -> str:
@@ -293,6 +293,10 @@ def _set_names(names: dict, method, version=None) -> None:
         for cid in sorted(names):
             forms = names[cid]
             items.append({"n": cid + DB_OFFSET, "name": forms[0], "alt": " / ".join(forms[1:])})
+        # 配布元のデータにまだ無い新キャラ。解放できるのは、Ver16.0 以降のゲームのセーブ（引き継ぎ）のときだけ
+        for cid, forms in sorted(engine.SUPPLEMENT_CATS.items()):
+            if cid not in names:
+                items.append({"n": cid + DB_OFFSET, "name": forms[0], "alt": " / ".join(forms[1:]), "new": 1})
         version = version or _effective_version()
         _names.update(state="ready", items=items, method=method, error=None,
                       version=version, updated=time.time(), refreshing=False)
@@ -1130,6 +1134,14 @@ def _apply_edits(job: dict, save, items, subs, others, qty, cat_nums, cat_settin
             if r["failed"]:
                 label = "キャラ解放・個別設定" if settings else "キャラ解放"
                 msg = f"{label}に失敗: {_compress([i + DB_OFFSET for i in r['failed']])}"
+                job["warn"].append(msg)
+                _log(job, "注意: " + msg)
+            newest = [i for i in r["missing"] + r["hidden"] if i in engine.SUPPLEMENT_CATS]
+            if newest:                               # 新キャラ：セーブが古い版のゲームのもの → 最新版にしてから
+                r["missing"] = [i for i in r["missing"] if i not in newest]
+                r["hidden"] = [i for i in r["hidden"] if i not in newest]
+                msg = (f"新キャラ {_compress([i + DB_OFFSET for i in newest])} は、ゲームを最新版"
+                       f"（Ver{engine.SUPPLEMENT_MIN_VERSION.rsplit('.0', 1)[0]}以降）にしたアカウントでだけ解放できます。今回は解放していません。")
                 job["warn"].append(msg)
                 _log(job, "注意: " + msg)
             for key, label in (
