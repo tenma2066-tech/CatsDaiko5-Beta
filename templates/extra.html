@@ -489,7 +489,8 @@ function showDone(res,order){
   clearInterval(watchTimer); watchTimer=null;
   if(res.coupon) keepCode(res);
   $('#payPanel').hidden=true; document.body.style.overflow='';
-  loadMine(res.coupon||order||payOrder);
+  const mark=res.coupon||order||payOrder; payOrder=null;
+  loadMine(mark);
 }
 /* 取れなかったときは null（「注文が無い」とは区別する。区別しないと、通信が一度こけただけで見張りをやめてしまう） */
 async function fetchMine(){ try{ const r=await fetch('/api/orders/mine',{cache:'no-store'}); return r.ok?((await r.json()).orders||[]):null; }catch(e){ return null; } }
@@ -529,7 +530,7 @@ async function loadMine(highlight){
   const shown=new Set();
   list.forEach(o=>{
     if(o.state==='done'&&o.result&&o.result.download){ root.append(downloadRow(o,o.order===highlight)); return; }
-    if(o.state==='done'&&o.result){ shown.add(o.result.coupon); root.append(codeRow(o.result,o.result.coupon===highlight)); return; }
+    if(o.state==='done'&&o.result){ if(o.result.coupon) keepCode(o.result); shown.add(o.result.coupon); root.append(codeRow(o.result,o.result.coupon===highlight)); return; }
     const box=el('div','item');
     box.append(el('div',null,(o.breakdown[0]||{}).label||'ご注文'), el('div','meta',yen(o.amount)+'　／　'+(STATE_JA[o.state]||o.state)));
     if(['unpaid','hold','paid'].includes(o.state)){

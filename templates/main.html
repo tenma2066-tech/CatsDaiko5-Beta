@@ -401,6 +401,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 .humanbox{display:flex;justify-content:center;min-height:65px;margin:10px 0 4px}
 </style><link rel="stylesheet" href="/static/qa.css?v=3">
 </head><body>
+<div class="maintbar" id="maintBar" hidden><b>メンテナンス中</b><span id="maintMsg"></span> <a id="maintLink" href="#" hidden rel="noopener">新しいサイトを開く</a></div>
 
 <div class="wrap"><header>
   <div class="top"><div class="brand"><h1>にゃんこ代行</h1><small>by <b>{{ shop_name }}</b></small></div><button type="button" class="btn" id="helpBtn">使い方・よくある質問</button></div>
@@ -708,7 +709,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="modal" id="payPanel" role="dialog" aria-modal="true" aria-labelledby="payTitle" hidden>
   <div class="mbox">
     <h2 id="payTitle">PayPayでお支払い</h2>
-    <p class="ordno">受付番号 <code id="payOrderShort"></code> <button type="button" class="btn mini" id="payCopy">番号をコピー</button><code id="payOrderNo" hidden></code><br><small>画面を閉じても、コピーした番号で再開できます。お問い合わせのときもこの番号をお伝えください。</small></p>
+    <p class="ordno">注文番号 <code id="payOrderShort" style="user-select:all;word-break:break-all"></code> <button type="button" class="btn mini" id="payCopy">番号をコピー</button><code id="payOrderNo" hidden></code><br><small>画面を閉じても、コピーした番号で再開できます。お問い合わせのときもこの番号をお伝えください。</small></p>
     <div class="payamt"><b id="payAmount"></b><span>円</span></div>
     <ul class="paylist" id="payList"></ul>
     <div class="payerr" id="paySkip" data-lv="wait" hidden><b>実行されない項目</b><span id="paySkipList"></span><span>これらは料金に含まれません。</span></div>
@@ -812,12 +813,11 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <div id="reviewForm"></div>
   </div>
 </div>
-<div class="maintbar" id="maintBar" hidden><b>メンテナンス中</b><span id="maintMsg"></span> <a id="maintLink" href="#" hidden rel="noopener">新しいサイトを開く</a></div>
 <div class="maintwall" id="maintWall" hidden><div class="mbox"><h2>メンテナンス中</h2><p id="maintWallMsg"></p><p><a id="maintWallLink" class="btn pri" href="#" hidden rel="noopener" style="display:inline-block;padding:12px 18px;text-decoration:none">新しいサイトを開く</a></p><p class="sub">すでに支払い済み・保留中の注文がある方は、同じブラウザでこのページを開き直すと続きを確認できます。</p></div></div>
 <div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="/static/review.js?v=3"></script>
+<script src="/static/review.js?v=4"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAINT={{ maint|tojson }};
@@ -885,7 +885,7 @@ function updateBar(){
 }
 function goNext(){
   const st=stepOf(curView);
-  if(st===4){ show('start'); return; }
+  if(st===4){ show('start'); refresh(); return; }
   if(curView==='start'){ show(special()?'input':lastMenu); return; }
   if(st===1){
     if(parseNums($('#chars').value).err){ show('chars'); toast('キャラ番号を確認してください'); return; }
@@ -981,6 +981,9 @@ function normLegend(){
   document.querySelectorAll('input[name=subs]:checked').forEach(x=>{ const k=LEG.exec(x.value); if(k&&legLv(k)!==best[k[1]]) x.checked=false; });
 }
 /* イベステ：前提（大狂乱←狂乱、絶・○○←○○）を満たさないものは押せない */
+/* 選んだイベントのうち、前提のマップを一緒に選んでいないものがあるか（「クリア済み」のチェックに頼っている） */
+function needEvPre(){ const on=new Set(picked('events')); return $$('input[name=events][data-req]:checked').some(x=>!x.dataset.req.split(',').every(r=>on.has(r))); }
+function newNums(nums){ const s=new Set(CATS.filter(c=>c.isNew).map(c=>c.n)); return nums.filter(n=>s.has(n)); }
 function evDeps(){
   const pre=$('#evPre')&&$('#evPre').checked;
   const on=new Set(picked('events'));
@@ -1229,6 +1232,9 @@ function renderChecks(pc,qm,total){
     if(configured.length) add('ok','個別強化：レベル '+levels+'体・形態 '+forms+'体・本能 '+talents+'体');
     const ex=pc.nums.filter(n=>ERRNUMS.includes(n));
     if(ex.length) add('warn','エラーキャラになる番号は自動で除外します：'+compress(ex));
+    const nw=newNums(pc.nums);
+    if(nw.length&&!t) add('bad','新キャラ（'+compress(nw)+'）は、ゲームを最新版にしたアカウントの引き継ぎでだけ解放できます。番号を外すか、引継ぎコードを入れてください。');
+    else if(nw.length) add('warn','新キャラ（'+compress(nw)+'）は、ゲームが最新版になっていないアカウントでは解放されません（その場合も料金はかかります）。');
   }
   const t=$('#transfer').value.trim(), c=$('#confirm').value.trim();
   if(!t!==!c) add('bad','引継ぎコードと暗証番号が片方だけです。');
@@ -1236,6 +1242,7 @@ function renderChecks(pc,qm,total){
   if(ptc.err) add('bad',ptc.err);
   if(ptc.min>0&&picked('others').includes('プレイ時間カンスト')) add('bad','「プレイ時間カンスト」と「プレイ時間を増やす」は同時に選べません。');
   if(restartOn()&&(t||c)) add('bad','初期垢作成は新しいアカウントで行います。引継ぎコードと暗証番号を空欄にしてください。');
+  if(!t&&$('#evPre')&&$('#evPre').checked&&needEvPre()) add('bad','「前提のステージはクリア済み」は、引継ぎコードを入れたアカウントでだけ使えます。新しいアカウントでは、前提のマップも一緒に選んでください。');
   if(needOld()&&!special()){
     if(!t) add('bad','真レジェンドは、旧レジェンドの冠1まで終わっていないと遊べません。新しいアカウントでは、旧レジェンドの段階も一緒に選んでください。');
     else if(!$('#oldDone').checked) add('bad','真レジェンドだけを頼むときは、「サブ」で「旧レジェンドの冠1はクリア済み」にチェックするか、旧レジェンドの段階も選んでください。');
@@ -1470,10 +1477,14 @@ function renderNow(j){
   let t, p;
   if(j.status==='queued'){ t='順番待ちです（あと '+j.queue_position+' 件）。このままお待ちください。'; p=4; }
   else if(j.status==='done'){ t=j.dry?'試運転が終わりました（コードは発行していません）。':'完了しました！下の引継ぎコードと暗証番号を控えてください。'; p=100; }
-  else if(j.status==='error'){ t='うまくいきませんでした。'+(PAYMENTS?'お支払いはそのまま有効です（再送金は不要）。内容を直して、もう一度実行できます。':''); p=100; }
+  else if(j.status==='error'){
+    const retry=PAYMENTS&&!j.outcome_unknown&&!j.result;   /* やり直せるのは、何も発行されていない失敗だけ（下の案内と同じ条件） */
+    t=isCancel(j)?'順番待ちを取り消しました。':'うまくいきませんでした。'+(retry?'お支払いはそのまま有効です（再送金は不要）。内容を直して、もう一度実行できます。'
+      :PAYMENTS?'下の内容をご確認ください。解決しないときは、注文番号を添えてお問い合わせください。':''); p=100; }
   else { const k=Math.max(1,Math.min(4,j.step||1)); t=NOW_MSG[k-1]+' 画面はこのままでお待ちください。'; p=Math.round((k-0.5)/4*100); }
   m.textContent=t; m.dataset.s=j.status; bar.style.width=p+'%'; bar.dataset.s=j.status;
 }
+function isCancel(j){ return /^順番待ちを取り消しました/.test((j&&j.error)||''); }
 function renderJob(j){
   renderSteps(j); renderNow(j);
   $('#log').textContent=j.status==='queued'?'待機中（順番: '+j.queue_position+'）':j.log.join('\n');
@@ -1530,19 +1541,24 @@ async function poll(){
     const j=await r.json();
     if(!r.ok){
       sessionStorage.removeItem('job'); curJob=null; stopJob();
+      $('#cancel-queue').hidden=true;
+      { const m=$('#nowMsg'); if(m){ m.textContent='この実行の記録は、表示できる期限を過ぎました。結果は「① メニュー」画面の上の「未完了の注文」から確認できます。'; m.dataset.s='idle'; } }
       $('#fail').hidden=false; $('#fail').textContent=j.error||'状況を取得できませんでした';
+      loadResume();   /* 注文に残っている結果（評価がまだなら評価の入力）を出す */
       return;
     }
     lastOk=Date.now(); fails=0;
     renderJob(j);
     if(j.status==='done'&&j.result_locked){   /* 完了。結果は、評価と感想を送るとサーバーから届く → 送信後にもう一度取りに行く */
-      stopJob(); rvOpen({job:curJob},()=>poll()); return;
+      const job=curJob; stopJob(); markDoneJob(job); rvOpen({job:job},()=>{ if(curJob===job||!curJob) watch(job); }); return;
     }
     if(j.status!=='running'&&j.status!=='queued'){
+      if(j.status==='done') markDoneJob(curJob);
       stopJob(); setTimeout(loadResume,1500);
-      document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):'失敗 | ')+'にゃんこ代行';
+      try{ sessionStorage.removeItem('job'); }catch(e){}   /* 終わった実行は、再読み込みで開き直さない（前のコードが出て、入力中の内容が消える） */
+      document.title=(j.status==='done'?(j.dry?'試運転完了 | ':j.clone?'複製完了 | ':'完了 | '):isCancel(j)?'取り消し | ':'失敗 | ')+'にゃんこ代行';
       if(j.status==='done'&&j.result&&!j.dry){ keepResult(curJob,j); openDone(j); if(PAYMENTS) fetchCoupon(curJob); $('#transfer').value=''; $('#confirm').value=''; refresh(); }
-      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown&&!j.result){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① メニュー」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
+      if(j.status==='error'&&PAYMENTS&&!j.outcome_unknown&&!j.result&&!isCancel(j)){ $('#fail').textContent=(j.error||'エラーが発生しました')+'　※お支払いは有効です。「① メニュー」画面の上の「未完了の注文」から、再送金なしで再実行できます。'; }
       if(j.status==='done'){toast(j.integrity_only?(j.integrity&&j.integrity.upload_required?'保全修復・再登録が完了しました':'バン保証の検査が完了しました'):j.dry?'試運転が完了しました':j.clone?'複製が完了しました':'完了しました'); if(navigator.vibrate) navigator.vibrate(120);}
     }
   }catch(e){fails++; renderState();} /* 一時的な通信エラーは次回に再試行 */
@@ -1611,9 +1627,12 @@ function currentPreset(name){
   const nums=parseNums($('#chars').value).nums, cats={};
   nums.forEach(n=>{ if(catSettings[n]) cats[n]=catSettings[n]; });
   return {name, items:picked('items'), subs:picked('subs'), others:picked('others'), events:picked('events'), qty:qtyMap(),
-          chars:$('#chars').value, cats, safe:$('#safe').checked, dry:$('#dry').checked};
+          chars:$('#chars').value, cats, safe:$('#safe').checked, dry:$('#dry').checked,
+          evPre:!!($('#evPre')&&$('#evPre').checked), oldDone:!!($('#oldDone')&&$('#oldDone').checked)};
 }
 function applyPreset(p,silent){
+  if($('#evPre')) $('#evPre').checked=!!p.evPre;      /* 先に戻す：あとだと、前提つきのマップのチェックが外される */
+  if($('#oldDone')) $('#oldDone').checked=!!p.oldDone;
   ['items','subs','others','events'].forEach(g=>$$('input[name='+g+']').forEach(e=>e.checked=(p[g]||[]).includes(e.value)));
   $$('input.q').forEach(e=>e.value=(p.qty&&p.qty[e.dataset.item]!=null)?String(p.qty[e.dataset.item]):'');
   $('#chars').value=p.chars||'';
@@ -1693,8 +1712,12 @@ async function start(){
     const go=$('#go'); go.disabled=true; go.textContent='注文を確認中…';
     const restore=()=>{ go.disabled=false; go.textContent=goLabel(); };
     try{
-      const r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(runBody(t,c))});
-      const j=await r.json();
+      let r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(runBody(t,c))});
+      let j=await r.json();
+      if(r.status===409&&j.code==='credit_confirm'){   /* 支払い済みの注文を、今回の（安い）注文に充てるか → 聞いてから、答えを付けて送り直す */
+        r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign(runBody(t,c),{use_credit:confirm(j.error)}))});
+        j=await r.json();
+      }
       restore();
       if(!r.ok){ $('#orderErr').textContent=j.error||'注文を作成できませんでした'; if(j.code==='maintenance'){ applyMaint({on:true,message:j.error,url:j.url||''},false); } $('#orderErr').scrollIntoView({block:'center'}); return; }
       if(j.order){ openPay(j.order,j.amount,j.breakdown,j.skipped,j.state); return; }
@@ -1759,12 +1782,14 @@ function saveDraft(){
   draftTimer=setTimeout(()=>{ try{
     const d=currentPreset('draft'); d.transfer=$('#transfer').value; d.confirm=$('#confirm').value;
     d.mode=$('#integrity').checked?'integrity':$('#clone').checked?'clone':restartOn()?'restart':'normal'; d.view=curView;
+    d.ptH=$('#ptH')?$('#ptH').value:''; d.ptM=$('#ptM')?$('#ptM').value:'0'; d.coupon=$('#coupon')?$('#coupon').value:'';
     sessionStorage.setItem(DKEY,JSON.stringify(d));
   }catch(e){} },300);
 }
 function restoreDraft(){
   try{
     const d=JSON.parse(sessionStorage.getItem(DKEY)||'null'); if(!d) return null;
+    if($('#ptH')) $('#ptH').value=d.ptH||''; if($('#ptM')&&d.ptM) $('#ptM').value=d.ptM; if($('#coupon')) $('#coupon').value=d.coupon||'';
     applyPreset(d,true);
     $('#transfer').value=d.transfer||''; $('#confirm').value=d.confirm||'';
     $('#integrity').checked=d.mode==='integrity'; $('#clone').checked=d.mode==='clone';
@@ -1829,7 +1854,7 @@ function payError(j,fallback,lv){
 }
 function openPay(id,amount,breakdown,skipped,state){
   watchOrders(true);
-  payOrder=id; $('#payOrderNo').textContent=id; $('#payOrderShort').textContent='TN-'+String(id).slice(0,8); payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
+  payOrder=id; $('#payOrderNo').textContent=id; $('#payOrderShort').textContent=id;   /* 省略せずに出す（コピーできない端末でも、書き写して「注文番号」欄に入れられる） */ payDead=false; setHold(false); $('#payPanel').hidden=false; $('#payErr').hidden=true; $('#payLink').value='';
   $('#payAmount').textContent=Number(amount).toLocaleString('ja-JP');
   const ul=$('#payList'); ul.textContent='';
   (breakdown||[]).forEach(r=>{ const li=document.createElement('li'); li.textContent=r.label+' '+r.count+'件 × '+r.unit+'円'; ul.append(li); });
@@ -1837,7 +1862,7 @@ function openPay(id,amount,breakdown,skipped,state){
   $('#paySkip').hidden=!(skipped&&skipped.length); $('#paySkipList').textContent=(skipped||[]).join('・');
   $('#payGo').disabled=false; document.body.style.overflow='hidden';
   if(state==='hold') setHold(true);
-  else if(state==='paid'){ $('#payLinkField').hidden=true; $('#payGo').textContent='支払い済み・実行を開始'; $('#payInfo').textContent='支払いは確認済みです。ボタンを押すと実行を開始します（再送金は不要です）。'; }
+  else if(state==='paid'){ $('#payLinkField').hidden=true; $('#paySteps').hidden=true; $('#payGo').textContent='支払い済み・実行を開始'; $('#payInfo').textContent='支払いは確認済みです。ボタンを押すと実行を開始します（再送金は不要です）。'; }
   else setTimeout(()=>$('#payLink').focus(),50);
 }
 let holdTimer=null, holdTries=0;
@@ -1938,7 +1963,7 @@ function applyMaint(m,hasOrders){
   $('#maintMsg').textContent=msg; $('#maintWallMsg').textContent=msg;
   [['#maintLink'],['#maintWallLink']].forEach(([id])=>{ const a=$(id); if(m.url){ a.href=m.url; a.hidden=false; } else a.hidden=true; });
   $('#maintBar').hidden=false;
-  $('#maintWall').hidden=!!hasOrders;   /* 未完了の注文がある人には、続きを見られるよう全面表示にしない */
+  $('#maintWall').hidden=!!hasOrders||IS_ADMIN;   /* 未完了の注文がある人には、続きを見られるよう全面表示にしない。管理者はメンテ中も注文できる */
 }
 /* 結果（引継ぎコード）を見せた注文を、この端末に記録する（タブを開き直しても・X から戻っても残る）。
    これがないと、前の注文のコードを「まだ見ていない」と思って自動で出してしまう（2026-11 の不具合）。 */
@@ -1946,6 +1971,10 @@ const SHOWN_KEY='nyanko-shown-orders';
 function shownOrders(){ try{ const v=JSON.parse(localStorage.getItem(SHOWN_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
 function markShown(order){ if(!order) return; try{ const v=shownOrders(); if(!v.includes(order)) localStorage.setItem(SHOWN_KEY,JSON.stringify(v.concat(order).slice(-50))); }catch(e){} }
 function wasShown(order,seen){ return shownOrders().includes(order)||(seen||[]).includes('r:'+order); }
+/* 終わりまで見届けた実行（評価の入力を出したものも含む）。別のタブで開き直しても、同じ完了をもう一度自動で開かない */
+const DONE_KEY='nyanko-done-jobs';
+function doneJobs(){ try{ const v=JSON.parse(localStorage.getItem(DONE_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function markDoneJob(job){ if(!job) return; try{ const v=doneJobs(); if(!v.includes(job)) localStorage.setItem(DONE_KEY,JSON.stringify(v.concat(job).slice(-30))); }catch(e){} }
 /* 完了・停止・未払いは本人が一覧から消せる（表示だけ・管理台帳には残る） */
 function addDel(o,row){
   const del=el('button','btn del','削除'); del.type='button';
@@ -1969,9 +1998,9 @@ async function loadResume(quiet){
     const j=await r.json(); const list=(j.orders||[]).filter(o=>!o.tsum&&!o.puni&&!o.product);   /* ツム・ぷにの注文は各画面で扱う */
     let seen=[]; try{ seen=JSON.parse(sessionStorage.getItem('nyanko-seen-jobs')||'[]'); }catch(e){}
     // いま見ている（見た）実行の注文は「結果を見せた」として記録する
-    list.forEach(o=>{ if(o.job&&o.job===curJob&&o.state==='done') markShown(o.order); });
+    { const dj=doneJobs(); list.forEach(o=>{ if(o.job&&o.state==='done'&&(o.job===curJob||dj.includes(o.job))) markShown(o.order); }); }
     // 1) 実行が始まった注文（管理者の承認・保留解除・別のタブで戻った など）→ 見ていなければ、その注文の状況画面へ（こちらを優先）
-    const live=list.find(o=>o.job&&(o.state==='started'||o.state==='done')&&!seen.includes(o.job));
+    const live=list.find(o=>o.job&&!seen.includes(o.job)&&(o.state==='started'||(o.state==='done'&&!shownOrders().includes(o.order))));   /* 完了は、この端末で一度見せたものを開き直さない */
     if(live&&!jobRunning&&curJob!==live.job){
       try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat(live.job).slice(-20))); }catch(e){}
       if(payOrder&&payOrder===live.order) closePay();
@@ -1985,14 +2014,20 @@ async function loadResume(quiet){
     //    対象は「いちばん新しい完了の注文」だけ（前の注文のコードを、今回のものと取り違えて出さない）
     const newest=list.find(o=>o.state==='done'&&o.result);
     const saved=(!live&&newest&&!newest.job&&!wasShown(newest.order,seen))?newest:null;
+    const waiting=(!live&&!jobRunning&&$('#donePanel').hidden&&$('#reviewPanel').hidden&&$('#payPanel').hidden)
+      ?list.find(o=>o.state==='done'&&o.locked&&!o.job&&!wasShown(o.order,seen)&&!seen.includes('q:'+o.order)):null;
+    if(waiting){
+      try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat('q:'+waiting.order).slice(-20))); }catch(e){} markShown(waiting.order);
+      show('status'); rvOpen({order:waiting.order},()=>loadResume());
+    }
     if(saved&&!jobRunning&&$('#donePanel').hidden){
-      markShown(saved.order);
+      markShown(saved.order); $('#transfer').value=''; $('#confirm').value='';
       try{ sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(seen.concat('r:'+saved.order).slice(-20))); }catch(e){}
       if(payOrder===saved.order) closePay();
       show('status'); openDone({result:saved.result,clone:saved.clone,coupon:saved.coupon_issued}); keepResult('o:'+saved.order,{result:saved.result,clone:saved.clone});
     }
     // 支払い画面を開いている注文が「支払い済み」になった → その場で開始ボタンに切り替える
-    if(payOrder){ const me=list.find(o=>o.order===payOrder); if(me&&me.state==='paid'&&!$('#payPanel').hidden&&$('#payGo').textContent!=='支払い済み・実行を開始'){ payDead=false; clearInterval(holdTimer); holdTimer=null; $('#payLinkField').hidden=true; $('#payGo').disabled=false; $('#payGo').textContent='支払い済み・実行を開始'; $('#payErr').hidden=true; $('#payInfo').textContent='お支払いが確認できました。ボタンを押すと実行を開始します（再送金は不要です）。'; } }
+    if(payOrder){ const me=list.find(o=>o.order===payOrder); if(me&&me.state==='paid'&&!$('#payPanel').hidden&&$('#payGo').textContent!=='支払い済み・実行を開始'){ payDead=false; clearInterval(holdTimer); holdTimer=null; $('#payLinkField').hidden=true; $('#paySteps').hidden=true; $('#payGo').disabled=false; $('#payGo').textContent='支払い済み・実行を開始'; $('#payErr').hidden=true; $('#payInfo').textContent='お支払いが確認できました。ボタンを押すと実行を開始します（再送金は不要です）。'; } }
     watchOrders(list.some(o=>['unpaid','hold','paid','dead','starting','paying'].includes(o.state)||(o.state==='started'&&o.job)));
     applyMaint(j.maint,list.some(o=>o.state!=='unpaid'));
     const box=$('#resumeList'); box.textContent='';
@@ -2024,7 +2059,7 @@ async function loadResume(quiet){
         const b=el('button','btn',o.state==='paid'?(o.retry?'同じ内容でもう一度実行':'実行を開始する'):o.state==='hold'?'状況を確認する':'支払い画面を開く'); b.type='button';
         b.addEventListener('click',()=>openPay(o.order,o.amount,o.breakdown,o.skipped,o.state));
         row.append(b); if(o.state==='unpaid') addDel(o,row); box.append(row);
-        if(o.state==='paid'&&o.retry) box.append(el('p','note','前回は実行できませんでした。お支払いは有効です（再送金は不要）。引継ぎコードなどを直したい場合は、入力し直して「決済して実行」を押すと、この支払いがそのまま使われます（同じ金額以下のとき）。'));
+        if(o.state==='paid'&&o.retry) box.append(el('p','note','前回は実行できませんでした。お支払いは有効です（再送金は不要）。引継ぎコードなどを直したい場合は、入力し直して「決済して実行」を押すと、この支払いがそのまま使われます（同じ金額以下のとき。安くなる場合は、充てるかどうかを先に確認します）。'));
       }
     });
   }catch(e){}

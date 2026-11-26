@@ -272,8 +272,8 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="note" id="payOrderNo"></p>
 </div></div>
 
-<script src="/static/review.js?v=3"></script>
-<script src="/static/shop.js?v=8"></script>
+<script src="/static/review.js?v=4"></script>
+<script src="/static/shop.js?v=11"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
@@ -432,10 +432,14 @@ const orders=ShopOrders({
   shop:'puni', payments:PAYMENTS, couponMin:COUPON_MIN,
   review:{min:{{ review_min }},max:{{ review_max }},pastUrl:{{ past_reviews_url|tojson }}}, isAdmin:IS_ADMIN,
   isBusy:()=>!!curJob, watch, afterClose:renderCart,
-  result:{ has:o=>!!(o.result&&o.result.puni_account), label:'アカウント情報を見る', name:'結果（アカウント情報）', show:o=>{
+  result:{ has:o=>!!(o.result&&o.result.puni_account)||!!(o.outcome&&o.outcome.lines&&o.outcome.lines.length),
+    label:o=>(o.result&&o.result.puni_account)?'アカウント情報を見る':'結果を見る', name:'結果（アカウント情報）', show:o=>{
+    const acc=o.result&&o.result.puni_account;
     $('#s-status').hidden=false; $('#codes').textContent=''; delete $('#codes').dataset.done;
-    $('#now').dataset.s='done'; $('#now').textContent='完了した注文のアカウント情報です'; $('#pbar').style.width='100%'; $('#pbar').dataset.s='done';
-    showAccounts(o.result.puni_account,false); $('#s-status').scrollIntoView({behavior:'smooth',block:'start'}); } }
+    $('#now').dataset.s='done'; $('#now').textContent=acc?'完了した注文のアカウント情報です':'完了した注文の結果です'; $('#pbar').style.width='100%'; $('#pbar').dataset.s='done';
+    $('#resultLines').textContent=(o.outcome&&o.outcome.lines||[]).join('\n'); $('#log').textContent=''; $('#longBox').hidden=true;
+    $('#coupBox').hidden=!o.coupon_issued; if(o.coupon_issued) $('#coupBox').textContent='🎟 次回使えるクーポン '+o.coupon_issued+'（次回 {{ coupon_min }}円以上のご注文で10%引き・1回きり・30日間）';
+    if(acc) showAccounts(acc,false); $('#s-status').scrollIntoView({behavior:'smooth',block:'start'}); } }
 });
 const {api,copyText,markSeen}=orders;
 
@@ -460,8 +464,12 @@ $('#go').addEventListener('click',async()=>{
   }
   $('#go').disabled=true; $('#go').textContent='送信中…';
   try{
-    const r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())});
-    const j=await r.json();
+    let r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())});
+    let j=await r.json();
+    if(r.status===409&&j.code==='credit_confirm'){   /* 支払い済みの注文を、今回の（安い）注文に充てるか → 聞いてから、答えを付けて送り直す */
+      r=await api('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign(body(),{use_credit:confirm(j.error)}))});
+      j=await r.json();
+    }
     if(!r.ok){ $('#runErr').textContent=j.error||'注文できませんでした。'; return; }
     $('#runErr').textContent='';
     if(j.job){ watch(j.job); return; }
@@ -471,7 +479,7 @@ $('#go').addEventListener('click',async()=>{
 });
 
 /* ---------- 状況 ---------- */
-let pollFails=0, pollEvery=1500, isLong=false;
+let pollFails=0, pollEvery=1500, isLong=false, stopAsked=null;   /* stopAsked＝「ここで終了」を送った実行 */
 $('#stopLong').addEventListener('click',async()=>{
   if(!curJob) return;
   if(!confirm('ここで終了しますか？\nいまの1周が終わったところで止まります。残りの周回ぶんの返金はありません。')) return;
@@ -479,7 +487,7 @@ $('#stopLong').addEventListener('click',async()=>{
   try{
     const r=await fetch('/api/jobs/'+curJob+'/stop',{method:'POST'}); const j=await r.json().catch(()=>({}));
     if(!r.ok){ alert(j.error||'終了できませんでした。'); $('#stopLong').disabled=false; return; }
-    $('#stopLong').textContent='終了を受け付けました（いまの1周が終わると止まります）';
+    $('#stopLong').textContent='終了を受け付けました（いまの1周が終わると止まります）'; stopAsked=curJob;
   }catch(e){ alert('通信できませんでした。'); $('#stopLong').disabled=false; }
 });
 function watch(job){
@@ -501,12 +509,14 @@ async function poll(){
   let j;
   try{ const r=await fetch('/status/'+curJob,{cache:'no-store'}); j=await r.json();
     if(r.status===404){   /* 実行の記録はもう無い（完了から30分以上など）。待っても戻らないので、すぐ注文の一覧へ */
-      stopWatch(); $('#now').dataset.s='error'; $('#now').textContent='この実行の表示期限が過ぎました。下の「このブラウザの注文」から結果を確認できます。'; orders.loadResume(); return; }
-    if(!r.ok) throw new Error(j.error||'error'); pollFails=0; }
+      stopWatch(); $('#cancelQueue').hidden=true; $('#longBox').hidden=true; $('#stopLong').hidden=true; $('#now').dataset.s='error'; $('#now').textContent='この実行の記録は、もう表示できません（完了から時間がたった・サーバーの入れ替え）。下の「このブラウザの注文」から、状況と結果を確認できます。'; orders.loadResume(); return; }
+    if(!r.ok) throw new Error(j.error||'error');
+    if(pollFails>=20){ clearInterval(timer); timer=setInterval(poll,pollEvery); }   /* つながった → もとの間隔に戻す */
+    pollFails=0; }
   catch(e){
-    if(++pollFails>=20){
-      stopWatch(); $('#now').dataset.s='error';
-      $('#now').textContent='状況を確認できなくなりました。下の「注文」から結果を確認できます。'; orders.loadResume();
+    if(++pollFails>=20){   /* しばらくつながらない。見張りはやめず、ゆっくり確かめ続ける（つながり次第、続きを出す） */
+      $('#now').textContent='通信できていません。つながり次第、続きを表示します（下の「このブラウザの注文」からも確認できます）。';
+      if(pollFails===20){ clearInterval(timer); timer=setInterval(poll,8000); orders.loadResume(); }
     } else { $('#now').textContent='状況を確認しています…（通信が不安定です）'; }
     return;
   }
@@ -515,10 +525,10 @@ async function poll(){
   isLong=!!j.long;
   $('#now').textContent=st==='queued'?(isLong?('長時間メニューの順番待ちです（'+(j.queue_position||1)+'番目）。前の方の周回が終わると自動で始まります。画面は閉じても大丈夫です')
                                               :('順番待ちです（'+(j.queue_position||1)+'番目）。そのままお待ちください')):
-    st==='done'?'完了しました':st==='error'?('エラー：'+(j.error||'')+(PAYMENTS&&!j.outcome_unknown?'　※お支払いは有効です。下の「このブラウザの注文」から、続きを実行できます（再送金は不要）。':'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
+    st==='done'?'完了しました':st==='error'?((/^順番待ちを取り消しました/.test(j.error||'')?'':'エラー：')+(j.error||'')+(PAYMENTS&&!IS_ADMIN&&!j.outcome_unknown&&!/^順番待ちを取り消しました/.test(j.error||'')?'　※お支払いは有効です。下の「このブラウザの注文」から、続きを実行できます（再送金は不要）。':'')):((j.log&&j.log.length)?j.log[j.log.length-1].slice(9):'実行しています…');
   $('#longBox').hidden=!(isLong&&(st==='running'||st==='queued'));
   $('#stopLong').hidden=st!=='running';
-  $('#stopLong').disabled=!!j.stopping; if(j.stopping) $('#stopLong').textContent='終了を受け付けました（いまの1周が終わると止まります）';
+  $('#stopLong').disabled=!!j.stopping||stopAsked===curJob; if(j.stopping) $('#stopLong').textContent='終了を受け付けました（いまの1周が終わると止まります）';
   /* 長時間の実行は、状況の確認をゆっくりに（何時間も1.5秒おきに問い合わせない） */
   if(isLong&&st==='running'&&pollEvery!==6000){ pollEvery=6000; clearInterval(timer); timer=setInterval(poll,pollEvery); }
   const pct=st==='done'?100:Math.round(Math.min(1,(j.step||0)/TOTAL_STEPS)*100);
@@ -528,7 +538,7 @@ async function poll(){
   if(st==='done'||st==='error') delete $('#codes').dataset.done;   /* 前に開いた別の注文の結果が残っていても、この実行の結果で描き直す */
   if(j.result&&j.result.puni_account) showAccounts(j.result.puni_account, st==='error');
   if(st==='done'||st==='error'){
-    const job=curJob; stopWatch(); orders.loadCoupon(job); orders.loadResume();
+    const job=curJob; stopWatch(); if(st==='done') orders.markDone(job); orders.loadCoupon(job); orders.loadResume();
     if(st==='done'&&j.result_locked) orders.requireReview(job,()=>watch(job));   /* 評価を送ると、サーバーが結果を渡す → 取り直して表示 */
     if(st==='done'&&navigator.vibrate) navigator.vibrate(120);
   }

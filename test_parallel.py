@@ -129,7 +129,13 @@ class ParallelJobTests(unittest.TestCase):
         return self.client.post("/run", json={"transfer": transfer, "confirm": confirm, "items": ["XP"], "dry": dry})
 
     def status(self, job_id):
-        return self.client.get("/status/" + job_id).get_json()
+        data = self.client.get("/status/" + job_id).get_json()
+        # 実行の途中の結果は、/status では返さない（複製の元コードが評価の前に見えないように）。
+        # 試験用のワーカーが実行中に書く印（pid など）は、内部の記録から読む。
+        if data.get("result") is None and data.get("status") in ("running", "queued"):
+            with A._jobs_lock:
+                data["result"] = (A._jobs.get(job_id) or {}).get("result")
+        return data
 
     def test_default_and_configured_limits(self):
         for configured, expected in ((None, 4), ("3", 3)):

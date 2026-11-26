@@ -94,11 +94,15 @@ class ResultCodesNotMixedUp(unittest.TestCase):
         """同じタブを再読み込みして戻ってきた。"""
         pg, _ = self._page(live=True)
         pg.goto(self.url + "nyanko")
-        pg.evaluate("()=>{sessionStorage.setItem('job','J2'); sessionStorage.setItem('nyanko-seen-jobs',JSON.stringify(['J2']));}")
+        self.assertEqual(self._shown(pg)["done"], ["NEW222bbb", "2222"])     # 今回のコードが出る
+        self.assertIsNone(pg.evaluate("()=>sessionStorage.getItem('job')"))    # 終わった実行は、再読み込みで開き直さない
         pg.reload()
         s = self._shown(pg)
-        self.assertEqual(s["done"], ["NEW222bbb", "2222"])
+        # 再読み込みのたびにコードの画面を出し直さない（入力中の内容が消え、次の注文の邪魔になる）。前のコードも出さない
+        self.assertIsNone(s["done"])
         self.assertNotIn("OLD111aaa", s["hist"])
+        self.assertIn("NEW222bbb", s["hist"])                                 # 今回のコードは、履歴と一覧からいつでも見られる
+        self.assertIn("コードを見る", pg.inner_text("#resumeList"))
 
     def test_after_expiry_shows_newest_once(self):
         """30分以上たち、今回のジョブもサーバーから消えた：いちばん新しい注文を1回だけ出す。"""

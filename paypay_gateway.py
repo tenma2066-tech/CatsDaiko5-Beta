@@ -874,11 +874,15 @@ def coupon_release(code: str, order_id: str) -> None:
                    (time.time(), code, order_id))
 
 
-def coupon_consume(code: str, order_id: str) -> None:
+def coupon_consume(code: str, order_id: str) -> bool:
+    """クーポンを使用済みにする。使えるのは、この注文が押さえているもの（または、まだだれも押さえていないもの）だけ。
+    ほかの注文が押さえている・もう使われているときは False（同じクーポンで2つの注文が安くならないように）。"""
     with _ledger() as db:
         _coupon_table(db)
-        db.execute("UPDATE coupons SET state='used', used_order=COALESCE(used_order, ?), updated=? WHERE code=? AND state IN ('reserved','active')",
-                   (order_id, time.time(), code))
+        cur = db.execute("UPDATE coupons SET state='used', used_order=?, updated=? WHERE code=? "
+                         "AND (state='active' OR (state='reserved' AND used_order=?))",
+                         (order_id, time.time(), code, order_id))
+        return cur.rowcount == 1
 
 
 def coupon_list(limit: int = 100):
@@ -927,7 +931,13 @@ def mark_paid_by_admin(code: str, purchase_id: str):
 _ORDERS_FILE = _ROOT / "orders.enc"
 
 def save_orders(data: dict):
-    raw = _cipher().encrypt(json.dumps(data, ensure_ascii=False).encode())
+    try:
+        text = json.dumps(data, ensure_ascii=False).encode()
+    except UnicodeEncodeError:
+        # 文字として壊れた入力（単独のサロゲート）が1つでも混じると、全部の注文が保存できなくなる。
+        # 入口でも取り除いているが、ここでも止まらないようにする（\uXXXX の形で書けば必ず保存できる）。
+        text = json.dumps(data, ensure_ascii=True).encode()
+    raw = _cipher().encrypt(text)
     if github_runtime_store.enabled():
         try:
             github_runtime_store.write_blob("paypay/orders.enc", raw)

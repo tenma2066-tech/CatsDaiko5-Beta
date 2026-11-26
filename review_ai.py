@@ -16,7 +16,7 @@ import os
 
 MODEL = os.environ.get("REVIEW_AI_MODEL", "claude-haiku-5-5")
 TIMEOUT = 8.0          # 待つ秒数。超えたら「判断できなかった」として通す
-MAX_TOKENS = 200
+MAX_TOKENS = 1500      # 判定そのものは数トークン。考える分（このモデルは既定で考える）も含めて、途中で切れない余裕を持たせる
 _log = logging.getLogger("review_ai")
 
 MESSAGES = {
@@ -63,6 +63,7 @@ def judge(text: str, stars: int):
             messages=[{"role": "user", "content": f"星：{int(stars)}（5が最高）\n<review>\n{text}\n</review>"}],
         )
         if getattr(resp, "stop_reason", None) != "end_turn":      # 途中で切れた・答えなかった → 判断できなかった
+            _log.warning("review check gave no verdict (stop_reason=%s)", getattr(resp, "stop_reason", None))
             return None, ""
         raw = next(b.text for b in resp.content if getattr(b, "type", None) == "text")
         verdict = json.loads(raw).get("verdict")

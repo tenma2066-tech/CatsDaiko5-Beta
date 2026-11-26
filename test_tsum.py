@@ -680,7 +680,9 @@ class Order(unittest.TestCase):
         payload = {"mode": "line", "login": "a@example.com"}
         self.assertEqual(A._lock_subject({"mode": "tsum"}, (payload,)), "tsum:a@example.com")
         self.assertEqual(A._lock_subject({"mode": "download"}, ("abc", "1234")), "abc")
-        self.assertEqual(A._lock_subject({"mode": "tsum"}, ({"mode": "new", "login": ""},)), "tsum:")
+        # 新しいアカウントを作る注文（ログインIDなし）は、共通の鍵を持たない＝作成の注文どうしが締め出し合わない
+        self.assertEqual(A._lock_subject({"mode": "tsum"}, ({"mode": "new", "login": ""},)), "")
+        self.assertEqual(A._lock_subject({"mode": "puni"}, ({"mode": "new", "login": ""},)), "")
 
     def test_tsum_orders_are_separated_from_nyanko_orders(self):
         self.c.post("/run", json=self.body())

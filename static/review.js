@@ -3,7 +3,7 @@
      ReviewForm(置く場所の要素, { min:20, max:400, target:()=>({order, job}), pastUrl:'…', onDone:(saved)=>{} })
 
    送信できたら onDone を呼ぶ。保存先は POST /api/reviews（完了した注文1件につき1つ）。
-   通信に続けて失敗したときは、お客さんを待たせないよう onDone(false) で先へ進める。 */
+   通信できないときは、入力欄を開いたままにする（結果は、サーバーが評価を受け取るまで渡さない）。 */
 (function () {
   "use strict";
   var CSS = ".rvf{display:block}.rvf-stars{display:flex;justify-content:center;gap:4px;margin:6px 0 2px}" +
@@ -26,7 +26,7 @@
 
   window.ReviewForm = function (root, cfg) {
     if (!styled) { styled = true; var st = el("style"); st.textContent = CSS; document.head.append(st); }
-    var min = cfg.min || 20, max = cfg.max || 400, stars = 0, fails = 0, busy = false;
+    var min = cfg.min || 20, max = cfg.max || 400, stars = 0, busy = false;
     root.textContent = ""; root.classList.add("rvf");
 
     var row = el("div", "rvf-stars"); row.setAttribute("role", "radiogroup"); row.setAttribute("aria-label", "評価（星1〜5）");
@@ -84,11 +84,10 @@
         if (r.status === 404) { cfg.onDone(false); return; }        /* 実績の機能が止められている */
         busy = false; refresh(); send.textContent = "実績を送信する";
         err.textContent = j.error || "送信できませんでした。もう一度お試しください。";
-        if (r.status >= 500 && ++fails >= 2) cfg.onDone(false);      /* サーバーの不調が続くときは、先へ進める */
+        /* サーバーの不調が続くときは、サーバーの側で免除して ok を返す（上の r.ok）。ここでは入力欄を閉じない＝書いた文を失わない */
       } catch (e) {
         busy = false; refresh(); send.textContent = "実績を送信する";
         err.textContent = "通信できませんでした。電波の良いところでもう一度お試しください。";
-        if (++fails >= 2) cfg.onDone(false);
       }
     });
     return { focus: function () { btns[0].focus(); } };

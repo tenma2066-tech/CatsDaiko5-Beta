@@ -71,6 +71,10 @@
 
     function seenJobs() { try { var v = JSON.parse(sessionStorage.getItem(SEEN_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
     function markSeen(job) { try { var v = seenJobs(); if (!v.includes(job)) sessionStorage.setItem(SEEN_KEY, JSON.stringify(v.concat(job).slice(-20))); } catch (e) {} }
+    /* 終わりまで見届けた実行は、この端末に覚えておく（別のタブで開き直しても、同じ完了をもう一度自動で開かない） */
+    var DONE_KEY = cfg.shop + "-done-jobs";
+    function doneJobs() { try { var v = JSON.parse(localStorage.getItem(DONE_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+    function markDone(job) { if (!job) return; try { var v = doneJobs(); if (!v.includes(job)) localStorage.setItem(DONE_KEY, JSON.stringify(v.concat(job).slice(-30))); } catch (e) {} }
     async function myOrders() {
       var r = await fetch("/api/orders/mine", { cache: "no-store" });
       var j = await r.json();
@@ -117,6 +121,7 @@
         }
         $("#payPanel").hidden = true; document.body.style.overflow = "";
         cfg.watch(j.job);
+        loadResume();
       } catch (e) { $("#payErr").textContent = "通信エラーです。もう一度お試しください（同じリンクのままで大丈夫です）。"; btn.disabled = false; }
     }
     /* /run の返事（注文ができた）を受け取って、支払いへ進める */
@@ -145,13 +150,18 @@
       var list;
       try { list = await myOrders(); } catch (e) { return; }
       /* 実行が始まった注文（保留の解除・別タブ・開き直し）→ まだ見ていなければ状況を開く */
-      var live = list.find(function (o) { return o.job && o.state === "started" && !seenJobs().includes(o.job); });
+      /* 終わっている実行も含める：保留の解除や管理者の操作のあと、次に確かめるまでのあいだに終わっていることがある */
+      var live = list.find(function (o) { return o.job && !seenJobs().includes(o.job) && (o.state === "started" || (o.state === "done" && !doneJobs().includes(o.job))); });
       if (live && !cfg.isBusy() && !($("#reviewPanel") && !$("#reviewPanel").hidden)) {   /* 評価の入力中は、画面を切り替えない */ if (!$("#payPanel").hidden && payOrder === live.order) { $("#payPanel").hidden = true; document.body.style.overflow = ""; } cfg.watch(live.job); }
       var box = $("#resumeList"); box.textContent = "";
       $("#s-resume").hidden = !list.length;
       list.forEach(function (o) {
         var d = el("div", "code"), t = el("div");
         t.append(el("small", null, STATE_JA[o.state] || o.state), el("strong", null, yen(o.amount) + "（注文 " + o.order + "）"));
+        if (o.state === "done" && o.coupon_issued && !o.locked)   /* 次回クーポンは、あとから開いた人にも見せる */
+          t.append(el("small", null, "🎟 次回クーポン " + o.coupon_issued + "（" + cfg.couponMin + "円以上のご注文で10%引き・1回きり）"));
+        if (o.state === "done" && o.unknown && !cfg.result.has(o))
+          t.append(el("small", null, "途中で止まり、結果を確認できませんでした。注文番号を管理者に伝えてください。"));
         if (o.state === "paid" && o.retry) t.append(el("small", null, o.resume
           ? "途中で止まりました（" + o.resume + "）。お支払いは有効です。続きから実行できます（再送金は不要）。"
           : "前回は実行できませんでした。お支払いは有効です（再送金は不要）。"));
@@ -161,12 +171,12 @@
           b.textContent = "評価を書いて結果を見る";
           b.addEventListener("click", function () { reviewThenShow(o); }); d.append(b);
         } else if (o.state === "done" && cfg.result.has(o)) {
-          b.textContent = cfg.result.label;
+          b.textContent = typeof cfg.result.label === "function" ? cfg.result.label(o) : cfg.result.label;
           b.addEventListener("click", function () { showResult(o); }); d.append(b);
         } else if (o.job && (o.state === "started" || o.state === "done")) {
           b.textContent = o.state === "done" ? "結果を見る" : "状況を見る";
           b.addEventListener("click", function () { cfg.watch(o.job); }); d.append(b);
-        } else if (o.state === "dead") {
+        } else if (o.state === "dead" || (o.state === "done" && o.unknown)) {
           b.textContent = "注文番号をコピー";
           b.addEventListener("click", async function () { b.textContent = (await copyText(o.order)) ? "コピーしました。管理者に伝えてください" : "コピーできません"; });
           d.append(b);
@@ -186,7 +196,15 @@
       /* 保留が解けて支払い済みになった注文を、開いたままの支払いパネルにも反映する */
       var mine = list.find(function (o) { return o.order === payOrder; });
       if (mine && mine.state === "paid" && !$("#payPanel").hidden && !$("#payGo").disabled && $("#payGo").textContent === "今すぐ確認する") openPay(mine.order, mine.amount, "paid");
-      if (list.some(function (o) { return WAITING.includes(o.state) || (o.state === "started" && o.job); })) startOrderWatch(); else stopOrderWatch();
+      /* 開いたままの支払いパネルの注文が、もう先へ進んでいる（別のタブ・管理者の操作）→ 古い画面を残さない */
+      if (mine && !$("#payPanel").hidden) {
+        if (mine.state === "done" || mine.state === "started") { $("#payPanel").hidden = true; document.body.style.overflow = ""; payOrder = null; }
+        else if (mine.state === "dead" && !$("#payGo").disabled) {
+          $("#payErr").textContent = "自動では確認できませんでした。お支払い済みの場合は、注文番号を管理者に伝えてください（再送金は不要です）。";
+          $("#payGo").disabled = true;
+        }
+      }
+      if (list.some(function (o) { return WAITING.includes(o.state) || (o.state === "started" && o.job) || (o.state === "paid" && o.retry && o.long); })) startOrderWatch(); else stopOrderWatch();
     }
     async function forgetOrder(o, row) {
       var msg = (o.state === "done" && cfg.result.has(o))
@@ -261,7 +279,7 @@
         await loadResume();
         try {
           var fresh = (await myOrders()).find(function (x) { return x.order === o.order; });
-          if (fresh && cfg.result.has(fresh)) cfg.result.show(fresh);
+          if (fresh && cfg.result.has(fresh) && !cfg.isBusy()) cfg.result.show(fresh);
         } catch (e) {}
       });
     }
@@ -271,7 +289,7 @@
       cfg.result.show(o);
     }
 
-    return { api: api, postJson: postJson, copyText: copyText, seenJobs: seenJobs, markSeen: markSeen,
+    return { api: api, postJson: postJson, copyText: copyText, seenJobs: seenJobs, markSeen: markSeen, markDone: markDone,
              begin: begin, loadResume: loadResume, loadCoupon: loadCoupon,
              requireReview: requireReview, resetReview: resetReview };
   };

@@ -104,6 +104,31 @@ def clean_words(raw) -> list[str]:
     return out[:200]
 
 
+# 禁止語を「一部に含む」ふつうの言葉。探す前に取り除く（例：プレイ、プレミアム → つなげると「レイプ」／瞬殺 → 「殺して」）
+SAFE_WORDS = ("プレイヤー", "プレイ", "プレー", "プレミアム", "リプレイ", "ディスプレイ", "スプレー", "瞬殺", "秒殺", "必殺", "悩殺", "殺到", "殺菌", "相殺",
+              "ゴミ箱", "ゴミ袋", "ゴミ出し", "バカンス", "バカ売れ", "親バカ", "パチンコ", "雑魚敵", "雑魚キャラ", "雑魚戦", "ザコ敵", "メキシコ", "ピンボケ",
+              "寝ボケ", "ボケ防止", "時差ボケ", "アホウドリ", "ハゲタカ", "デブリ", "ブスッ", "アダルトチルドレン", "風俗習慣", "クズ鉄", "葛")
+_SAFE = re.compile("|".join(re.escape(unicodedata.normalize("NFKC", w).lower()) for w in sorted(SAFE_WORDS, key=len, reverse=True)))
+
+
+def _without_safe(plain: str) -> str:
+    return _SAFE.sub("、", plain)
+
+
+def has_bad_words(text: str, extra_words=()) -> bool:
+    """言葉づかいだけを見る（意見・質問箱用：URL や連絡先は書いてよいが、暴言は断る）。"""
+    plain = _without_safe(normalize(text))
+    tight = squeeze(plain)
+    if any(squeeze(normalize(word)) in tight for word in JA_WORDS):
+        return True
+    if any(len(squeeze(normalize(w))) >= 2 and squeeze(normalize(w)) in tight for w in (extra_words or ())):
+        return True
+    if any(re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", plain) for word in EN_WORDS):
+        return True
+    letters = re.sub(r"[^a-z]", "", plain)
+    return any(word in letters for word in EN_ANYWHERE)
+
+
 def check(text: str, extra_words=()) -> tuple[bool, str, str]:
     """感想を載せてよいか。戻り値は (よいか, 理由のコード, お客さんに見せる文)。"""
     if _INVISIBLE.search(str(text or "")) or _TAG.search(str(text or "")):
@@ -111,7 +136,7 @@ def check(text: str, extra_words=()) -> tuple[bool, str, str]:
     plain = normalize(text)
     if _URL.search(plain) or _HANDLE.search(plain) or _CONTACT.search(plain) or _PHONE.search(squeeze(plain)):
         return False, "ad", MSG_AD
-    tight = squeeze(plain)
+    tight = squeeze(_without_safe(plain))
     for word in JA_WORDS:
         if squeeze(normalize(word)) in tight:
             return False, "bad_words", MSG_WORDS

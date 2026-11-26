@@ -17,6 +17,7 @@ import secrets
 import struct
 import threading
 import time
+import unicodedata
 import urllib.parse
 
 import paypay_gateway
@@ -41,7 +42,8 @@ def code_at(secret: str, counter: int) -> str:
 
 def _match(secret: str, code: str, now: float | None = None):
     """合っていれば、その6桁の番号（時刻の区切り）。合わなければ None。"""
-    code = "".join(ch for ch in str(code or "") if ch.isdigit())
+    # 全角の数字（日本語入力のまま打ったもの）も受け付ける。ASCII の数字だけにしてから比べる（そうしないと比較で例外になる）
+    code = "".join(ch for ch in unicodedata.normalize("NFKC", str(code or "")) if ch in "0123456789")
     if len(code) != DIGITS:
         return None
     base = int((now if now is not None else time.time()) // STEP)

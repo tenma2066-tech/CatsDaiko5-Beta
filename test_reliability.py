@@ -224,8 +224,9 @@ class Coupons(Base):
         o = next(iter(A._orders.values()))
         self.assertEqual((o["state"], o.get("retry")), ("paid", True))
         with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JR")):
-            r = self.c.post("/run", json={"chars": "1-6"}).get_json()    # 入力し直しても、その「無料」が使える
-        self.assertTrue(r.get("prepaid"))
+            # コードが入ったまま、内容を直して送り直す（以前は「このクーポンはすでに使われています」で断っていた）
+            r = self.c.post("/run", json={"chars": "1-6", "coupon": free}).get_json()
+        self.assertTrue(r.get("prepaid"))                                 # 入力し直しても、その「無料」が使える
 
 
 class LongLane(Base):

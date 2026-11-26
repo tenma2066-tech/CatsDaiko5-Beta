@@ -56,6 +56,8 @@ mkdir -p "$APP_DIR/caddy-sites"   # 別サイト（xbot など）の追加設定
 # 4) 秘密情報（初回だけ生成。以後は上書きしない＝保存済みPayPay情報を読めなくしないため）
 cd "$APP_DIR"
 touch .env && chmod 600 .env
+# 手で書き足した最後の行に改行が無いと、下の追記がその行につながって両方とも壊れる → 必ず改行で終わるようにしておく
+if [ -s .env ] && [ -n "$(tail -c1 .env)" ]; then echo >> .env; fi
 grep -q '^SECRET_KEY=' .env || echo "SECRET_KEY=$(openssl rand -hex 32)" >> .env
 grep -q '^PAYPAY_ENCRYPTION_KEY=' .env || echo "PAYPAY_ENCRYPTION_KEY=$(openssl rand 32 | base64 | tr '+/' '-_')" >> .env
 sed -i '/^SITE_HOST=/d' .env
@@ -72,15 +74,25 @@ fi
 # 無い・空のときは何もしない＝手動で .env に書いた値を消さない。
 TURNSTILE_FILE="${5:-}"
 if [ -n "$TURNSTILE_FILE" ] && [ -s "$TURNSTILE_FILE" ]; then
-  sed -i '/^TURNSTILE_SITE_KEY=/d; /^TURNSTILE_SECRET_KEY=/d' .env
-  grep -E '^TURNSTILE_(SITE|SECRET)_KEY=[A-Za-z0-9_.-]+$' "$TURNSTILE_FILE" >> .env || true
+  # 先に形を確かめる（確かめる前に古い鍵を消すと、貼り付けの空白や改行コード1つで、人間確認が黙って無効になる）
+  TS_LINES="$(tr -d '\r ' < "$TURNSTILE_FILE" | grep -E '^TURNSTILE_(SITE|SECRET)_KEY=[A-Za-z0-9_.-]+$' || true)"
+  if [ "$(printf '%s\n' "$TS_LINES" | grep -c 'KEY=' || true)" = "2" ]; then
+    sed -i '/^TURNSTILE_SITE_KEY=/d; /^TURNSTILE_SECRET_KEY=/d' .env
+    printf '%s\n' "$TS_LINES" >> .env
+  else
+    echo "::warning::Turnstile の鍵の形が正しくないため、.env は変更しませんでした（これまでの設定のまま動きます）。"
+  fi
   shred -u "$TURNSTILE_FILE" 2>/dev/null || rm -f "$TURNSTILE_FILE"
 fi
+OLD_PW_SUM="$(sha256sum admin_password 2>/dev/null | cut -d' ' -f1 || true)"
 if [ -n "$ADMIN_PASSWORD" ]; then
   (umask 077; printf '%s' "$ADMIN_PASSWORD" > admin_password)
 fi
 [ -f admin_password ] || (umask 077; : > admin_password)
 chmod 600 admin_password
+# 管理者パスワードは、アプリが起動のときに読む。変わったのにコンテナが作り直されないと、古いパスワードのまま動き続ける（下の 7 で作り直す）
+PW_CHANGED=0
+if [ "$OLD_PW_SUM" != "$(sha256sum admin_password | cut -d' ' -f1)" ]; then PW_CHANGED=1; fi
 
 # 4.5) バックアップ（毎日自動＋入れ替えの前）。注文・台帳・設定・暗号鍵を /opt/catsdaiko/backups に残す（root だけが読める）
 cat > "$APP_DIR/backup.sh" <<'SH'
@@ -188,6 +200,23 @@ fi
 # 5) 先にビルド（今のサイトは動いたまま）
 docker compose build
 
+# 5.5) 入れ替える前に、新しい版がアプリとして読み込めて、ページを返せるかを確かめる。
+#      読み込めない版に入れ替えると、直した版がもう一度届くまでサイトが落ちたままになる。
+#      確かめるのは使い捨てのコンテナで、データの置き場所は中の一時フォルダーに向ける（本物の注文・台帳には触れない）。
+SMOKE='import app
+c = app.app.test_client()
+assert c.get("/health").status_code == 200
+assert c.get("/").status_code == 200
+print("smoke ok")'
+if ! docker compose run --rm --no-deps -T \
+     -e PAYPAY_DATA_DIR=/tmp/smoke -e PAYPAY_LEDGER_PATH=/tmp/smoke/l.sqlite3 -e PUNI_DATA_DIR=/tmp/smoke/puni -e TSUM_DATA_DIR=/tmp/smoke/tsum \
+     app sh -c 'mkdir -p /tmp/smoke/puni /tmp/smoke/tsum && exec python3 -c "$0"' "$SMOKE" > /tmp/catsdaiko-smoke.log 2>&1; then
+  echo "::error::新しい版が起動できませんでした。入れ替えを中止しました（サイトは今の版のまま動いています）。"
+  tail -25 /tmp/catsdaiko-smoke.log | cut -c1-300 || true
+  exit 4
+fi
+echo "smoke test: OK"
+
 # 6) 実行中・決済確認中の処理がなくなるまで待つ（最大12分）。新しい実行の開始は一時的に待たせる。
 APP_PY='import json,sys,urllib.request as u
 t=open("/run/admin/admin_password").read()
@@ -203,7 +232,14 @@ if docker compose ps --status running --services 2>/dev/null | grep -qx app; the
   N=1
   ALLOW="${ALLOW_RUNNING:-0}"   # 止まったまま終わらない実行がある場合だけ、その件数を許して入れ替える（手動実行時のみ）
   for i in $(seq 1 48); do
-    N=$(docker compose exec -T app python3 -c "$APP_PY" state 2>/dev/null) || { N=0; break; }
+    # 1回聞けなかっただけで「何も動いていない」と決めない（4つの受付がたまたま全部ふさがっていると、5秒で返事が来ない）。
+    # 3回続けて聞けなければ、アプリ自体が応答していないとみなして入れ替える（壊れた版を直す入れ替えは止めない）。
+    N=""
+    for t in 1 2 3; do
+      if N=$(docker compose exec -T app python3 -c "$APP_PY" state 2>/dev/null); then break; fi
+      N=""; sleep 4
+    done
+    [ -n "$N" ] || { N=0; break; }
     [ "$N" -le "$ALLOW" ] 2>/dev/null && { N=0; break; }
     echo "busy ($N) - waiting... ($i/48)"; sleep 15
   done
@@ -222,7 +258,13 @@ if [ -n "$(docker network ls -q -f name=^catsdaiko_default$)" ] && [ "$CUR_MTU" 
   echo "network MTU '$CUR_MTU' -> 1400 (recreate)"
   docker compose down --remove-orphans
 fi
+APP_BEFORE="$(docker compose ps -q app 2>/dev/null || true)"
 docker compose up -d --remove-orphans
+if [ "$PW_CHANGED" = "1" ] && [ -n "$APP_BEFORE" ] && [ "$APP_BEFORE" = "$(docker compose ps -q app 2>/dev/null || true)" ]; then
+  # 管理者パスワードだけが変わった（プログラムは同じ）→ コンテナが作り直されていないので、読み直させるために作り直す
+  echo "admin password changed -> recreate app"
+  docker compose up -d --no-deps --force-recreate app
+fi
 # 新しいコンテナ（または変更なしで動き続けたコンテナ）で、実行の開始を再び受け付ける
 for i in $(seq 1 30); do
   if docker compose exec -T app python3 -c "$APP_PY" drain 1 >/dev/null 2>&1; then break; fi

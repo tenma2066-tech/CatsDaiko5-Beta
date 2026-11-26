@@ -233,7 +233,9 @@ class NewFeatures(unittest.TestCase):
         A._reconcile_orders()
         self.assertEqual((o["state"], o.get("retry")), ("paid", True))     # 失敗 → 払い直し無しで再実行できる
         with patch.object(A, "_start_job", side_effect=lambda *a: A.jsonify(job="JI")):
-            r = self.run_({"chars": "1-9", "items": ["XP"]}).get_json()
+            # コードを入れずに別の内容を頼んだだけでは、あの「無料」は使わない（黙って使われると、安い注文に無料券が消える）
+            self.assertFalse(self.run_({"chars": "1-9", "items": ["XP"]}).get_json().get("prepaid"))
+            r = self.run_({"chars": "1-9", "items": ["XP"], "coupon": code}).get_json()   # 同じコードをもう一度入れた → 充てる
         self.assertEqual((r.get("order"), r.get("prepaid")), (oid, True))  # 無料クーポンの注文を充てる
         o.update(state="started", job_id="JD")
         self.jobs["JD"] = {"finished": None, "created": time.time(), "status": "done", "error": None, "result": {"transfer": "t"}}

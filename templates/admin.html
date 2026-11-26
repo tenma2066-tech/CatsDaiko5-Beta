@@ -117,14 +117,15 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <div class="meta">USERID <a href="/admin?user={{ o.uid }}#history"><code>{{ o.uid }}</code></a>　注文番号 <code>{{ o.id }}</code></div>
 <div class="meta">最後の結果: {{ o.diag or "-" }}{% if o.ledger %}　／　PayPay: {{ o.ledger }}{% endif %}{% if not o.has_link %}　／　リンク未送信{% endif %}</div>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="order" value="{{ o.id }}">
-{% if o.superseded %}<div class="note bad">この注文の支払いは、同じ利用者の新しい注文に引き継ぎ済みです。支払い済みにしないでください（二重に実行されます）。</div>
+{% if o.unknown %}<div class="note bad">実行の途中で結果が分からなくなり、完了の扱いになっています（自動でのやり直しは止めています）。お客さんに状況を確認し、必要なら「1回無料クーポン」を発行して、もう一度注文してもらってください。</div>
+{% elif o.superseded %}<div class="note bad">この注文の支払いは、同じ利用者の新しい注文に引き継ぎ済みです。支払い済みにしないでください（二重に実行されます）。</div>
 {% elif o.state != "paid" %}{% if not o.has_link %}<div class="note">この注文には送金リンクの記録がありません（未払いの可能性が高いです）。</div>{% endif %}{% endif %}
 {% if o.state == "paid" and not o.has_link %}<div class="note">この注文には送金リンク（入金）の記録がありません。同じ人の別の注文と重複していないか確認してから開始してください。</div>{% endif %}
 <div class="row">
 {% if o.has_link and o.state in ("hold", "unpaid", "dead") %}<button class="btn" name="action" value="order_recheck">PayPayに再確認する</button>{% endif %}
 {% if o.state == "paid" %}<button class="btn pri" name="action" value="order_start" data-confirm="この注文の実行を開始しますか？">実行を開始する</button>{% endif %}
-{% if not o.superseded and o.state != "paid" %}<button class="btn {{ 'pri' if o.has_link else '' }}" name="action" value="order_paid" data-confirm="{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
-{% if o.state != "dead" %}<button class="btn danger" name="action" value="order_dead" data-confirm="この注文を停止しますか？">停止する</button>{% endif %}
+{% if not o.superseded and o.state != "paid" and not o.unknown %}<button class="btn {{ 'pri' if o.has_link else '' }}" name="action" value="order_paid" data-confirm="{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
+{% if o.state != "dead" and not o.unknown %}<button class="btn danger" name="action" value="order_dead" data-confirm="この注文を停止しますか？">停止する</button>{% endif %}
 </div></form></div>
 {% else %}<div class="empty">未完了の注文はありません 🎉</div>{% endfor %}
 </div></section>
@@ -154,7 +155,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <button class="btn full" name="action" value="pp_refresh" data-confirm="保存済みの電話番号・パスワードでPayPayにログインし直します。SMS認証を求められることがあります。よろしいですか？">🔄 PayPayの接続を更新（ログインし直す）</button>
 <button class="btn full" name="action" value="pp_recheck_all" data-confirm="保留・要確認の注文を、いますぐ全部PayPayに確認します。入金済みのものは実行まで進みます。よろしいですか？">🔍 保留中の注文をまとめて再確認</button>
 </form>
-<a class="btn full" href="/admin#paypay" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">↻ 状態を表示し直す（何も送らない）</a>
+<a class="btn full" href="/admin?r={{ csp_nonce[:8] }}#paypay" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">↻ 状態を表示し直す（何も送らない）</a>
 <p class="sub" style="margin-top:12px">初めて接続するとき・接続が切れたときは、① 電話番号とパスワードでログイン → ② SMS で届いた4桁のコードを入力、の順です。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pp_login">
 <h3>① ログイン</h3>
