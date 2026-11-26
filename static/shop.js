@@ -101,8 +101,9 @@
       var btn = $("#payGo"); btn.disabled = true;
       $("#payErr").textContent = "決済を確認しています…（画面を閉じずにお待ちください）";
       try {
-        var r = await postJson("/api/orders/" + payOrder + "/pay", { link: link });
+        var r = await postJson("/api/orders/" + payOrder + "/pay", { link: link, human: window.Human ? await window.Human.get(8000) : "" });
         var j = await r.json();
+        if (window.Human) window.Human.reset();   /* 確認の印は1回しか使えない */
         if (!r.ok) {
           $("#payErr").textContent = j.error || "決済を確認できませんでした。";
           if (j.hold) { openPay(payOrder, payAmount, "hold"); return; }   /* PayPay 側の保留：同じリンクを送り直さない */

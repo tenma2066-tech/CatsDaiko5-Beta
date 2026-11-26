@@ -80,6 +80,8 @@ jobs:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
         run: |
           set -eu
           AF="/tmp/.ap-$GITHUB_RUN_ID"
@@ -91,12 +93,18 @@ jobs:
             KF="/tmp/.ak-$GITHUB_RUN_ID"
             printf '%s' "$ANTHROPIC_API_KEY" | $SSH_CMD "$TARGET" "umask 077; cat > $KF"
           fi
+          # 購入時の人間確認（Cloudflare Turnstile。任意）。2つの鍵がそろっていれば一時ファイルで渡す（第5引数）。
+          TF=""
+          if [ -n "${TURNSTILE_SITE_KEY:-}" ] && [ -n "${TURNSTILE_SECRET_KEY:-}" ]; then
+            TF="/tmp/.tk-$GITHUB_RUN_ID"
+            printf 'TURNSTILE_SITE_KEY=%s\nTURNSTILE_SECRET_KEY=%s\n' "$TURNSTILE_SITE_KEY" "$TURNSTILE_SECRET_KEY" | $SSH_CMD "$TARGET" "umask 077; cat > $TF"
+          fi
           # sudo を使うユーザーの場合は、同じパスワードを標準入力で渡す（root なら不要）
           if [ -n "$SUDO" ] && [ -n "${USE_SSHPASS:-}" ]; then
-            printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF'"
+            printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF' '$TF'"
           else
             AR="${{ github.event.inputs.allow_running || '0' }}"; case "$AR" in ''|*[!0-9]*) AR=0;; esac
-            $SSH_CMD "$TARGET" "ALLOW_RUNNING=$AR $SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF'"
+            $SSH_CMD "$TARGET" "ALLOW_RUNNING=$AR $SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF' '$TF'"
           fi
       - name: Health check
         if: env.SKIP != 'true'

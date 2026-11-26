@@ -398,6 +398,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 .toast{position:fixed;left:50%;bottom:calc(100px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;font-weight:700;max-width:90vw}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
+.humanbox{display:flex;justify-content:center;min-height:65px;margin:10px 0 4px}
 </style><link rel="stylesheet" href="/static/qa.css?v=3">
 </head><body>
 
@@ -720,6 +721,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
     <label class="field" id="payLinkField"><span>送金リンクを貼り付け</span>
       <input id="payLink" type="url" inputmode="url" placeholder="https://pay.paypay.ne.jp/..." autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048"></label>
     <div class="payerr" id="payErr" role="alert" hidden><b id="payErrTitle"></b><span id="payErrHint"></span></div>
+    {% if turnstile_key %}<div id="humanBox" class="humanbox" data-sitekey="{{ turnstile_key }}"></div>{% endif %}
     <div class="mbtns">
       <button class="btn" id="payCancel" type="button">やめる</button>
       <button class="btn pri" id="payGo" type="button">支払って実行する</button>
@@ -1855,7 +1857,8 @@ $('#payGo').addEventListener('click',async()=>{
   const btn=$('#payGo'); btn.disabled=true; payError({error:'決済を確認しています…',code:'x'},'決済を確認しています…','wait');
   $('#payErrTitle').textContent='決済を確認しています…'; $('#payErrHint').textContent='画面を閉じずにお待ちください。';
   try{
-    const r=await api('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:$('#payLink').value})});
+    const r=await api('/api/orders/'+payOrder+'/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:$('#payLink').value,human:window.Human?await window.Human.get(8000):''})});
+    if(window.Human) window.Human.reset();
     const j=await r.json();
     if(!r.ok){
       if(j.code==='started'){ /* 通信が途切れている間に開始できていた → その実行の状況画面へ */

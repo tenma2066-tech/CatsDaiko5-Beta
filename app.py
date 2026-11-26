@@ -56,6 +56,7 @@ import tsum_service
 import puni_service
 import qa_bot
 import admin_2fa
+import human
 import review_filter
 import site_config
 import source_pack
@@ -67,7 +68,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.21"
+APP_VERSION = "1.22"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -141,7 +142,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
 @app.context_processor
 def _shop_context() -> dict:
     """すべての画面で使える値：店名・問い合わせ先など（site_config.py）。"""
-    return dict(site_config.template_context(), csp_nonce=_csp_nonce())
+    return dict(site_config.template_context(), csp_nonce=_csp_nonce(), turnstile_key=human.site_key())
 
 
 def _csp_nonce() -> str:
@@ -615,8 +616,10 @@ def _private_response(response):
         # 中身のセキュリティ方針（CSP）：自分のサイトのファイルと、合い言葉つきのスクリプトだけを動かす。
         # ほかのサイトのスクリプト・埋め込み・送信先はすべて止める（書き込まれた文字がスクリプトとして動く攻撃を防ぐ）
         nonce = getattr(g, "csp_nonce", None)
+        cf = " " + human.WIDGET_ORIGIN if human.enabled() else ""    # 人間確認（Turnstile）のチェック画面だけは通す
         response.headers.setdefault("Content-Security-Policy", "; ".join((
-            "default-src 'self'", "script-src 'self'" + (f" 'nonce-{nonce}'" if nonce else ""),
+            "default-src 'self'", "script-src 'self'" + (f" 'nonce-{nonce}'" if nonce else "") + cf,
+            "frame-src" + (cf or " 'none'"),
             "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "connect-src 'self'",
             "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'")))
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
@@ -3734,6 +3737,8 @@ def box_post():
     data = _json_body()
     if str(data.get("website") or "").strip():          # 人には見えない欄。埋めてくるのは自動投稿だけ → 受け取ったふりをして捨てる
         return jsonify(ok=True)
+    if not _human_ok(data.get("human")):
+        return _human_required()
     kind = str(data.get("kind") or "")
     if kind not in BOX_KINDS:
         return jsonify(error="種類を選んでください。", code="kind"), 400
@@ -3949,6 +3954,27 @@ def _hold_watcher() -> None:
             _log_orders.exception("hold watcher failed")
 
 
+HUMAN_TTL = 15 * 60     # 人間確認が通ったら、このあいだは同じブラウザに聞き直さない（リンクの入れ直しのたびに出さない）
+HUMAN_MSG = "「人間であることの確認」が済んでいません。チェックが終わるのを待って、もう一度押してください。"
+
+
+def _human_ok(token) -> bool:
+    """購入・投稿の前の人間確認（Cloudflare Turnstile）。鍵が設定されていなければ、確認しない。"""
+    if not human.enabled() or _is_admin():
+        return True
+    at = session.get("human_at")
+    if isinstance(at, (int, float)) and 0 <= time.time() - at <= HUMAN_TTL:
+        return True
+    result = human.verify(token, _client_ip())
+    if result is True:
+        session["human_at"] = time.time()
+    return result is not False          # None（Cloudflare に聞けない）は通す＝売り上げを止めない
+
+
+def _human_required():
+    return jsonify(error=HUMAN_MSG, code="human_required"), 400
+
+
 def _pay_order(order_id: str):
     """PayPay送金リンクを受け取り、確認できたら実行を開始する。支払い済みなら再送不要で開始だけ再試行。"""
     data = _json_body()
@@ -3956,6 +3982,11 @@ def _pay_order(order_id: str):
         return _updating_response()
     if not _rate_ok("pay:" + _client_ip(), PAY_LIMIT, 600):
         return _too_fast()
+    with _orders_lock:
+        peek = _orders.get(order_id)
+        fresh = bool(peek and peek["owner"] == _owner() and peek["state"] == "unpaid")
+    if fresh and not _human_ok(data.get("human")):      # 新しい支払いのときだけ（保留の確認・支払い済みの再開には出さない）
+        return _human_required()
     with _orders_lock:
         order = _orders.get(order_id)
         if not order or order["owner"] != _owner():
@@ -4223,7 +4254,9 @@ def _template(name: str, guard: bool = True) -> str:
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", name), encoding="utf-8", newline="") as f:
         text = strip_comments(f.read().replace("\r\n", "\n"), html=True)
     if guard and "</body>" in text:    # のぞき見よけ（右クリック・保存・開発者ツールのキー）。管理画面には入れない
-        text = text.replace("</body>", '<script src="/static/guard.js?v=1" defer></script>\n</body>', 1)
+        text = text.replace("</body>", '<script src="/static/guard.js?v=1" defer></script>\n'
+                            '{% if turnstile_key %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>'
+                            '<script src="/static/human.js?v=1" defer></script>{% endif %}\n</body>', 1)
     return re.sub(r"<script(?=[\s>])", '<script nonce="{{ csp_nonce }}"', text)
 
 

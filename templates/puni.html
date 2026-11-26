@@ -128,6 +128,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 .hero{display:block;width:100%;height:auto;aspect-ratio:2/1;object-fit:cover;border:2px solid var(--line);border-radius:16px;margin:0 0 14px;background:var(--soft)}
 .tagline{display:inline-block;margin:4px 0 0;padding:1px 8px;border:1.5px solid var(--line);border-radius:999px;font-size:11.5px;font-weight:800;background:var(--hit)}
 [hidden]{display:none!important}
+.humanbox{display:flex;justify-content:center;min-height:65px;margin:10px 0 4px}
 </style><link rel="stylesheet" href="/static/qa.css?v=3">
 </head><body>
 <header><div class="wrap top">
@@ -261,12 +262,13 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="note" id="payInfo">PayPayアプリで <b id="payYen">0円</b> ちょうどの送金リンクを作って、下に貼り付けてください（パスコードなし）。</p>
   <label class="field"><span>PayPay送金リンク</span><input id="payLink" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://pay.paypay.ne.jp/..."></label>
   <p class="err" id="payErr" role="alert"></p>
+{% if turnstile_key %}<div id="humanBox" class="humanbox" data-sitekey="{{ turnstile_key }}"></div>{% endif %}
   <div class="row"><button class="btn" id="payCancel" type="button">やめる</button><button class="btn primary" id="payGo" type="button">支払って実行する</button></div>
   <p class="note" id="payOrderNo"></p>
 </div></div>
 
 <script src="/static/review.js?v=3"></script>
-<script src="/static/shop.js?v=7"></script>
+<script src="/static/shop.js?v=8"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};

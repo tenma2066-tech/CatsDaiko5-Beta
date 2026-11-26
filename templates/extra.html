@@ -150,6 +150,7 @@ a.dl{text-decoration:none;color:#17181c}
 .ticks span:first-child{transform:none}
 .ticks span:last-child{transform:translateX(-100%)}
 @media (prefers-reduced-motion:reduce){.bars i{transition:none}}
+.humanbox{display:flex;justify-content:center;min-height:65px;margin:10px 0 4px}
 </style></head><body>
 <main class="wrap">
   <div class="top"><a href="/">← メニューへ</a><span class="tag">PayPay 払い</span></div>
@@ -287,6 +288,7 @@ a.dl{text-decoration:none;color:#17181c}
   <ol class="steps" id="paySteps"><li>PayPay の「送る」→「リンクを作成」</li><li>金額を <b id="payYen2">0円</b> ちょうどにして、パスコードはなし</li><li>できたリンクをコピーして、ここに貼り付け</li></ol>
   <label class="field" id="payLinkField"><span>PayPay送金リンク</span><input id="payLink" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://pay.paypay.ne.jp/..."></label>
   <p class="err" id="payErr" aria-live="polite"></p>
+{% if turnstile_key %}<div id="humanBox" class="humanbox" data-sitekey="{{ turnstile_key }}"></div>{% endif %}
   <div class="row"><button class="btn" id="payCancel" type="button">閉じる</button><button class="btn primary" id="payGo" type="button">支払う</button></div>
   <p class="note" id="payOrderNo"></p>
 </div></div>
@@ -453,7 +455,8 @@ $('#payGo').addEventListener('click',()=>{
 async function payNow(link){
   const btn=$('#payGo'); btn.disabled=true; $('#payErr').textContent='決済を確認しています…（画面を閉じずにお待ちください）';
   try{
-    const r=await post('/api/orders/'+payOrder+'/pay',{link:link}); const j=await r.json();
+    const r=await post('/api/orders/'+payOrder+'/pay',{link:link,human:window.Human?await window.Human.get(8000):''}); const j=await r.json();
+    if(window.Human) window.Human.reset();
     if(!r.ok){
       $('#payErr').textContent=j.error||'決済を確認できませんでした。';
       if(j.hold){ $('#payLinkField').hidden=true; $('#paySteps').hidden=true; $('#payInfo').hidden=true; btn.textContent='今すぐ確認する'; btn.disabled=false;

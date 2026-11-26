@@ -2,6 +2,7 @@
 # サーバー上で root 権限で実行される（GitHub Actions から）。何度実行しても安全。
 # 引数: $1 = SITE_HOST, $2 = 新しいソースを展開したディレクトリ, $3 = 管理者パスワードを書いたファイル（読んだら削除）,
 #       $4 = ANTHROPIC_API_KEY を書いたファイル（任意・読んだら削除。空なら .env は変更しない）
+#       $5 = TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY を書いたファイル（任意・読んだら削除。空なら .env は変更しない）
 set -euo pipefail
 SITE_HOST="$1"
 NEW_SRC="$2"
@@ -66,6 +67,14 @@ if [ -n "$ANTHROPIC_KEY_FILE" ] && [ -s "$ANTHROPIC_KEY_FILE" ]; then
   sed -i '/^ANTHROPIC_API_KEY=/d' .env
   printf 'ANTHROPIC_API_KEY=%s\n' "$(cat "$ANTHROPIC_KEY_FILE")" >> .env
   shred -u "$ANTHROPIC_KEY_FILE" 2>/dev/null || rm -f "$ANTHROPIC_KEY_FILE"
+fi
+# 購入時の人間確認（Cloudflare Turnstile）の鍵。第5引数のファイル（KEY=値 が2行）があれば .env に反映する。
+# 無い・空のときは何もしない＝手動で .env に書いた値を消さない。
+TURNSTILE_FILE="${5:-}"
+if [ -n "$TURNSTILE_FILE" ] && [ -s "$TURNSTILE_FILE" ]; then
+  sed -i '/^TURNSTILE_SITE_KEY=/d; /^TURNSTILE_SECRET_KEY=/d' .env
+  grep -E '^TURNSTILE_(SITE|SECRET)_KEY=[A-Za-z0-9_.-]+$' "$TURNSTILE_FILE" >> .env || true
+  shred -u "$TURNSTILE_FILE" 2>/dev/null || rm -f "$TURNSTILE_FILE"
 fi
 if [ -n "$ADMIN_PASSWORD" ]; then
   (umask 077; printf '%s' "$ADMIN_PASSWORD" > admin_password)

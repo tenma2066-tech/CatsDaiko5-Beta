@@ -54,6 +54,7 @@ textarea{min-height:150px;resize:vertical}
 .thanks .big{font-size:44px;line-height:1}
 .thanks h2{margin:8px 0 6px;font-size:20px}
 .foot{margin:24px 0 0;text-align:center;font-size:12.5px;color:var(--muted)}
+.humanbox{display:flex;justify-content:center;min-height:65px;margin:10px 0 4px}
 </style></head><body>
 <main class="wrap">
   <div class="top"><a href="/">← メニューへ</a></div>
@@ -71,6 +72,7 @@ textarea{min-height:150px;resize:vertical}
     <label class="f" for="contact">返事がほしい方は、連絡先（任意）</label>
     <input type="text" id="contact" maxlength="{{ contact_max }}" placeholder="例：X の @ユーザー名 / メールアドレス" autocomplete="off" autocapitalize="off" spellcheck="false">
     <div class="hp" aria-hidden="true"><label>ここは空のままにしてください<input type="text" id="website" tabindex="-1" autocomplete="off"></label></div>
+{% if turnstile_key %}<div id="humanBox" class="humanbox" data-sitekey="{{ turnstile_key }}"></div>{% endif %}
     <p class="err" id="err" role="alert"></p>
     <button class="btn primary" id="send" type="button" disabled>送信する</button>
     <p class="how">注文についてのお問い合わせは、<b>注文番号</b>も書いていただくと早く確認できます。引継ぎコード・暗証番号・パスワードは書かないでください。{% if shop_x %}急ぎのときは X（<a href="{{ contact_url }}" target="_blank" rel="noopener">@{{ shop_x }}</a>）のDMへ。{% endif %}</p>
@@ -103,7 +105,8 @@ textarea{min-height:150px;resize:vertical}
     if(busy) return; busy=true; refresh(); send.textContent='送信しています…'; err.textContent='';
     try{
       const r=await fetch('/api/box',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({kind:(document.querySelector('input[name=kind]:checked')||{}).value||'',text:text.value,contact:$('#contact').value,website:$('#website').value})});
+        body:JSON.stringify({kind:(document.querySelector('input[name=kind]:checked')||{}).value||'',text:text.value,contact:$('#contact').value,website:$('#website').value,human:window.Human?await window.Human.get(8000):''})});
+      if(window.Human) window.Human.reset();
       const j=await r.json().catch(()=>({}));
       if(r.ok){ text.value=''; try{ sessionStorage.removeItem('box-draft'); }catch(e){} $('#formCard').hidden=true; $('#thanks').hidden=false; window.scrollTo(0,0); }
       else err.textContent=j.error||'送信できませんでした。もう一度お試しください。';

@@ -57,6 +57,7 @@ jobs:
           python -m unittest -v test_reliability.py
           python -m unittest -v test_new_cats.py
           python -m unittest -v test_v121.py
+          python -m unittest -v test_human.py
           python -m unittest -v test_hold_e2e.py
           python -m unittest -v test_paypay_hold.py
           python -m unittest -v test_paypay_gateway.py
