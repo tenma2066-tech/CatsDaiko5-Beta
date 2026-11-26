@@ -345,6 +345,14 @@ def _ledger():
                 order_id TEXT PRIMARY KEY, created REAL NOT NULL, updated REAL NOT NULL, user_id TEXT,
                 amount INTEGER, state TEXT, summary TEXT, diag TEXT
             )""")
+            hist_cols = {r[1] for r in db.execute("PRAGMA table_info(history)").fetchall()}
+            for column in ("shop TEXT", "base INTEGER", "lines TEXT", "coupon_kind TEXT"):   # 売上の集計用（部門・割引前の金額・内訳）
+                if column.split()[0] not in hist_cols:
+                    db.execute("ALTER TABLE history ADD COLUMN " + column)
+            # 注文ごとの出来事（状態・メモが変わった時刻）。管理画面の「注文の詳細」の時系列に使う
+            db.execute("""CREATE TABLE IF NOT EXISTS order_events (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL,
+                          at REAL NOT NULL, state TEXT, text TEXT)""")
+            db.execute("CREATE INDEX IF NOT EXISTS order_events_order ON order_events(order_id)")
             for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER", "sender_id TEXT", "sender_name TEXT", "accept_status TEXT"):
                 try:
                     db.execute("ALTER TABLE links ADD COLUMN " + column)
@@ -603,17 +611,34 @@ def adopt_link(code: str, new_purchase_id: str, amount: int):
 
 
 def history_upsert(rows):
-    """取引履歴（注文ごとに1行）。引継ぎコードなどの秘密は入れない。"""
+    """取引履歴（注文ごとに1行）。引継ぎコードなどの秘密は入れない。
+    状態かメモ（diag）が変わったときは、その時刻を order_events にも1行残す（注文の時系列）。"""
     if not rows:
         return
     now = time.time()
     with _ledger() as db:
+        ids = [r["order_id"] for r in rows]
+        before = {}
+        for i in range(0, len(ids), 400):
+            part = ids[i:i + 400]
+            for row in db.execute("SELECT order_id, state, diag FROM history WHERE order_id IN (%s)" % ",".join("?" * len(part)), part):
+                before[row[0]] = (row[1], row[2])
         for r in rows:
-            db.execute("""INSERT INTO history(order_id,created,updated,user_id,amount,state,summary,diag) VALUES(?,?,?,?,?,?,?,?)
+            db.execute("""INSERT INTO history(order_id,created,updated,user_id,amount,state,summary,diag,shop,base,lines,coupon_kind)
+                          VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                           ON CONFLICT(order_id) DO UPDATE SET updated=excluded.updated, user_id=excluded.user_id, amount=excluded.amount,
-                          state=excluded.state, summary=excluded.summary, diag=excluded.diag
-                          WHERE history.state IS NOT excluded.state OR history.diag IS NOT excluded.diag OR history.user_id IS NOT excluded.user_id""",
-                       (r["order_id"], r["created"], now, r["user_id"], r["amount"], r["state"], r["summary"], r["diag"]))
+                          state=excluded.state, summary=excluded.summary, diag=excluded.diag,
+                          shop=COALESCE(excluded.shop, history.shop), base=COALESCE(excluded.base, history.base),
+                          lines=COALESCE(excluded.lines, history.lines), coupon_kind=COALESCE(excluded.coupon_kind, history.coupon_kind)
+                          WHERE history.state IS NOT excluded.state OR history.diag IS NOT excluded.diag OR history.user_id IS NOT excluded.user_id
+                             OR history.summary IS NOT excluded.summary OR history.amount IS NOT excluded.amount
+                             OR history.lines IS NOT excluded.lines""",
+                       (r["order_id"], r["created"], now, r["user_id"], r["amount"], r["state"], r["summary"], r["diag"],
+                        r.get("shop"), r.get("base"), r.get("lines"), r.get("coupon_kind")))
+            old = before.get(r["order_id"])
+            if old is None or old[0] != r["state"] or (old[1] or "") != (r["diag"] or ""):
+                db.execute("INSERT INTO order_events(order_id, at, state, text) VALUES(?,?,?,?)",
+                           (r["order_id"], now if old is not None else r["created"], r["state"], (r["diag"] or "")[:200]))
 
 
 def history_list(limit: int = 200, user_id: str = ""):

@@ -56,6 +56,7 @@ import tsum_service
 import puni_service
 import qa_bot
 import admin_2fa
+import admin_ops
 import human
 import review_ai
 import review_filter
@@ -69,7 +70,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.26"
+APP_VERSION = "1.27"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -496,6 +497,38 @@ def _free_slot_locked(long: bool):
     return next((base + i for i, value in enumerate(lane) if value is None and not _slot_held_elsewhere(base + i)), None)
 
 
+_SLOT_DEFAULT = {"normal": MAX_CONCURRENT_JOBS, "long": LONG_JOB_SLOTS}   # 起動のときの数（.env）。管理画面で空欄にすると戻る
+_slot_target = {"normal": None, "long": None}
+
+
+def _resize_slots_locked() -> None:
+    """実行枠の数を、管理画面で決めた数に合わせる。呼び出し側で _jobs_lock を持つこと。
+    増やすのはすぐ。減らすのは、うしろの枠が空いてから（動いている実行は止めない）。"""
+    global MAX_CONCURRENT_JOBS, LONG_JOB_SLOTS
+    for lane, key, base in ((_slots, "normal", 0), (_long_slots, "long", LONG_SLOT_BASE)):
+        if _slot_target[key] is None:     # 管理画面で決めていない＝起動のときの数のまま（触らない）
+            continue
+        want = max(1 if key == "normal" else 0, int(_slot_target[key]))
+        while len(lane) < want:
+            lane.append(None)
+        while len(lane) > want and lane[-1] is None:
+            lane.pop()
+    MAX_CONCURRENT_JOBS, LONG_JOB_SLOTS = len(_slots), len(_long_slots)
+
+
+def _apply_slot_settings() -> None:
+    try:
+        want = admin_ops.slots()
+    except Exception:  # noqa: BLE001
+        return
+    with _jobs_lock:
+        for key in ("normal", "long"):   # 空欄にした（初期値に戻す）ときは、起動のときの数を目標にする
+            if want.get(key) is not None or _slot_target[key] is not None:
+                _slot_target[key] = want.get(key) if want.get(key) is not None else _SLOT_DEFAULT[key]
+        _resize_slots_locked()
+        _start_queued_jobs_locked()
+
+
 def _set_slot_locked(slot: int, value) -> None:
     """枠を使用中にする（value＝実行の番号）／空ける（None）。呼び出し側で _jobs_lock を持つこと。"""
     if slot >= LONG_SLOT_BASE:
@@ -602,15 +635,54 @@ def _ensure_cleanup() -> None:
                     pass
         threading.Thread(target=cleanup_loop, daemon=True).start()
         threading.Thread(target=_hold_watcher, daemon=True).start()
+        _apply_slot_settings()   # 管理画面で変えた実行枠の数（再起動しても続く）
+
+
+PAGE_SHOP = {"/": None, "/nyanko": "nyanko", "/tsum": "tsum", "/puni": "puni", "/ticket": "ticket", "/support": "support",
+             "/source": "source", "/reviews": None, "/box": None}
+_BANNER_STYLE = ("display:block;margin:0;padding:9px 14px;font:700 14px/1.55 system-ui,-apple-system,'Hiragino Sans',sans-serif;"
+                 "text-align:center;border-bottom:2px solid #17181c;word-break:break-word;white-space:pre-wrap;")
+_BANNER_COLORS = {"info": "background:#e7f0ff;color:#17181c", "warn": "background:#fff3dc;color:#17181c",
+                  "sale": "background:#ffe3ec;color:#17181c", "pause": "background:#fdebeb;color:#17181c"}
+
+
+def _page_banners(path: str) -> str:
+    """お店の画面の上に出す帯：お知らせ・セール・一時停止中のもの（管理画面で決める）。文字はすべてエスケープする。"""
+    from markupsafe import escape
+    try:
+        shop = PAGE_SHOP[path]
+        bars = []
+        n = admin_ops.notice()
+        if n:
+            bars.append(("warn" if n["level"] == "warn" else "info", "📢 " + n["text"]))
+        sale = admin_ops.sale()
+        if sale and (shop is None or shop in sale["shops"]):
+            names = "・".join(admin_ops.SHOP_LABELS[x] for x in sale["shops"])
+            bars.append(("sale", f"🎉 {sale.get('label') or 'セール'}：{names}が {sale['pct']}%引き（{_jst(sale['until'])} まで）。"
+                                 "お支払いの金額から自動で割り引きます"))
+        if shop:
+            if admin_ops.paused_shop(shop):
+                bars.append(("pause", "⏸ " + (admin_ops.paused_message() or f"{admin_ops.SHOP_LABELS[shop]}は、ただいま受付を一時停止しています。")))
+            else:
+                names = dict(_pausable_menus())
+                prefix = {"nyanko": "nyanko:", "tsum": "tsum_", "puni": "puni_"}.get(shop)
+                stop = [names[m].split("：", 1)[-1] for m in admin_ops.paused_menus() if prefix and m.startswith(prefix) and m in names]
+                if stop:
+                    bars.append(("pause", "⏸ 調整中のため受付を止めています：" + "・".join(stop)
+                                 + ("\n" + admin_ops.paused_message() if admin_ops.paused_message() else "")))
+    except Exception:  # noqa: BLE001  帯が作れなくても、画面は出す
+        _log_orders.exception("page banner failed")
+        return ""
+    return "".join(f'<div class="ops-bar" role="status" style="{_BANNER_STYLE}{_BANNER_COLORS[kind]}">{escape(text)}</div>' for kind, text in bars)
 
 
 @app.after_request
 def _private_response(response):
-    if (request.path == "/admin" or request.path.startswith(("/api/", "/status/"))
+    if (request.path == "/admin" or request.path.startswith(("/api/", "/status/", "/admin/"))
             or request.path == "/health" or response.status_code >= 400):
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
     html = (response.mimetype or "") == "text/html"
-    if request.path.startswith(("/status/", "/api/")) or html:
+    if request.path.startswith(("/status/", "/api/", "/admin/")) or html:
         # 画面と API の中身は、端末にもブラウザの「戻る」用の控えにも残さない（結果のコードが保存されないように）
         response.headers.setdefault("Cache-Control", "no-store")
     if html:
@@ -624,6 +696,14 @@ def _private_response(response):
             "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "connect-src 'self'",
             "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'")))
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    if (html and request.method == "GET" and response.status_code == 200 and request.path in PAGE_SHOP
+            and not response.direct_passthrough and not response.is_streamed):
+        bars = _page_banners(request.path)
+        if bars:
+            body = response.get_data(as_text=True)
+            body, hit = re.subn(r"(<body\b[^>]*>)", lambda m: m.group(1) + bars, body, count=1)
+            if hit:
+                response.set_data(body)
     # 基本の守り：ほかのサイトの枠の中に表示させない・種類のなりすましをさせない・行き先に URL の詳細を渡さない
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
@@ -709,7 +789,7 @@ def _warmup_thread() -> None:
             prepared = 0
             for slot in range(MAX_CONCURRENT_JOBS):
                 with _jobs_lock:
-                    if _slots[slot] is not None or _pending_jobs:
+                    if slot >= len(_slots) or _slots[slot] is not None or _pending_jobs:
                         continue
                     _slots[slot] = "warmup"
                 try:
@@ -1021,6 +1101,7 @@ def _finish_job(job_id: str, slot: int, transfer_key: bytes | None) -> None:
         _set_slot_locked(slot, None)
         if transfer_key is not None:
             _active_transfers.discard(transfer_key)
+        _resize_slots_locked()
         _start_queued_jobs_locked()
 
 
@@ -1569,6 +1650,47 @@ def _too_fast():
     return jsonify(error="操作が続いています。少し待ってからもう一度お試しください。", code="too_fast"), 429
 
 
+BLOCK_MSG = "このブラウザからのご注文は、いま受け付けていません。お心当たりがない場合は、お問い合わせください。"
+
+
+def _pausable_menus() -> list:
+    """管理画面で一時停止できるメニュー（キー, 表示名）。にゃんこは種類ごと、ツムツム・ぷにぷにはメニューごと。"""
+    return ([("nyanko:" + k, v) for k, v in NYANKO_KINDS.items()]
+            + [(k, "ツムツム：" + tsum_service.menu_label(k)) for k in tsum_service.MENUS]
+            + [(k, "ぷにぷに：" + puni_service.menu_label(k)) for k in puni_service.MENUS])
+
+
+def _client_blocked() -> bool:
+    try:
+        return not _is_admin() and admin_ops.blocked(_uid(_owner()), _client_ip())
+    except Exception:  # noqa: BLE001  設定が読めなくても、受付は止めない
+        return False
+
+
+def _order_gate(shop: str, menus=()):
+    """注文を受ける前の確認：受付停止のお客さん・一時停止中の部門やメニュー。管理者は通す。止めるときは応答を返す。"""
+    if _is_admin():
+        return None
+    if _client_blocked():
+        return jsonify(error=BLOCK_MSG, code="blocked"), 403
+    try:
+        if admin_ops.paused_shop(shop):
+            label = admin_ops.SHOP_LABELS.get(shop, "")
+            return jsonify(error=admin_ops.paused_message() or f"{label}は、ただいま受付を一時停止しています。再開までお待ちください。",
+                           code="paused"), 503
+        names = dict(_pausable_menus())
+        stop = [m for m in menus if m in admin_ops.paused_menus()]
+        extra = admin_ops.paused_message()
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("order gate failed")
+        return None
+    if stop:
+        return jsonify(error="「" + "」「".join(names.get(m, m).split("：", 1)[-1] for m in stop) + "」は調整中のため、受付を止めています。"
+                             "外してからご注文ください。" + ("\n" + extra if extra else ""),
+                       code="paused_menu", menus=stop), 503
+    return None
+
+
 RUN_LIMIT = 300            # 1つの IP が10分に作れる注文の数（ふつうの使い方では届かない。連続で作り続けるのを止める）
 PAY_LIMIT = 120            # 1つの IP が10分に試せる支払い確認の数（1回ごとに PayPay へ問い合わせるため）
 MAX_UNPAID_PER_OWNER = 5   # 1人が同時に持てる未払いの注文（超えたら、入金リンクのない古いものから閉じる）
@@ -1816,6 +1938,136 @@ ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_log
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
 
+OPS_ACTIONS = ("order_note", "block_add", "block_remove", "block_order", "notice_save", "sale_save", "pause_save", "slots_save",
+               "faq_add", "faq_delete", "job_stop", "job_cancel", "job_front")
+ORDER_ACTIONS = ("order_note", "block_order")   # 注文の詳細だけから行う操作：終わったら、その詳細を開き直す
+ADMIN_TAB.update({k: "ops" for k in ("block_add", "block_remove", "notice_save", "sale_save", "pause_save", "slots_save")},
+                 faq_add="box", faq_delete="box", job_stop="home", job_cancel="home", job_front="home", order_note="history",
+                 block_order="history", order_recheck="orders", order_start="orders")
+AUDIT_LABELS = {"login": "ログイン", "login_step1": "ログイン（1段目）", "login_failed": "ログイン失敗", "logout": "ログアウト",
+                "order_paid": "支払い済みにした", "order_dead": "注文を停止した", "order_hold": "保留に戻した", "order_recheck": "PayPayに再確認",
+                "order_start": "実行を開始", "order_note": "メモ・返金を保存", "block_add": "受付停止を追加", "block_remove": "受付停止を解除",
+                "block_order": "注文のお客さんを受付停止", "notice_save": "お知らせを変更", "sale_save": "セールを変更", "pause_save": "一時停止を変更",
+                "slots_save": "実行枠の数を変更", "faq_add": "Q&Aの回答を追加", "faq_delete": "Q&Aの回答を削除", "job_stop": "実行を止めた",
+                "job_cancel": "順番待ちを取り消した", "job_front": "順番待ちを先頭へ", "price_save": "料金を変更", "maint_save": "メンテナンス表示を変更",
+                "coupon_free_issue": "無料クーポンを発行", "coupon_revoke": "クーポンを取り消し", "review_hide": "実績を非表示", "review_show": "実績を再表示",
+                "review_words_save": "実績に載せない言葉を変更", "box_done": "意見箱：対応済み", "box_undo": "意見箱：未対応に戻す", "box_delete": "意見箱：削除",
+                "backup_download": "バックアップをダウンロード", "pp_login": "PayPayにログイン", "pp_otp": "PayPayのSMS認証", "pp_refresh": "PayPayの接続を更新",
+                "pp_recheck_all": "保留をまとめて再確認", "restart_save": "初期垢作成を変更", "restart_official": "初期垢作成を公式の中身に",
+                "tfa_begin": "2段階認証の設定開始", "tfa_confirm": "2段階認証を有効化", "tfa_cancel": "2段階認証の設定をやめた", "tfa_disable": "2段階認証を無効化"}
+
+
+def _audit(action: str, target: str, msg: str) -> None:
+    """管理操作の記録（いつ・どこから・何を）。パスワード・SMSのコード・6桁は残さない。"""
+    try:
+        admin_ops.log_action(_client_ip(), action or "?", target, msg)
+    except Exception:  # noqa: BLE001  記録が書けなくても、操作は止めない
+        _log_orders.exception("admin audit failed")
+
+
+def _audit_target() -> str:
+    f = request.form
+    for key in ("order", "code", "value"):
+        if f.get(key):
+            return str(f.get(key))[:80]
+    return ("#" + str(f.get("id"))[:20]) if f.get("id") else ""
+
+
+def _job_of_order(order_id: str):
+    with _orders_lock:
+        o = _orders.get(order_id)
+        return (o.get("job_id") if o else None), o
+
+
+def _ops_action(action: str) -> str:
+    """運用の操作（運用タブ・注文の詳細・ホームの実行中の注文から）。戻り値は画面に出す一言。"""
+    f = request.form
+    try:
+        if action == "order_note":
+            oid = f.get("order", "")
+            if oid not in _orders and not admin_ops.order_record(oid):
+                return "注文が見つかりません。"
+            r = admin_ops.save_note(oid, f.get("note", ""), f.get("refund", "0"), f.get("refund_note", ""))
+            return "メモを保存しました。" + (f"返金 {r['refund']:,}円 として売上から差し引きます。" if r["refund"] else "")
+        if action == "block_add":
+            value = admin_ops.add_block(f.get("kind", ""), f.get("value", ""), f.get("days", ""), f.get("note", ""))
+            return f"{value} からの注文を受け付けないようにしました。"
+        if action == "block_remove":
+            return "受付停止を解除しました。" if admin_ops.remove_block(f.get("kind", ""), f.get("value", "")) else "見つかりませんでした。"
+        if action == "block_order":
+            with _orders_lock:
+                o = _orders.get(f.get("order", ""))
+                uid, ip = ((o.get("uid") or _uid(o["owner"])), o.get("ip")) if o else (None, None)
+            if not uid:
+                rec = admin_ops.order_record(f.get("order", ""))
+                uid = (rec or {}).get("history", {}).get("user_id")
+            if not uid:
+                return "注文が見つかりません。"
+            note = f.get("note", "") or ("注文 " + f.get("order", "")[:8])
+            admin_ops.add_block("uid", uid, f.get("days", ""), note)
+            if ip and f.get("with_ip") == "1":
+                admin_ops.add_block("ip", ip, f.get("days", ""), note)
+            return f"USERID {uid}" + (f" と IP {ip}" if ip and f.get("with_ip") == "1" else "") + " からの注文を受け付けないようにしました。"
+        if action == "notice_save":
+            admin_ops.set_notice(f.get("text", ""), f.get("hours", ""), f.get("level", "info"))
+            return "お知らせを出しました。" if f.get("text", "").strip() else "お知らせを消しました。"
+        if action == "sale_save":
+            admin_ops.set_sale(f.get("pct", ""), f.get("hours", ""), f.getlist("shops"), f.get("label", ""))
+            s = admin_ops.sale()
+            return (f"セールを始めました（{s['pct']}%引き・{_jst(s['until'])} まで）。これからの新しい注文から反映されます。"
+                    if s else "セールを終了しました。")
+        if action == "pause_save":
+            admin_ops.set_paused(f.getlist("shops"), f.getlist("menus"), f.get("message", ""), [k for k, _ in _pausable_menus()])
+            n = len(admin_ops.settings()["paused"]["shops"]) + len(admin_ops.paused_menus())
+            return f"受付の一時停止を保存しました（止めているもの {n} 件）。" if n else "受付の一時停止をすべて解除しました。"
+        if action == "slots_save":
+            want = admin_ops.set_slots(f.get("normal", ""), f.get("long", ""))
+            _apply_slot_settings()
+            with _jobs_lock:
+                now = (len(_slots), len(_long_slots))
+            pend = (want["normal"] is not None and now[0] != want["normal"]) or (want["long"] is not None and now[1] != want["long"])
+            return f"実行枠を保存しました（いま ふつう {now[0]}・長時間 {now[1]}）。" + ("動いている実行が終わると、残りも減ります。" if pend else "")
+        if action == "faq_add":
+            admin_ops.faq_add(f.get("shop", "all"), f.get("q", ""), f.get("a", ""))
+            return "Q&A の回答を追加しました。チャットが、この答えも使うようになります。"
+        if action == "faq_delete":
+            return "削除しました。" if admin_ops.faq_delete(int(f.get("id") or 0)) else "見つかりませんでした。"
+        job_id, o = _job_of_order(f.get("order", ""))
+        if not job_id:
+            return "この注文は、いま実行していません。"
+        if action == "job_stop":
+            with _jobs_lock:
+                job = _jobs.get(job_id) or {}
+            if job.get("status") != "running" or job.get("mode") != "puni":
+                return "途中で止められるのは、実行中のぷにぷにの注文だけです（ほかは途中で止めると結果が分からなくなるため）。"
+            with _job_pipes_lock:
+                pipe = _job_pipes.get(job_id)
+            try:
+                pipe.send({"stop": True})
+            except (AttributeError, BrokenPipeError, EOFError, OSError):
+                return "処理とつながっていません。少し待ってからもう一度お試しください。"
+            return "止めるよう伝えました。いまの1周が終わると止まり、そこまでの結果で完了になります。"
+        with _jobs_lock:
+            entry = next((e for e in _pending_jobs if e[0] == job_id), None)
+            if entry is None:
+                return "この注文は順番待ちではありません（もう始まっています）。"
+            _pending_jobs.remove(entry)
+            if action == "job_front":
+                _pending_jobs.appendleft(entry)
+                _start_queued_jobs_locked()
+                return "順番待ちの先頭にしました。"
+            if entry[2] is not None:
+                _active_transfers.discard(entry[2])
+            _jobs[job_id].update(status="error", error="順番待ちを取り消しました。お支払い済みの場合は、注文からそのまま（追加料金なしで）実行できます。",
+                                 finished=time.time())
+        return "順番待ちを取り消しました。お支払いは注文に残り、お客さんはあとで追加料金なしで実行できます。"
+    except ValueError as exc:
+        return str(exc)
+    except OSError:
+        _log_orders.exception("ops action failed")
+        return "保存できませんでした。"
+
+
 def _backup_response():
     """管理画面からのバックアップ：注文（暗号化のまま）・台帳・料金や設定のファイルを1つにまとめて渡す。
     台帳（SQLite）は使用中でも壊れない写し方（backup）で写す。暗号鍵（.env）は入れない。"""
@@ -1864,13 +2116,16 @@ def _admin_post(token):
             if admin_2fa.enabled():                       # 2段階認証：次に、認証アプリの6桁を入れてもらう
                 session["admin_2fa_at"] = time.time()
                 session["admin_csrf"] = secrets.token_urlsafe(32)
+                _audit("login_step1", "", "パスコードが合いました（6桁の入力待ち）")
                 return redirect("/admin")
             _admin_login()
+            _audit("login", "", "ログインしました")
             return redirect("/admin")
         else:
             _note_fail("admin:" + ip)
             _note_fail("admin:*")
             msg = "管理者パスコードが違うか、設定されていません。"
+            _audit("login_failed", "", "パスコードが違いました")
     elif action == "unlock_2fa":
         ip = _client_ip()
         if not _admin_2fa_waiting():
@@ -1880,10 +2135,12 @@ def _admin_post(token):
             msg = "失敗が続いたので、10分ほど待ってください。"
         elif admin_2fa.verify(request.form.get("code", "")):
             _admin_login()
+            _audit("login", "", "ログインしました（2段階認証）")
             return redirect("/admin")
         else:
             _note_fail("admin:" + ip)
             _note_fail("admin:*")
+            _audit("login_failed", "", "6桁の番号が違いました")
             msg = "6桁の番号が違います（番号は30秒ごとに変わります。同じ番号は一度しか使えません）。"
     elif action == "unlock_cancel":
         session.pop("admin_2fa_at", None)
@@ -2013,6 +2270,7 @@ def _admin_post(token):
         except OSError:
             msg = "保存できませんでした。"
     elif action == "backup_download":
+        _audit("backup_download", "", "バックアップをダウンロードしました")
         return _backup_response()
     elif action == "lock":
         _admin_logout()
@@ -2087,11 +2345,252 @@ def _admin_post(token):
             msg = "料金を変更しました。これからの新しい注文から反映されます（作成済みの注文の金額は変わりません）。"
         except (ValueError, OSError) as exc:
             msg = str(exc) or "保存できませんでした。"
+    elif action in OPS_ACTIONS:
+        msg = _ops_action(action)
     if request.form.get("action") == "unlock" and not _is_admin():
         session["admin_flash"] = msg
         return redirect("/admin")
+    if action not in ("unlock", "unlock_2fa", "unlock_cancel", "lock"):
+        _audit(action, _audit_target(), msg)
+    elif action == "lock":
+        _audit("logout", "", "管理者モードを終了しました")
     session["admin_flash"] = msg
+    oid = request.form.get("order", "")
+    if action in ORDER_ACTIONS and oid:   # 注文の詳細から操作した → その注文の詳細を開き直す
+        return redirect("/admin#o:" + re.sub(r"[^A-Za-z0-9_-]", "", oid)[:40])
     return redirect("/admin#" + ADMIN_TAB.get(request.form.get("action"), "home"))
+
+
+def _product_labels() -> list:
+    return [("ticket", PRODUCT_LABELS["ticket_once"]), ("ticket", PRODUCT_LABELS["ticket_period"]),
+            ("support", PRODUCT_LABELS["support"]), ("source", PRODUCT_LABELS["source"])]
+
+
+def _admin_json_only():
+    if not _is_admin():
+        return jsonify(error="管理者モードが必要です。", code="admin_required"), 403
+    return None
+
+
+def _range_args():
+    """?from=YYYY-MM-DD&to=YYYY-MM-DD（日本時間）。無ければ直近30日。"""
+    now = time.time()
+    end = admin_ops.parse_day(request.args.get("to", ""), end=True) or now
+    start = admin_ops.parse_day(request.args.get("from", ""))
+    if request.args.get("from") == "all":   # 全期間：最初の入金の日から
+        first = admin_ops.first_paid_at()
+        start = admin_ops.parse_day(datetime.datetime.fromtimestamp(first or end - 29 * 86400, _JST).strftime("%Y-%m-%d"))
+    if start is None:
+        start = admin_ops.parse_day(datetime.datetime.fromtimestamp(end - 29 * 86400, _JST).strftime("%Y-%m-%d"))
+    if start > end:
+        start, end = end - 86400, start
+    return start, min(end, max(start, now + 86400 * 366))
+
+
+@app.get("/admin/api/sales")
+def admin_sales():
+    denied = _admin_json_only()
+    if denied:
+        return denied
+    start, end = _range_args()
+    series = request.args.get("series", "all")
+    if series not in ("all",) + admin_ops.SERIES:
+        series = "all"
+    try:
+        paypay_gateway.history_upsert(_history_rows())   # いまの注文を台帳に写してから集計する
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("history update failed")
+    try:
+        return jsonify(admin_ops.report(start, end, request.args.get("unit"), series, _product_labels()))
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("sales report failed")
+        return jsonify(error="集計できませんでした。", code="report_failed"), 500
+
+
+@app.get("/admin/api/sales.csv")
+def admin_sales_csv():
+    denied = _admin_json_only()
+    if denied:
+        return denied
+    import csv
+    import io
+    start, end = _range_args()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    for row in admin_ops.csv_rows(start, end, _product_labels()):
+        writer.writerow([("'" + c) if isinstance(c, str) and c[:1] in ("=", "+", "-", "@") else c for c in row])   # 表計算ソフトで式にならないように
+    name = "sales-%s-%s.csv" % (datetime.datetime.fromtimestamp(start, _JST).strftime("%Y%m%d"),
+                                datetime.datetime.fromtimestamp(end, _JST).strftime("%Y%m%d"))
+    resp = Response("﻿" + buf.getvalue(), mimetype="text/csv")   # 先頭の印（BOM）＝Excel で文字化けしない
+    resp.headers["Content-Disposition"] = f"attachment; filename={name}"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+HISTORY_STATE_JA = {"unpaid": "未払い", "paying": "確認中", "hold": "保留", "paid": "支払い済み・未実行", "starting": "開始処理中",
+                    "started": "実行中", "done": "完了", "dead": "停止"}
+
+
+@app.get("/admin/api/orders")
+def admin_order_search():
+    denied = _admin_json_only()
+    if denied:
+        return denied
+    try:
+        paypay_gateway.history_upsert(_history_rows())
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("history update failed")
+    a = request.args
+    start = admin_ops.parse_day(a.get("from", ""))
+    end = admin_ops.parse_day(a.get("to", ""), end=True)
+    rows = admin_ops.search(a.get("q", ""), a.get("state", ""), a.get("shop", ""), start, end, 100, _product_labels())
+    return jsonify(orders=[{"order": r["order_id"], "when": _jst(r["created"]), "amount": r["amount"], "state": r["state"],
+                            "state_ja": HISTORY_STATE_JA.get(r["state"], r["state"]), "summary": r["summary"] or "",
+                            "shop": admin_ops.SHOP_LABELS.get(r["shop"], ""), "paid": r["pay_state"] == "paid",
+                            "sender": r["sender_name"] or "", "user": r["user_id"] or "", "note": r["note"] or "",
+                            "refund": r["refund"] or 0} for r in rows])
+
+
+@app.get("/admin/api/order/<order_id>")
+def admin_order_detail(order_id: str):
+    denied = _admin_json_only()
+    if denied:
+        return denied
+    order_id = str(order_id)[:40]
+    try:
+        paypay_gateway.history_upsert(_history_rows())
+    except Exception:  # noqa: BLE001
+        pass
+    rec = admin_ops.order_record(order_id)
+    with _orders_lock:
+        o = _orders.get(order_id)
+        live = None
+        if o:
+            live = {"state": o["state"], "state_ja": HISTORY_STATE_JA.get(o["state"], o["state"]), "amount": o["amount"],
+                    "base": o.get("base_amount"), "summary": o.get("summary", ""), "breakdown": o.get("breakdown") or [],
+                    "skipped": o.get("skipped") or [], "coupon": o.get("coupon"), "coupon_kind": o.get("coupon_kind"),
+                    "coupon_used": bool(o.get("coupon_used")), "coupon_issued": o.get("coupon_issued"), "retry": bool(o.get("retry")),
+                    "delivered": bool(o.get("delivered")), "diag": o.get("diag", ""), "uid": o.get("uid") or _uid(o["owner"]),
+                    "ip": o.get("ip") or "", "admin_free": bool(o.get("admin_free")), "free_coupon": bool(o.get("free_coupon")),
+                    "product": (o.get("product") or {}).get("type"), "has_link": bool(o.get("link_code")),
+                    "long": bool((o.get("job") or {}).get("long")), "progress": _resume_note(o),
+                    "outcome": (o.get("outcome") or {}).get("lines"), "reviewed": bool(o.get("reviewed")),
+                    "created": _jst(o["created"]), "job_id": o.get("job_id"), "dept": admin_ops.SHOP_LABELS.get(_order_dept(o), "")}
+    if not rec and not live:
+        return jsonify(error="見つかりません。", code="order_missing"), 404
+    job = None
+    if live and live["job_id"]:
+        with _jobs_lock:
+            j = _jobs.get(live["job_id"])
+            queued = [e[0] for e in _pending_jobs]
+            if j:
+                job = {"status": j.get("status"), "step": j.get("step"), "error": j.get("error"), "log": (j.get("log") or [])[-60:],
+                       "mode": j.get("mode"), "long": bool(j.get("long")), "started": _jst(j["created"]) if j.get("created") else "",
+                       "queue": queued.index(live["job_id"]) + 1 if live["job_id"] in queued else None,
+                       "lines": ((j.get("tsum") or j.get("puni") or {}).get("lines") or [])[-40:]}
+    link, hist = (rec or {}).get("link"), (rec or {}).get("history") or {}
+    note = admin_ops.note_of(order_id) or {}
+    return jsonify(order=order_id, live=live, job=job,
+                   history={"when": _jst(hist["created"]) if hist.get("created") else "", "state_ja": HISTORY_STATE_JA.get(hist.get("state"), hist.get("state") or ""),
+                            "amount": hist.get("amount"), "summary": hist.get("summary") or "", "diag": hist.get("diag") or "",
+                            "user": hist.get("user_id") or "", "shop": admin_ops.SHOP_LABELS.get(hist.get("shop") or "", "")} if hist else None,
+                   pay={"state": link["state"], "paid": link["state"] == "paid", "when": _jst(link["created"]), "amount": link["amount"],
+                        "sender": link["sender_name"] or "", "sender_id": link["sender_id"] or "", "status": link["last_status"] or ""} if link else None,
+                   events=[{"when": _jst(e["at"]), "state_ja": HISTORY_STATE_JA.get(e["state"], e["state"] or ""), "text": e["text"] or ""}
+                           for e in (rec or {}).get("events", [])],
+                   review={"stars": rec["review"]["stars"], "text": rec["review"]["body"], "when": _jst(rec["review"]["created"]),
+                           "hidden": bool(rec["review"]["hidden"])} if rec and rec.get("review") else None,
+                   note={"note": note.get("note", ""), "refund": note.get("refund", 0), "refund_note": note.get("refund_note", ""),
+                         "refund_at": _jst(note["refund_at"]) if note.get("refund_at") else ""},
+                   actions=[{"when": _jst(a["at"]), "action": AUDIT_LABELS.get(a["action"], a["action"]), "msg": a["msg"] or ""}
+                            for a in admin_ops.action_log(30, order_id)],
+                   csrf=session.get("admin_csrf", ""))
+
+
+def _health() -> list:
+    """サーバーの点検。各行 (名前, 状態 ok/warn/bad, 説明)。"""
+    import socket
+    out = []
+    try:
+        pp = paypay_gateway.status()
+        left = pp["expires_at"] - time.time()
+        out.append(("PayPay の接続", "ok" if pp["ready"] and left > 86400 else "warn" if pp["ready"] else "bad",
+                    (f"有効（期限 {_jst(pp['expires_at'])}）" if pp["ready"] else "期限切れ・未接続（次の決済で再認証が必要）")))
+    except Exception as exc:  # noqa: BLE001
+        out.append(("PayPay の接続", "bad", f"確認できません（{type(exc).__name__}）"))
+    names = _names
+    out.append(("にゃんこのゲームデータ", "ok" if names.get("state") == "ready" else "warn" if names.get("state") in ("loading", "none") else "bad",
+                f"版 {names.get('version') or '不明'}・キャラ {len(names.get('items') or [])}体・状態 {names.get('state')}"
+                + (f"・最新の版 {_learned['version']}" if _learned.get("version") and _learned["version"] != names.get("version") else "")))
+    out.append(("にゃんこの実行の準備（bcsfe）", "ok" if _bcsfe_state.get("status") == "ready" else "warn" if _bcsfe_state.get("status") in ("idle", "loading") else "bad",
+                str(_bcsfe_state.get("status")) + (f"：{str(_bcsfe_state.get('error'))[:80]}" if _bcsfe_state.get("error") else "")))
+    out.append(("注文の保存", "bad" if _orders_unsaved else "ok", "直近の保存に失敗しています（ログを確認）" if _orders_unsaved else "保存できています"))
+    base = os.environ.get("PAYPAY_DATA_DIR", "instance/paypay")
+    try:
+        du = shutil.disk_usage(base if os.path.isdir(base) else ".")
+        pct = du.free * 100 / du.total
+        out.append(("ディスクの空き", "ok" if pct >= 15 else "warn" if pct >= 5 else "bad", f"{du.free / 2**30:.1f}GB 空き（{pct:.0f}%）"))
+    except OSError:
+        out.append(("ディスクの空き", "warn", "確認できません"))
+    try:
+        mem = {}
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                k, v = line.split(":", 1)
+                mem[k] = int(v.split()[0])
+        pct = mem["MemAvailable"] * 100 / mem["MemTotal"]
+        load = os.getloadavg()[0]
+        out.append(("メモリと負荷", "ok" if pct >= 15 else "warn" if pct >= 7 else "bad",
+                    f"空き {mem['MemAvailable'] / 2**20:.1f}GB（{pct:.0f}%）・負荷 {load:.2f}（CPU {os.cpu_count()}個）"))
+    except (OSError, KeyError, ValueError, ZeroDivisionError):
+        pass
+    socks = os.environ.get("TSUM_SOCKS_URL", "")
+    if socks:
+        target = urlsplit(socks)
+        try:
+            with socket.create_connection((target.hostname, target.port or 9050), timeout=1.5):
+                pass
+            out.append(("Tor（LINEログインの回線）", "ok", "つながります"))
+        except OSError:
+            out.append(("Tor（LINEログインの回線）", "bad", "つながりません（ツムツムの LINE ログインが失敗しやすくなります）"))
+    stamp = os.path.join(os.path.dirname(os.path.abspath(base)), "last_backup")
+    try:
+        with open(stamp) as fh:
+            at = float(fh.read().strip() or 0)
+        age = time.time() - at
+        out.append(("サーバーの自動バックアップ", "ok" if age < 36 * 3600 else "warn" if age < 4 * 86400 else "bad", f"最後 {_jst(at)}"))
+    except (OSError, ValueError):
+        out.append(("サーバーの自動バックアップ", "warn", "記録がありません（次のデプロイのあと、毎日の自動保存から記録されます）"))
+    out.append(("Q&A・実績の AI", "ok" if os.environ.get("ANTHROPIC_API_KEY") else "warn",
+                "鍵あり" if os.environ.get("ANTHROPIC_API_KEY") else "鍵なし（固定文の案内・決まった検査だけで動きます）"))
+    out.append(("購入時の人間確認（Turnstile）", "ok" if human.enabled() else "warn", "有効" if human.enabled() else "無効（鍵が未設定）"))
+    out.append(("管理画面の2段階認証", "ok" if admin_2fa.enabled() else "warn", "有効" if admin_2fa.enabled() else "無効（設定タブから有効にできます）"))
+    return [{"name": n, "level": lv, "text": t} for n, lv, t in out]
+
+
+@app.get("/admin/api/log")
+def admin_log_api():
+    denied = _admin_json_only()
+    if denied:
+        return denied
+    return jsonify(items=[{"when": _jst(a["at"]), "label": AUDIT_LABELS.get(a["action"], a["action"]), "failed": a["action"] == "login_failed",
+                           "target": a["target"] or "", "msg": a["msg"] or "", "ip": a["ip"] or ""} for a in admin_ops.action_log(100)])
+
+
+@app.get("/admin/api/health")
+def admin_health():
+    denied = _admin_json_only()
+    if denied:
+        return denied
+    with _jobs_lock:
+        par = _parallel_state_locked()
+    return jsonify(items=_health(), version=APP_VERSION, uptime=int(time.time() - _started_at),
+                   slots={"normal": len(_slots), "long": len(_long_slots), "running": par.get("running_jobs", 0),
+                          "queued": par.get("queued_jobs", 0), "long_running": par.get("long_running_jobs", 0),
+                          "long_queued": par.get("long_queued_jobs", 0)})
+
+
+FAQ_SHOPS = {"all": "全部の部門", "nyanko": "にゃんこ", "tsum": "ツムツム", "puni": "ぷにぷに"}
 
 
 def _admin_page(msg):
@@ -2150,10 +2649,17 @@ def _admin_page(msg):
         for o in orders:
             counts[o["state"]] = counts.get(o["state"], 0) + 1
         with _orders_lock:   # 実行中の注文（長時間の周回は途中経過つき）
-            running_orders = [{"summary": v.get("summary", ""), "amount": v["amount"], "long": bool((v.get("job") or {}).get("long")),
-                               "created": time.strftime("%m/%d %H:%M", time.localtime(v["created"])),
-                               "progress": _resume_note(v)}
-                              for v in sorted(_orders.values(), key=lambda v: -v["created"]) if v["state"] == "started"][:20]
+            running_orders = [{"id": k, "summary": v.get("summary", ""), "amount": v["amount"], "long": bool((v.get("job") or {}).get("long")),
+                               "created": time.strftime("%m/%d %H:%M", time.localtime(v["created"])), "job_id": v.get("job_id"),
+                               "puni": (v.get("job") or {}).get("mode") == "puni", "progress": _resume_note(v)}
+                              for k, v in sorted(_orders.items(), key=lambda kv: -kv[1]["created"]) if v["state"] == "started"][:20]
+        with _jobs_lock:
+            queue = [e[0] for e in _pending_jobs]
+            for r in running_orders:
+                j = _jobs.get(r["job_id"]) or {}
+                r["status"] = j.get("status")
+                r["queue"] = queue.index(r["job_id"]) + 1 if r["job_id"] in queue else None
+                r["step"] = (j.get("log") or [""])[-1][9:80] if j.get("log") else ""
         dash = {"running": par.get("running_jobs", 0), "queued": par.get("queued_jobs", 0), "max_jobs": par.get("max_concurrent_jobs", 0),
                 "long_running": par.get("long_running_jobs", 0), "long_queued": par.get("long_queued_jobs", 0),
                 "long_slots": par.get("long_slots", 0), "running_orders": running_orders,
@@ -2194,11 +2700,31 @@ def _admin_page(msg):
                             "user": r["user_id"], "done": bool(r["done"]), "when": _jst(r["created"])})
         except Exception:
             _log_orders.exception("feedback list failed")
+    ops = {}
+    if unlocked:
+        try:
+            st = admin_ops.settings()
+            notice = st["notice"]
+            sale = admin_ops.sale()
+            ops = {"notice": notice, "notice_on": bool(admin_ops.notice()),
+                   "notice_until": _jst(notice["until"]) if notice.get("until") else "",
+                   "sale": sale, "sale_until": _jst(sale["until"]) if sale else "", "sale_shops": admin_ops.SALE_SHOPS,
+                   "paused": st["paused"], "pausable": _pausable_menus(),
+                   "shops": [(k, admin_ops.SHOP_LABELS[k]) for k in admin_ops.SHOPS],
+                   "blocks": [dict(b, until_ja=_jst(b["until"]) if b.get("until") else "無期限", at_ja=_jst(b.get("at") or 0)) for b in admin_ops.blocks()],
+                   "slots": admin_ops.slots(), "slot_now": (len(_slots), len(_long_slots)), "slot_default": _SLOT_DEFAULT,
+                   "slot_limits": admin_ops.SLOT_LIMITS,
+                   "jobs": admin_ops.job_summary(),
+                   "faq": admin_ops.faq_list(),
+                   "paused_count": len(st["paused"].get("shops", [])) + len(st["paused"].get("menus", []))}
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("ops view failed")
+            msg = msg or "運用の設定を読み込めませんでした。"
     rp = restart_pack()
     rp_text = "\n".join(f"{k}={v}" for k, v in rp["items"].items())
     tfa = {"on": admin_2fa.enabled(), "waiting": not unlocked and _admin_2fa_waiting(),
            "setup": admin_2fa.pending("admin", site_config.SHOP_NAME) if unlocked and not admin_2fa.enabled() else None}
-    return render_template_string(ADMIN_HTML, tfa=tfa, coupons=coupons, reviews=reviews, box=box, box_open=sum(1 for b in box if not b["done"]), review_words="\n".join(review_extra_words()), review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
+    return render_template_string(ADMIN_HTML, tfa=tfa, ops=ops, faq_shops=FAQ_SHOPS, coupons=coupons, reviews=reviews, box=box, box_open=sum(1 for b in box if not b["done"]), review_words="\n".join(review_extra_words()), review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
                                   maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED,
@@ -2335,6 +2861,7 @@ def _reconcile_orders() -> None:
     - コード発行中に結果不明 → done 扱い（自動では再実行させない。管理画面で対応）"""
     changed = False
     issue_for = []
+    stats = []        # 実行の結末（メニュー別の成功率に使う）：(部門, メニュー, 成功か, 理由, 注文)
     stamp = time.strftime('%m/%d %H:%M')
     progressed = False
     with _orders_lock:
@@ -2357,6 +2884,7 @@ def _reconcile_orders() -> None:
             if info and info[0] in ("running", "queued"):
                 continue
             if info and info[0] == "done":
+                stats += [(_order_dept(o), m, True, None, k_order) for m in _stat_menus(o)]
                 o.update(state="done", arguments=None, transfer_key=None, diag=f"done {stamp}")
                 o.pop("checkpoint", None)
                 if not o.get("admin_free"):
@@ -2369,16 +2897,24 @@ def _reconcile_orders() -> None:
                     o["outcome"] = outcomes[o["job_id"]]
                 o.pop("delivered", None)
             elif info and (info[2] or info[3]):
+                stats += [(_order_dept(o), m, False, "結果不明：" + str(info[1] or "")[:80], k_order) for m in _stat_menus(o)]
                 o.update(state="done", arguments=None, transfer_key=None, diag=f"結果不明: {str(info[1])[:80]} {stamp}")
                 if o.get("job_id") in results:
                     o["result"], o["clone"], o["dry"] = results[o["job_id"]]
             else:
                 reason = str(info[1])[:80] if info else "中断（サーバー再起動など）"
+                if not reason.startswith("順番待ちを取り消しました"):   # お客さんの取り消しは失敗に数えない
+                    stats += [(_order_dept(o), m, False, reason, k_order) for m in _stat_menus(o)]
                 o.update(state="paid", retry=True, job_id=None, diag=f"失敗→再実行可: {reason} {stamp}")
                 if info and info[4]:
                     o["delivered"] = True   # 一部は提供済み：この支払いを別の内容に充てさせない（_place_order・_adopt_existing_link）
                 _carry_progress(o, interrupted=info is None)
             changed = True
+    if stats:
+        try:
+            admin_ops.record_jobs(stats)
+        except Exception:  # noqa: BLE001  集計の記録が書けなくても、注文の処理は止めない
+            _log_orders.exception("job stats failed")
     for k_order, o in issue_for:   # 200円以上の購入にはクーポンを1枚発行（次回200円以上で10%引き・1回きり）
         try:
             o["coupon_issued"] = paypay_gateway.coupon_issue(k_order, COUPON_DAYS)
@@ -2393,6 +2929,35 @@ def _reconcile_orders() -> None:
 
 
 CHECKPOINT_SAVE_EVERY = 60     # 長い周回の途中経過をディスクに書く間隔（秒）。再起動で失うのは最大この時間ぶん
+
+
+NYANKO_KINDS = {"clone": "にゃんこ：アカウント複製", "integrity": "にゃんこ：バン保証", "restart": "にゃんこ：初期垢作成",
+                "download": "にゃんこ：引き継ぎ", "new": "にゃんこ：新規アカウント"}
+
+
+def _nyanko_kind(job: dict, arguments=None) -> str:
+    if job.get("clone"):
+        return "clone"
+    if job.get("integrity_only") or job.get("mode") == "integrity":
+        return "integrity"
+    others = arguments[4] if arguments and not _is_tsum_arguments(arguments) and len(arguments) > 4 else []
+    if RESTART_KEY in (others or []):
+        return "restart"
+    return "download" if job.get("mode") == "download" else "new"
+
+
+def _stat_menus(o: dict) -> list:
+    """成功率の集計に使うメニュー名（ツムツム・ぷにぷにはメニューごと、にゃんこは種類ごと）。呼ぶ側で _orders_lock を持つ。"""
+    if o.get("product"):
+        return []
+    job, args = o.get("job") or {}, o.get("arguments")
+    if job.get("mode") == "tsum" and _is_tsum_arguments(args):
+        return [tsum_service.menu_label(m) for m in args[0].get("menus") or []][:10] or ["ツムツム"]
+    if job.get("mode") == "puni" and _is_tsum_arguments(args):
+        return [puni_service.menu_label(m) for m in args[0].get("menus") or []][:10] or ["ぷにぷに"]
+    if job.get("mode") in ("tsum", "puni"):
+        return ["ツムツム" if job.get("mode") == "tsum" else "ぷにぷに"]
+    return [NYANKO_KINDS[_nyanko_kind(job, args)]]
 
 
 def _has_result(result) -> bool:
@@ -2500,10 +3065,24 @@ def _rescue_stranded_orders() -> None:
         _persist_orders()
 
 
+def _order_dept(o: dict) -> str:
+    """売上の集計に使う部門（nyanko / tsum / puni / ticket / support / source）。"""
+    product = (o.get("product") or {}).get("type")
+    if product:
+        return "ticket" if str(product).startswith("ticket") else product
+    mode = (o.get("job") or {}).get("mode")
+    return mode if mode in ("tsum", "puni") else "nyanko"
+
+
 def _history_rows() -> list:
     with _orders_lock:
         return [{"order_id": k, "created": v["created"], "user_id": v.get("uid") or _uid(v["owner"]), "amount": v["amount"],
-                 "state": v["state"], "summary": v.get("summary", ""), "diag": v.get("diag", "")} for k, v in _orders.items()]
+                 "state": v["state"], "summary": v.get("summary", ""), "diag": v.get("diag", ""),
+                 "shop": _order_dept(v), "base": int(v.get("base_amount") if v.get("base_amount") is not None else v["amount"]),
+                 "lines": json.dumps([{"label": str(b.get("label", ""))[:60], "count": b.get("count"), "unit": b.get("unit"),
+                                       **({"coupon": True} if b.get("coupon") else {})}
+                                      for b in (v.get("breakdown") or [])[:40] if isinstance(b, dict)], ensure_ascii=False),
+                 "coupon_kind": v.get("coupon_kind")} for k, v in _orders.items()]
 
 
 def _load_orders() -> None:
@@ -2910,6 +3489,13 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
                 return reject(jsonify(error=f"クーポンは {COUPON_MIN}円以上のご注文で使えます（いまは {base_amount}円）。", code="coupon_min"), 400)
             amount = base_amount * 9 // 10   # 10%引き（1円未満切り捨て）
             breakdown.append({"label": f"クーポン（10%引き）{coupon}", "count": 1, "unit": amount - base_amount, "coupon": True})
+    sale_pct = 0 if free_coupon else admin_ops.sale_pct(_order_dept({"job": job}))
+    if sale_pct:   # セール（管理画面で期間を決める）：クーポンのあとの金額から、さらに割り引く
+        sale_info = admin_ops.sale() or {}
+        discounted = amount * (100 - sale_pct) // 100
+        breakdown.append({"label": f"{sale_info.get('label') or 'セール'}（{sale_pct}%引き）", "count": 1,
+                          "unit": discounted - amount, "coupon": True, "sale": True})
+        amount = discounted
     me = _owner()
     trimmed_coupons = []
     with _orders_lock:
@@ -2968,7 +3554,7 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
                                  "amount": amount, "created": time.time(),
                                  "job": job, "arguments": arguments, "transfer_key": transfer_key,
                                  "breakdown": breakdown, "skipped": skipped, "summary": summary,
-                                 "coupon": coupon or None, "base_amount": base_amount}
+                                 "coupon": coupon or None, "base_amount": base_amount, "ip": _client_ip()}
     for c, k in trimmed_coupons:          # 閉じた古い注文が押さえていたクーポンは、使えるように戻す
         try:
             paypay_gateway.coupon_release(c, k)
@@ -3078,6 +3664,9 @@ def _run_tsum_order(data: dict, admin_free: bool):
         with _jobs_lock:
             if transfer_key in _active_transfers:
                 return jsonify(error="このアカウントの処理はすでに実行中です。完了までお待ちください。"), 409
+    gate = _order_gate("tsum", menus)
+    if gate:
+        return gate
     return _checkout(job, arguments, transfer_key, _tsum_summary(mode, menus, qty), [],
                      lambda: compute_tsum_amount(menus, qty), data.get("coupon", ""), admin_free)
 
@@ -3159,6 +3748,9 @@ def _run_puni_order(data: dict, admin_free: bool):
         with _jobs_lock:
             if transfer_key in _active_transfers:
                 return jsonify(error="このアカウントの処理はすでに実行中です。完了までお待ちください。"), 409
+    gate = _order_gate("puni", menus)
+    if gate:
+        return gate
     return _checkout(job, arguments, transfer_key, _puni_summary(mode, menus, qty, stages), [],
                      lambda: compute_puni_amount(menus, qty), data.get("coupon", ""), admin_free)
 
@@ -3328,6 +3920,9 @@ def run():
     }
     transfer_key = hmac.new(app.secret_key.encode(), transfer.encode(), hashlib.sha256).digest() if transfer else None
     arguments = (transfer, confirm, items, subs, others, qty, cat_nums, cat_settings, dry, clone, integrity_only)
+    gate = _order_gate("nyanko", ["nyanko:" + _nyanko_kind(job, arguments)])
+    if gate:
+        return gate
     if transfer_key is not None:
         with _jobs_lock:
             if transfer_key in _active_transfers:
@@ -3527,6 +4122,9 @@ def _create_product_order(product: dict, amount: int, summary: str):
         return _maintenance_response()
     if not _rate_ok("product:" + _client_ip(), 10, 600):
         return _too_fast()
+    gate = _order_gate("ticket" if str(product.get("type", "")).startswith("ticket") else str(product.get("type", "")))
+    if gate:
+        return gate
     _gc_orders()
     me = _owner()
     with _orders_lock:
@@ -3538,7 +4136,8 @@ def _create_product_order(product: dict, amount: int, summary: str):
         breakdown = [{"label": summary, "count": 1, "unit": amount}]
         _orders[order_id] = {"owner": me, "uid": _uid(me), "state": "unpaid", "amount": amount, "created": time.time(),
                              "job": None, "arguments": None, "transfer_key": None, "product": product,
-                             "breakdown": breakdown, "skipped": [], "summary": summary, "coupon": None, "base_amount": amount}
+                             "breakdown": breakdown, "skipped": [], "summary": summary, "coupon": None, "base_amount": amount,
+                             "ip": _client_ip()}
     _persist_orders()
     return jsonify(order=order_id, amount=amount, breakdown=breakdown)
 
@@ -3916,6 +4515,8 @@ def box_post():
     data = _json_body()
     if str(data.get("website") or "").strip():          # 人には見えない欄。埋めてくるのは自動投稿だけ → 受け取ったふりをして捨てる
         return jsonify(ok=True)
+    if _client_blocked():
+        return jsonify(error=BLOCK_MSG, code="blocked"), 403
     if not _human_ok(data.get("human")):
         return _human_required()
     kind = str(data.get("kind") or "")
@@ -3971,7 +4572,11 @@ def qa():
     orders = _qa_orders_for(shop) if on else []
     live = _qa_live(shop) if on else None
     history = data.get("history") if isinstance(data.get("history"), list) else []
-    out = qa_bot.answer(shop, question, orders, history[-qa_bot.MAX_HISTORY:], live)
+    try:
+        extra = admin_ops.faq_list(shop)
+    except Exception:  # noqa: BLE001
+        extra = []
+    out = qa_bot.answer(shop, question, orders, history[-qa_bot.MAX_HISTORY:], live, extra)
     return jsonify(answer=out["answer"], enabled=out.get("enabled", False))
 
 

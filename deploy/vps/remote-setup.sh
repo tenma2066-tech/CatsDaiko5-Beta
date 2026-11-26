@@ -114,6 +114,8 @@ OUT="$B/$(date +%Y%m%d-%H%M%S)-$KIND.tar.gz"
 tar czf "$OUT" -C "$T" . && chmod 600 "$OUT"
 KEEP=14; [ "$KIND" = predeploy ] && KEEP=10
 ls -1t "$B"/*-"$KIND".tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+# 管理画面の「サーバーの点検」に、最後に保存した時刻を出す（アプリからは /data/last_backup として見える）
+date +%s > "$D/data/last_backup" 2>/dev/null || true
 echo "backup: $OUT"
 SH
 chmod 700 "$APP_DIR/backup.sh"

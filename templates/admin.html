@@ -52,6 +52,40 @@ header a{color:var(--muted)}
 .gate{max-width:380px;margin:14vh auto 0}
 table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding:6px 0;border-top:1px solid var(--soft)}.price td:last-child{text-align:right;font-weight:800}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+:root{--s1:#257de0;--s2:#f47230;--s3:#00b894;--s4:#f2a600;--grid:#e7e7e7;--axis:#c2c2c2;--ink2:#666;--up:#006c10;--down:#c22b2b}
+@media (prefers-color-scheme:dark){:root{--s1:#338ced;--s2:#e76624;--s3:#00a888;--s4:#d28e05;--grid:#30343c;--axis:#4a505b;--ink2:#9c9c9c;--up:#53c556;--down:#ff8a8a}}
+.filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.filters .btn{min-height:36px;padding:0 10px;font-size:13px}.filters .btn[aria-pressed=true]{background:var(--accent);color:#17181c}
+.filters select,.filters input[type=date]{min-height:36px;font:inherit;font-size:14px;padding:4px 8px;border:2px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink)}
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+@media (min-width:620px){.kpis{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.kpi{background:var(--soft);border-radius:12px;padding:10px 12px;min-width:0}.kpi small{display:block;color:var(--muted);font-size:12px}
+.kpi b{display:block;font-size:20px;line-height:1.3;font-weight:700}.kpi span{display:block;font-size:12px;color:var(--muted)}
+.kpi .up{color:var(--up)}.kpi .down{color:var(--down)}
+.hero{font-size:44px;font-weight:700;line-height:1.1;margin:4px 0 2px;letter-spacing:-.5px}
+.chart{position:relative;margin-top:6px;transition:opacity .15s}.chart.loading{opacity:.45}.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart text{fill:var(--ink2);font-size:11px;font-family:system-ui,-apple-system,sans-serif;font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--ink2);margin-top:6px}.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.tip{position:absolute;pointer-events:none;z-index:6;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-size:12.5px;box-shadow:0 4px 14px rgba(0,0,0,.18);min-width:140px;white-space:nowrap}
+.tip .t{color:var(--ink2);font-size:11.5px;margin-bottom:3px}.tip .r{display:flex;align-items:center;gap:6px}.tip .r b{margin-left:auto;padding-left:12px}.tip .k{display:inline-block;width:12px;height:2px;border-radius:2px}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}.tbl th,.tbl td{padding:5px 6px;border-top:1px solid var(--soft);text-align:right;white-space:nowrap}
+.tbl th:first-child,.tbl td:first-child{text-align:left}.tbl thead th{color:var(--muted);font-weight:700;border-top:0}
+.tblwrap{overflow-x:auto;margin-top:8px}
+.bars .row1{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;margin:7px 0 0;font-size:13px}
+.bars .row1 .lab{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bars .row1 .val{font-variant-numeric:tabular-nums;font-weight:700}
+.bars .track{grid-column:1/-1;height:8px;border-radius:4px;background:var(--soft);overflow:hidden}.bars .fill{height:100%;border-radius:4px}
+.seg{display:flex;gap:2px;height:28px;margin-top:8px}.seg div{border-radius:4px;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;padding-left:6px;overflow:hidden;white-space:nowrap;min-width:0}
+.dlg{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+.dlg[hidden]{display:none}.dlg .inner{background:var(--bg);width:100%;max-width:760px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:4px 14px 30px}
+@media (min-width:700px){.dlg{align-items:center}.dlg .inner{border-radius:18px}}
+.dlg .head{position:sticky;top:0;background:var(--bg);display:flex;align-items:center;gap:8px;padding:10px 0;z-index:2}.dlg .head h2{flex:1;margin:0;font-size:17px}
+.tl{list-style:none;margin:6px 0 0;padding:0}.tl li{position:relative;padding:0 0 10px 18px;font-size:13px}.tl li:before{content:"";position:absolute;left:4px;top:6px;width:8px;height:8px;border-radius:50%;background:var(--accent);border:2px solid var(--line)}
+.tl li:after{content:"";position:absolute;left:8px;top:16px;bottom:0;width:2px;background:var(--soft)}.tl li:last-child:after{display:none}
+.logbox{white-space:pre-wrap;font-size:12px;background:var(--soft);border-radius:10px;padding:8px;max-height:240px;overflow:auto;margin-top:6px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:3px 12px;font-size:13px;margin-top:6px}.kv dt{color:var(--muted)}.kv dd{margin:0;word-break:break-all}
+.hl{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-top:1px solid var(--soft)}.hl:first-child{border-top:0}.hl .tx{flex:1;min-width:0;font-size:13px}
+.chk{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:13.5px}.chk label{font-weight:400;margin:2px 0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 </style></head><body>
 <div class="wrap">
 <header><h1>管理者</h1><a href="/">← サイトへ戻る</a></header>
@@ -72,11 +106,13 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 
 <div class="nav"><div class="tabs" role="tablist">
 <button class="tab" role="tab" data-sec="home">ホーム</button>
+<button class="tab" role="tab" data-sec="sales">売上</button>
 <button class="tab" role="tab" data-sec="orders">注文{% if dash.attention %}<span class="badge">{{ dash.attention|length }}</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="history">履歴</button>
 <button class="tab" role="tab" data-sec="paypay">PayPay{% if not pp.ready %}<span class="badge">!</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="reviews">実績</button>
 <button class="tab" role="tab" data-sec="box">意見箱{% if box_open %}<span class="badge">{{ box_open }}</span>{% endif %}</button>
+<button class="tab" role="tab" data-sec="ops">運用{% if ops.paused_count or ops.sale or ops.notice_on %}<span class="badge warn">{{ (ops.paused_count or 0) + (1 if ops.sale else 0) + (1 if ops.notice_on else 0) }}</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="settings">設定{% if maint.on %}<span class="badge warn">ON</span>{% endif %}</button>
 </div></div>
 
@@ -91,12 +127,17 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <div class="stat {{ 'bad' if dash.attention else 'ok' }}"><small>要対応の注文</small><b>{{ dash.attention|length }} 件</b><span>未完了 全{{ dash.open_orders }}件</span></div>
 </div></div>
 {% if dash.running_orders %}<div class="card"><h2>実行中の注文</h2><p class="sub">長時間の周回は、サーバーの更新で止まっても続きから自動で再開します（更新は長時間レーンを待たずに進みます）。</p>
-{% for o in dash.running_orders %}<div class="h"><div class="l1">{% if o.long %}<span class="chip warn">長時間</span>{% endif %}<span class="chip">{{ o.created }} 注文</span><span class="amt">{{ o.amount }}円</span></div>
-<div class="sub">{{ o.summary }}</div>{% if o.progress %}<div class="sub" style="font-size:12px">途中経過：{{ o.progress }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
+{% for o in dash.running_orders %}<div class="h"><div class="l1">{% if o.queue %}<span class="chip warn">順番待ち {{ o.queue }}番目</span>{% else %}<span class="chip ok">実行中</span>{% endif %}{% if o.long %}<span class="chip warn">長時間</span>{% endif %}<span class="chip">{{ o.created }} 注文</span><span class="amt">{{ o.amount }}円</span></div>
+<div class="sub">{{ o.summary }}</div>{% if o.progress %}<div class="sub" style="font-size:12px">途中経過：{{ o.progress }}</div>{% endif %}{% if o.step %}<div class="sub" style="font-size:12px">いま：{{ o.step }}</div>{% endif %}
+<form method="post" class="row" style="margin-top:6px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="order" value="{{ o.id }}">
+<button class="btn" type="button" data-order="{{ o.id }}">詳細・ログ</button>
+{% if o.queue %}<button class="btn" name="action" value="job_front">先頭にする</button><button class="btn danger" name="action" value="job_cancel" data-confirm="この順番待ちを取り消しますか？\nお支払いは注文に残り、お客さんはあとで追加料金なしで実行できます。">取り消す</button>
+{% elif o.puni and o.status == 'running' %}<button class="btn danger" name="action" value="job_stop" data-confirm="この周回を止めますか？\nいまの1周が終わると止まり、そこまでの結果で完了になります（返金は自動ではありません）。">止める</button>{% endif %}
+</form></div>{% endfor %}</div>{% endif %}
 <div class="card"><h2>売上（入金確認済み）</h2>
 <div class="grid"><div class="stat"><small>今日</small><b>{{ '{:,}'.format(dash.today.yen) }} 円</b><span>{{ dash.today.count }} 件</span></div>
 <div class="stat"><small>直近7日</small><b>{{ '{:,}'.format(dash.week.yen) }} 円</b><span>{{ dash.week.count }} 件</span></div></div>
-<p class="sub" style="margin-top:8px">履歴に残っている範囲の集計です。</p></div>
+<button class="btn full" data-go="sales" style="margin-top:10px">📈 売上の推移とグラフを見る</button></div>
 {% if dash.attention %}
 <div class="card"><h2>要対応</h2><p class="sub">「注文」タブで対応できます。</p>
 {% for o in dash.attention[:5] %}<div class="h"><div class="l1"><span class="chip {{ 'bad' if o.state=='dead' else 'warn' }}">{{ o.state_ja }}</span><span class="chip">{{ o.created }}</span><span class="amt">{{ o.amount }}円</span></div>
@@ -132,6 +173,14 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 
 <!-- ===== 履歴 ===== -->
 <section class="view" id="sec-history">
+<div class="card"><h2>注文を探す</h2><p class="sub">注文番号の一部・USERID・送金者の名前・内容・メモ・金額で探せます。消えた注文（期限切れ）も台帳から見つかります。押すと詳細が開きます。</p>
+<form id="osearch" class="filters" autocomplete="off">
+<input type="search" id="oq" placeholder="例：abc12 / 1500 / ツムツム" aria-label="探す言葉" style="flex:1 1 180px;min-height:36px;font-size:15px;padding:6px 10px">
+<select id="ostate" aria-label="状態"><option value="">すべての状態</option><option value="paid_money">入金済み</option><option value="done">完了</option><option value="started">実行中</option><option value="paid">支払い済み・未実行</option><option value="hold">保留</option><option value="unpaid">未払い</option><option value="dead">停止</option></select>
+<select id="oshop" aria-label="部門"><option value="">すべての部門</option><option value="nyanko">にゃんこ</option><option value="tsum">ツムツム</option><option value="puni">ぷにぷに</option><option value="other">チケット・支援など</option></select>
+<input type="date" id="ofrom" aria-label="この日から"><input type="date" id="oto" aria-label="この日まで">
+<button class="btn pri">探す</button></form>
+<div id="oresult" style="margin-top:6px"></div></div>
 <div class="card"><h2>取引履歴{% if hist_user %}<span class="chip" style="margin-left:6px">{{ hist_user }}</span>{% endif %}</h2>
 <p class="sub">新しい順に最大200件。USERID はブラウザごとの番号（Cookieを消すと変わります）。送金者は、送金リンクを確認できた注文だけ表示されます。{% if hist_user %}<a href="/admin#history">すべて表示</a>{% endif %}</p>
 <input type="search" id="hq" placeholder="絞り込み（金額・内容・ID・状態）" autocomplete="off" aria-label="履歴を絞り込み">
@@ -189,9 +238,107 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <div class="sub">{% if b.contact %}連絡先：<b>{{ b.contact }}</b>　{% endif %}ユーザーID：{{ b.user }}</div>
 <form method="post" style="display:flex;gap:6px;margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ b.id }}">
 <button class="btn" name="action" value="{{ 'box_undo' if b.done else 'box_done' }}" style="padding:4px 10px;font-size:12px">{{ '未対応に戻す' if b.done else '対応済みにする' }}</button>
-<button class="btn danger" name="action" value="box_delete" style="padding:4px 10px;font-size:12px" data-confirm="この投稿を削除しますか？（元に戻せません）">削除</button></form></div>
+<button class="btn danger" name="action" value="box_delete" style="padding:4px 10px;font-size:12px" data-confirm="この投稿を削除しますか？（元に戻せません）">削除</button></form>
+{% if b.kind == '質問' %}<details style="margin-top:4px"><summary class="sub" style="cursor:pointer">Q&A の答えに足す</summary>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="faq_add">
+<label>部門</label><select name="shop" style="min-height:36px;font:inherit;border:2px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink)">{% for k, v in faq_shops.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+<label>質問（短く）</label><input name="q" maxlength="100" value="{{ b.text[:100] }}" required>
+<label>答え</label><textarea name="a" maxlength="400" required></textarea>
+<button class="btn pri full">Q&A に足す</button></form></details>{% endif %}</div>
 {% else %}<div class="empty">まだ届いていません</div>{% endfor %}</div>
+<div class="card"><h2>Q&A に足した答え</h2><p class="sub">各画面のチャット（Q&A）が、ここの答えも使って返事します。AI の鍵が無いときも、言葉が近い質問にはこの答えをそのまま返します。</p>
+{% for q in ops.faq %}<div class="hl"><div class="tx"><span class="chip">{{ faq_shops.get(q.shop, q.shop) }}</span> <b>{{ q.q }}</b><div class="l2" style="white-space:pre-wrap">{{ q.a }}</div></div>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="faq_delete"><input type="hidden" name="id" value="{{ q.id }}"><button class="btn danger" style="padding:4px 10px;font-size:12px" data-confirm="この答えを削除しますか？">削除</button></form></div>
+{% else %}<div class="empty">まだありません</div>{% endfor %}
+<form method="post" style="margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="faq_add">
+<b>新しく足す</b>
+<label for="fqs">部門</label><select id="fqs" name="shop" style="min-height:36px;font:inherit;border:2px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink)">{% for k, v in faq_shops.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+<label for="fqq">質問</label><input id="fqq" name="q" maxlength="100" required placeholder="例：夜中でも注文できますか？">
+<label for="fqa">答え</label><textarea id="fqa" name="a" maxlength="400" required placeholder="例：はい、24時間受け付けています。"></textarea>
+<button class="btn pri full">足す</button></form></div>
 </section>
+<!-- ===== 売上 ===== -->
+<section class="view" id="sec-sales">
+<div class="card"><h2>売上の推移</h2><p class="sub">PayPay で入金を確認できた注文だけを数えます（無料クーポン・管理者の無料実行は0円なので入りません）。返金は「注文の詳細」で記録した分を差し引きます。</p>
+<div class="filters" id="sf" role="group" aria-label="期間">
+<button class="btn" type="button" data-range="today">今日</button><button class="btn" type="button" data-range="7">7日</button>
+<button class="btn" type="button" data-range="30" aria-pressed="true">30日</button><button class="btn" type="button" data-range="90">90日</button>
+<button class="btn" type="button" data-range="month">今月</button><button class="btn" type="button" data-range="lastmonth">先月</button>
+<button class="btn" type="button" data-range="year">今年</button><button class="btn" type="button" data-range="all">全期間</button></div>
+<div class="filters"><input type="date" id="sfrom" aria-label="この日から"><span class="sub" style="margin:0">〜</span><input type="date" id="sto" aria-label="この日まで">
+<select id="sunit" aria-label="区切り"><option value="">区切り：自動</option><option value="hour">1時間ごと</option><option value="day">1日ごと</option><option value="week">1週ごと</option><option value="month">1か月ごと</option></select>
+<select id="sseries" aria-label="部門"><option value="all">すべての部門</option><option value="nyanko">にゃんこ</option><option value="tsum">ツムツム</option><option value="puni">ぷにぷに</option><option value="other">チケット・支援など</option></select>
+<a class="btn" id="scsv" href="/admin/api/sales.csv" style="display:inline-flex;align-items:center;text-decoration:none;color:var(--ink)">⬇️ CSV</a></div>
+<p class="sub" id="srange" style="margin-top:8px"></p>
+<div class="hero" id="snet">-</div><div class="sub" id="snetsub">純売上（受け取った金額 − 返金）</div>
+<div class="kpis" id="skpi"></div></div>
+<div class="card"><h2 id="st1">売上（部門別）</h2><p class="sub" id="st1s">区切りごとの受け取った金額。棒に触れると内訳が出ます。</p><div class="chart" id="cTrend"></div><div class="legend" id="lTrend"></div>
+<details style="margin-top:8px"><summary class="sub" style="cursor:pointer">表で見る</summary><div class="tblwrap" id="tTrend"></div></details></div>
+<div class="card"><h2>累計（返金を引いたあと）</h2><p class="sub">期間のはじめからの合計の伸び方。</p><div class="chart" id="cCum"></div></div>
+<div class="card"><h2>部門の割合</h2><div id="cShare"></div><div class="legend" id="lShare"></div><div class="tblwrap" id="tShare"></div></div>
+<div class="card"><h2>よく売れたメニュー</h2><p class="sub">1件の金額を、内訳の定価の割合で各メニューに分けています（クーポン・セールの割引も同じ割合で引いています）。</p><div class="bars" id="cMenus"></div></div>
+<div class="card"><h2>時間帯（日本時間）</h2><p class="sub">何時に入金が多いか。</p><div class="chart" id="cHours"></div></div>
+<div class="card"><h2>曜日</h2><div class="chart" id="cWeek"></div></div>
+<div class="card"><h2>全期間</h2><div class="kpis" id="sall"></div></div>
+</section>
+
+<!-- ===== 運用 ===== -->
+<section class="view" id="sec-ops">
+<div class="card"><h2>サーバーの点検</h2><p class="sub">開いたときに確かめます。</p><div id="health"><div class="empty">確認しています…</div></div>
+<button class="btn full" type="button" id="healthReload">もう一度確かめる</button></div>
+
+<div class="card"><h2>メニュー別の成功率</h2><p class="sub">直近24時間と7日。失敗の多いものが上に来ます。ゲームの更新で壊れたメニューに早く気づくためのものです。</p>
+{% for j in ops.jobs %}<div class="h"><div class="l1"><b style="font-size:14px">{{ j.menu }}</b>
+<span class="chip {{ 'bad' if j.week_rate is not none and j.week_rate < 70 else ('warn' if j.week_rate is not none and j.week_rate < 90 else 'ok') }}">7日 {{ j.week_rate }}%（{{ j.week[1] }}/{{ j.week[0] }}）</span>
+<span class="chip">24時間 {% if j.day[0] %}{{ j.day_rate }}%（{{ j.day[1] }}/{{ j.day[0] }}）{% else %}なし{% endif %}</span></div>
+{% for e, n in j.errors %}<div class="l2">失敗 {{ n }}件：{{ e }}</div>{% endfor %}</div>
+{% else %}<div class="empty">まだ記録がありません（この版から記録します）</div>{% endfor %}</div>
+
+<div class="card"><h2>受付の一時停止</h2><p class="sub">選んだ部門・メニューだけ新しい注文を止めます（ほかは普通に売れます）。お客さんの画面の上に「調整中」と出ます。支払い済み・実行中の注文はそのまま進みます。管理者の無料実行は止めません。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pause_save">
+<h3>部門ごと</h3><div class="chk">{% for k, label in ops.shops %}<label><input type="checkbox" name="shops" value="{{ k }}" {{ 'checked' if k in ops.paused.shops }}> {{ label }}</label>{% endfor %}</div>
+<h3>メニューごと</h3><input type="search" id="pmq" placeholder="メニューを絞り込み" aria-label="メニューを絞り込み" style="min-height:36px;font-size:14px;padding:6px 10px">
+<div class="chk" id="pml" style="max-height:260px;overflow:auto;margin-top:6px;padding:4px;border:1px solid var(--soft);border-radius:10px">{% for k, label in ops.pausable %}<label data-q="{{ label }}"><input type="checkbox" name="menus" value="{{ k }}" {{ 'checked' if k in ops.paused.menus }}> {{ label }}</label>{% endfor %}</div>
+<label for="pmm">お客さんに見せる一言（任意）</label><input id="pmm" name="message" maxlength="200" value="{{ ops.paused.message }}" placeholder="例：ゲームの更新に合わせて調整中です。夕方に再開します。">
+<button class="btn pri full">保存</button></form></div>
+
+<div class="card"><h2>お知らせ</h2><p class="sub">お店のすべての画面の上に出します（注文は止めません）。{% if ops.notice_on %}<span class="chip ok">表示中{% if ops.notice_until %}・{{ ops.notice_until }} まで{% endif %}</span>{% endif %}</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="notice_save">
+<label for="nt">文章（空にして保存すると消えます）</label><textarea id="nt" name="text" maxlength="200" placeholder="例：本日は混み合っています。順番にお届けします。">{{ ops.notice.text if ops.notice_on else '' }}</textarea>
+<div class="sw"><label><input type="radio" name="level" value="info" {{ 'checked' if ops.notice.level != 'warn' }}>ふつう（青）</label><label><input type="radio" name="level" value="warn" {{ 'checked' if ops.notice.level == 'warn' }}>注意（黄）</label></div>
+<label for="nh">出しておく時間（時間・空欄なら消すまで）</label><input id="nh" name="hours" inputmode="numeric" maxlength="4" placeholder="例：24">
+<button class="btn pri full">保存</button></form></div>
+
+<div class="card"><h2>セール</h2><p class="sub">決めた期間だけ、選んだ部門のお支払い金額を割り引きます（クーポンのあとの金額から）。チケット・支援・ソースは対象外です。画面の上に「セール中」と出ます。{% if ops.sale %}<br><span class="chip ok">開催中：{{ ops.sale.pct }}%引き・{{ ops.sale_until }} まで</span>{% endif %}</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="sale_save">
+<label for="sp">割引（%・1〜50。0 か空欄で終了）</label><input id="sp" name="pct" inputmode="numeric" maxlength="2" value="{{ ops.sale.pct if ops.sale else '' }}">
+<label>対象の部門</label><div class="chk">{% for k in ops.sale_shops %}<label><input type="checkbox" name="shops" value="{{ k }}" {{ 'checked' if ops.sale and k in ops.sale.shops }}> {{ {'nyanko':'にゃんこ','tsum':'ツムツム','puni':'ぷにぷに'}[k] }}</label>{% endfor %}</div>
+<label for="sh">期間（時間・1〜2160）</label><input id="sh" name="hours" inputmode="numeric" maxlength="4" placeholder="例：48">
+<label for="sl">名前（任意）</label><input id="sl" name="label" maxlength="40" value="{{ ops.sale.label if ops.sale else '' }}" placeholder="例：週末セール">
+<button class="btn pri full" data-confirm="セールの設定を保存します。これからの新しい注文から反映されます。よろしいですか？">保存</button></form></div>
+
+<div class="card"><h2>実行枠の数</h2><p class="sub">同時に動かす数です。増やすとすぐ増え、減らすと動いている実行が終わってから減ります。1つで約70〜150MBのメモリを使うので、点検の「メモリ」を見ながら変えてください。空欄で起動のときの数（ふつう {{ ops.slot_default.normal }}・長時間 {{ ops.slot_default.long }}）に戻ります。</p>
+<p class="sub">いま：ふつう <b>{{ ops.slot_now[0] }}</b>・長時間 <b>{{ ops.slot_now[1] }}</b></p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="slots_save">
+<label for="sn">ふつうの枠（{{ ops.slot_limits.normal[0] }}〜{{ ops.slot_limits.normal[1] }}）</label><input id="sn" name="normal" inputmode="numeric" maxlength="1" value="{{ ops.slots.normal if ops.slots.normal is not none else '' }}">
+<label for="sg">長時間の枠（ぷにぷにの長い周回・{{ ops.slot_limits.long[0] }}〜{{ ops.slot_limits.long[1] }}）</label><input id="sg" name="long" inputmode="numeric" maxlength="1" value="{{ ops.slots.long if ops.slots.long is not none else '' }}">
+<button class="btn pri full">保存</button></form></div>
+
+<div class="card"><h2>お客さんの受付停止</h2><p class="sub">いたずら・不正が続く相手の、新しい注文と意見箱の投稿を止めます（実績の入力と、支払い済みの注文の結果は止めません）。USERID はブラウザごとの番号で、Cookie を消すと変わります。IP は回線ごとなので、同じ回線のほかの人も止まることがあります。注文の詳細からも追加できます。</p>
+{% for b in ops.blocks %}<div class="hl"><div class="tx"><span class="chip">{{ 'USERID' if b.kind == 'uid' else 'IP' }}</span> <code>{{ b.value }}</code><div class="l2">{{ b.until_ja }}{% if b.note %}・{{ b.note }}{% endif %}</div></div>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="block_remove"><input type="hidden" name="kind" value="{{ b.kind }}"><input type="hidden" name="value" value="{{ b.value }}"><button class="btn" style="padding:4px 10px;font-size:12px">解除</button></form></div>
+{% else %}<div class="empty">止めている相手はいません</div>{% endfor %}
+<form method="post" style="margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="block_add">
+<div class="sw"><label><input type="radio" name="kind" value="uid" checked>USERID</label><label><input type="radio" name="kind" value="ip">IP</label></div>
+<label for="bv">値</label><input id="bv" name="value" maxlength="45" required placeholder="例：1a2b3c4d">
+<label for="bd">期間（日・空欄なら無期限）</label><input id="bd" name="days" inputmode="numeric" maxlength="3">
+<label for="bn">メモ（任意）</label><input id="bn" name="note" maxlength="60">
+<button class="btn danger full" data-confirm="この相手からの新しい注文を止めますか？">受付を止める</button></form></div>
+
+<div class="card"><h2>管理操作の記録</h2><p class="sub">新しい順に100件。ログインの成功・失敗も残ります（パスワードや6桁の番号は残しません）。</p>
+<div id="alog"><div class="empty">読み込んでいます…</div></div></div>
+</section>
+
 <section class="view" id="sec-settings">
 <div class="card"><h2>2段階認証（管理画面）</h2>
 {% if tfa.on %}<p class="sub"><span class="chip">有効</span> ログインのとき、パスコードのあとに認証アプリの6桁を入れます。スマホをなくしたときは、サーバーのデータフォルダーの <code>admin_2fa.json</code> を消すと、パスコードだけに戻ります。</p>
@@ -242,15 +389,22 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <label for="fcd">有効期限（日）</label><input id="fcd" name="days" inputmode="numeric" maxlength="3" value="30">
 <label for="fcn">メモ（任意・自分用。例：誰に渡したか）</label><input id="fcn" name="note" maxlength="60" placeholder="例：お詫び用">
 <button class="btn pri full" data-confirm="1回だけ無料で使えるクーポンを発行します。よろしいですか？">発行する</button></form>
-{% for c in coupons %}<div class="h"><div class="l1"><code>{{ c.code }}</code>{% if c.kind_ja %}<span class="chip ok">{{ c.kind_ja }}</span>{% endif %}<span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div>
+<input type="search" id="cq" placeholder="クーポンを絞り込み（コード・種類・状態・メモ）" aria-label="クーポンを絞り込み" style="min-height:36px;font-size:14px;padding:6px 10px;margin-bottom:4px">
+<div id="clist">{% for c in coupons %}<div class="h" data-q="{{ c.code }} {{ c.kind_ja or '10%引き' }} {{ c.state_ja }} {{ c.note or '' }} {{ c.used_order or '' }}"><div class="l1"><code>{{ c.code }}</code>{% if c.kind_ja %}<span class="chip ok">{{ c.kind_ja }}</span>{% endif %}<span class="chip {{ 'ok' if c.state_ja=='未使用' else ('warn' if c.state=='reserved' else '') }}">{{ c.state_ja }}</span><span class="chip">{{ c.when }}発行</span><span class="amt" style="font-size:12px">〜{{ c.until }}</span></div>
 {% if c.free and c.note %}<div class="sub" style="font-size:12px">メモ：{{ c.note }}</div>{% endif %}
-{% if c.free and c.state_ja=='未使用' %}<form method="post" style="margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_revoke"><input type="hidden" name="code" value="{{ c.code }}"><button class="btn" style="padding:4px 10px;font-size:12px" data-confirm="このクーポンを取り消します。よろしいですか？">取り消す</button></form>{% endif %}</div>
-{% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div>
+{% if c.free and c.state_ja=='未使用' %}<form method="post" style="margin-top:4px"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="coupon_revoke"><input type="hidden" name="code" value="{{ c.code }}"><button class="btn" style="padding:4px 10px;font-size:12px" data-confirm="このクーポンを取り消します。よろしいですか？">取り消す</button></form>{% endif %}
+{% if c.used_order and c.used_order != 'revoked' %}<div class="sub" style="font-size:12px">使った注文：<a href="#o:{{ c.used_order }}" data-order="{{ c.used_order }}"><code>{{ c.used_order[:12] }}</code></a></div>{% endif %}
+{% if c.issued_order and c.issued_order|length > 12 %}<div class="sub" style="font-size:12px">発行のもとの注文：<a href="#o:{{ c.issued_order }}" data-order="{{ c.issued_order }}"><code>{{ c.issued_order[:12] }}</code></a></div>{% endif %}</div>
+{% else %}<div class="empty">まだ発行していません</div>{% endfor %}</div></div>
 <div class="card"><h2>バックアップ</h2><p class="sub">注文（暗号化されたまま）・支払いの台帳・料金や設定を、1つのファイルにまとめてダウンロードします。iPhone の「ファイル」や iCloud に保存しておいてください。サーバーでも毎日自動で保存しています（14日分）。暗号の鍵は入りません。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="backup_download"><button class="btn full">⬇️ バックアップをダウンロード</button></form></div>
 <div class="card"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="lock"><button class="btn full">管理者モードを終了</button></form></div>
 </section>
 
+<div class="dlg" id="odlg" role="dialog" aria-modal="true" aria-labelledby="odttl" hidden><div class="inner">
+<div class="head"><h2 id="odttl">注文の詳細</h2><button class="btn" type="button" id="odclose">閉じる</button></div>
+<div id="odbody"></div></div></div>
+<script src="/static/admin.js?v=1"></script>
 <script>
 /* data-confirm の付いたボタンは、押したときに確認する（CSP のため、HTML に直接 onclick を書かない） */
 document.addEventListener('click',function(e){
