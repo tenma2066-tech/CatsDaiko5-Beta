@@ -189,7 +189,10 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
 <label for="et{{ p.id }}">本文</label><textarea id="et{{ p.id }}" name="text" maxlength="25000">{{ p.text }}</textarea>
 <label for="ea{{ p.id }}">投稿する日時（日本時間{{ '・定期は次回' if p.rep }}）</label><input id="ea{{ p.id }}" type="datetime-local" name="at" value="{{ p.at_local }}">
 {% if p.imgs %}<div class="days">{% for n in p.imgs %}<label><input type="checkbox" name="drop" value="{{ n }}">画像{{ loop.index }}を外す</label>{% endfor %}</div>{% endif %}
-<p class="sub" style="margin-top:6px">画像を足したいときは、この予約を削除して作り直してください。{% if p.rep %}くり返し（{{ p.rep }}）の種類はそのままです。{% endif %}</p>
+<label for="er{{ p.id }}">くり返し</label><select id="er{{ p.id }}" name="repeat" class="erp">{% for v, t in [('none','くり返さない（1回だけ）'),('daily','毎日（同じ時刻）'),('weekly','毎週（曜日を選ぶ）'),('hours','〇時間ごと')] %}<option value="{{ v }}" {{ 'selected' if (p.repd.type or 'none') == v }}>{{ t }}</option>{% endfor %}</select>
+<div class="erweek" hidden><div class="days">{% for d in ['月','火','水','木','金','土','日'] %}<label><input type="checkbox" name="days" value="{{ loop.index0 }}" {{ 'checked' if loop.index0 in (p.repd.days or []) }}>{{ d }}</label>{% endfor %}</div></div>
+<div class="erhours" hidden><label for="eh{{ p.id }}">何時間ごと（1〜168）</label><input id="eh{{ p.id }}" type="number" name="every_hours" min="1" max="168" value="{{ p.repd.hours or 24 }}" inputmode="numeric"></div>
+<p class="sub" style="margin-top:6px">くり返す時刻は、上の日時の時刻になります。画像を足したいときは、この予約を削除して作り直してください。</p>
 <button class="btn pri full">保存する</button></form></details>{% endif %}
 <div class="row">
 {% if p.state == 'scheduled' %}<form method="post" action="/post/{{ p.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">取り消す</button></form>{% endif %}
@@ -272,6 +275,7 @@ code{font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:5px}
   var i=document.getElementById('pi'), pv=document.getElementById('pprev');
   if(i) i.addEventListener('change',function(){pv.textContent='';if(i.files.length>4){alert('画像は4枚までです');i.value='';return;}
     for(var k=0;k<i.files.length;k++){var im=document.createElement('img');im.src=URL.createObjectURL(i.files[k]);pv.appendChild(im);}});
+  document.querySelectorAll('select.erp').forEach(function(s){var f=s.closest('form'),g=function(){f.querySelector('.erweek').hidden=s.value!=='weekly';f.querySelector('.erhours').hidden=s.value!=='hours';};s.addEventListener('change',g);g();});
   var rp=document.getElementById('prp'); if(rp){var g=function(){document.getElementById('rpweek').hidden=rp.value!=='weekly';document.getElementById('rphours').hidden=rp.value!=='hours';};rp.addEventListener('change',g);g();}
   document.querySelectorAll('select[name=kind]').forEach(function(s){var f=function(){var b=s.form.querySelector('.kwbox');if(b) b.hidden=s.value!=='keyword';};s.addEventListener('change',f);f();});
 })();

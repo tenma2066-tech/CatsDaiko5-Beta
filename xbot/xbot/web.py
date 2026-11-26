@@ -113,7 +113,8 @@ def index():
         hour = d.execute("SELECT COUNT(*) c FROM replied WHERE dry=0 AND at>=?", (time.time() - 3600,)).fetchone()["c"]
         recent = [dict(r) for r in d.execute("SELECT r.*, u.name FROM replied r LEFT JOIN rules u ON u.id=r.rule_id WHERE r.rule_id IS NOT NULL ORDER BY r.at DESC LIMIT 50")]
     for p in posts:
-        p["rep"] = logic.describe_repeat(json.loads(p["repeat"])) if p.get("repeat") else ""
+        p["repd"] = json.loads(p["repeat"]) if p.get("repeat") else {}
+        p["rep"] = logic.describe_repeat(p["repd"]) if p["repd"] else ""
         p["imgs"] = json.loads(p["images"] or "[]")
         p["when"] = logic.fmt_jst(p["at"])
         p["at_local"] = datetime.fromtimestamp(p["at"], logic.JST).strftime("%Y-%m-%dT%H:%M")
@@ -249,28 +250,11 @@ def post_new():
     except ValueError:
         flash("日時の形が正しくありません。")
         return back("posts")
-    rep = None
-    rtype = request.form.get("repeat", "none")
-    if rtype in ("daily", "weekly", "hours"):
-        hm = datetime.fromtimestamp(at, logic.JST).strftime("%H:%M")
-        rep = {"type": rtype, "time": hm}
-        if rtype == "weekly":
-            days = sorted({int(x) for x in request.form.getlist("days") if x.isdigit() and 0 <= int(x) <= 6})
-            if not days:
-                flash("毎週の場合は、曜日を1つ以上選んでください。")
-                return back("posts")
-            rep["days"] = days
-        if rtype == "hours":
-            h = (request.form.get("every_hours") or "").strip()
-            if not h.isdigit() or not 1 <= int(h) <= 168:
-                flash("「〇時間ごと」は 1〜168 の数字で入れてください。")
-                return back("posts")
-            rep["hours"] = int(h)
-            rep["anchor"] = at
-        if at < time.time() - 60:
-            at = logic.next_time(rep, time.time())
-        elif rtype == "weekly" and datetime.fromtimestamp(at, logic.JST).weekday() not in rep["days"]:
-            at = logic.next_time(rep, at)
+    try:
+        rep, at = _repeat_form(at)
+    except ValueError as e:
+        flash(str(e))
+        return back("posts")
     os.makedirs(store.UPLOAD_DIR, exist_ok=True)
     names = []
     for f in files:
@@ -291,12 +275,36 @@ def post_new():
     return back("posts")
 
 
+def _repeat_form(at: float):
+    """フォームの「くり返し」を読む。戻り値は (くり返しの設定 or None, 最初に投稿する時刻)。入力が正しくなければ ValueError。"""
+    rtype = request.form.get("repeat", "none")
+    if rtype not in ("daily", "weekly", "hours"):
+        return None, at
+    rep = {"type": rtype, "time": datetime.fromtimestamp(at, logic.JST).strftime("%H:%M")}
+    if rtype == "weekly":
+        days = sorted({int(x) for x in request.form.getlist("days") if x.isdigit() and 0 <= int(x) <= 6})
+        if not days:
+            raise ValueError("毎週の場合は、曜日を1つ以上選んでください。")
+        rep["days"] = days
+    if rtype == "hours":
+        h = (request.form.get("every_hours") or "").strip()
+        if not h.isdigit() or not 1 <= int(h) <= 168:
+            raise ValueError("「〇時間ごと」は 1〜168 の数字で入れてください。")
+        rep["hours"] = int(h)
+        rep["anchor"] = at
+    if at < time.time() - 60:
+        at = logic.next_time(rep, time.time())
+    elif rtype == "weekly" and datetime.fromtimestamp(at, logic.JST).weekday() not in rep["days"]:
+        at = logic.next_time(rep, at)
+    return rep, at
+
+
 EDITABLE = ("scheduled", "canceled", "failed", "dry")   # 投稿の最中（posting）と投稿済みは編集できない
 
 
 @app.post("/post/<int:pid>/edit")
 def post_edit(pid):
-    """予約の編集：本文・日時・画像を外す。状態（予約中／取り消し など）は変えない。"""
+    """予約の編集：本文・日時・くり返し（周期）・画像を外す。状態（予約中／取り消し など）は変えない。"""
     text = (request.form.get("text") or "").strip()
     drop = set(request.form.getlist("drop"))
     with store.db() as d:
@@ -314,20 +322,21 @@ def post_edit(pid):
         flash(f"本文が長すぎます（全角は2文字として {logic.MAX_POST_LEN} まで）。")
         return back("posts")
     at, rep = row["at"], json.loads(row["repeat"]) if row["repeat"] else None
-    if request.form.get("at"):
-        try:
+    try:
+        if request.form.get("at"):
             new_at = logic.parse_jst(request.form["at"])
-        except ValueError:
-            flash("日時の形が正しくありません。")
-            return back("posts")
-        if abs(new_at - at) >= 60:                 # 日時を変えたときだけ（分より細かい違いは、変えていないとみなす）
-            at = new_at
-            if rep:                                # 定期：時刻（と「〇時間ごと」の起点）も合わせ、次の回を計算し直す
-                rep["time"] = datetime.fromtimestamp(at, logic.JST).strftime("%H:%M")
-                if rep["type"] == "hours":
-                    rep["anchor"] = at
-                if at < time.time() - 60 or (rep["type"] == "weekly" and datetime.fromtimestamp(at, logic.JST).weekday() not in rep["days"]):
-                    at = logic.next_time(rep, max(time.time(), at)) or at
+            if abs(new_at - at) >= 60:             # 分より細かい違いは、変えていないとみなす
+                at = new_at
+        if "repeat" in request.form:               # くり返し（周期）：種類・曜日・間隔を入れ直す。時刻は上の日時から取る
+            rep, at = _repeat_form(at)
+        elif rep:                                  # くり返しの欄が無い送信（古い画面）：時刻だけ合わせる
+            rep["time"] = datetime.fromtimestamp(at, logic.JST).strftime("%H:%M")
+    except ValueError as e:
+        flash(str(e) if "くだ" in str(e) else "日時の形が正しくありません。")
+        return back("posts")
+    if at is None:
+        flash("次に投稿する時刻を計算できませんでした。")
+        return back("posts")
     with store.db() as d:
         n = d.execute(f"UPDATE posts SET text=?, images=?, at=?, repeat=?, error=NULL WHERE id=? AND state IN ({','.join('?' * len(EDITABLE))})",
                       (text, json.dumps(images), at, json.dumps(rep, ensure_ascii=False) if rep else None, pid, *EDITABLE)).rowcount
@@ -341,7 +350,7 @@ def post_edit(pid):
                 os.remove(os.path.join(store.UPLOAD_DIR, os.path.basename(name)))
             except OSError:
                 pass
-    flash(f"予約を保存しました（{logic.fmt_jst(at)}）。")
+    flash(f"予約を保存しました（{'定期：' + logic.describe_repeat(rep) + '・次回 ' if rep else ''}{logic.fmt_jst(at)}）。")
     return back("posts")
 
 

@@ -215,6 +215,48 @@ class Web(unittest.TestCase):
             self.assertEqual(d.execute("SELECT text FROM posts WHERE id=?", (row["id"],)).fetchone()["text"], "直した文")
         self.assertEqual(self.c.post(f"/post/{row['id']}/edit", data={"text": "x"}).status_code, 400)   # CSRF なしは不可
 
+    def test_edit_repeating_post(self):
+        csrf = self.login()
+        self.c.post("/post/new", data={"csrf": csrf, "text": "毎日の投稿", "at": "2030-01-07T09:00", "repeat": "daily"})
+        with store.db() as d:
+            pid = d.execute("SELECT id FROM posts ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        def get():
+            with store.db() as d:
+                return dict(d.execute("SELECT * FROM posts WHERE id=?", (pid,)).fetchone())
+        page = self.c.get("/?tab=posts").get_data(as_text=True)
+        self.assertIn('<option value="daily" selected>', page)                # いまの設定が入った状態で開く
+        # 毎日 → 毎週（月・金）21:30。2030-01-07 は月曜
+        self.c.post(f"/post/{pid}/edit", data={"csrf": csrf, "text": "週の投稿", "at": "2030-01-07T21:30", "repeat": "weekly", "days": ["0", "4"]})
+        got = get()
+        self.assertEqual(json.loads(got["repeat"]), {"type": "weekly", "time": "21:30", "days": [0, 4]})
+        self.assertEqual((got["text"], got["state"], logic.fmt_jst(got["at"])), ("週の投稿", "scheduled", "01/07 21:30"))
+        # 曜日なしは保存しない
+        self.c.post(f"/post/{pid}/edit", data={"csrf": csrf, "text": "x", "at": "2030-01-07T21:30", "repeat": "weekly"})
+        self.assertEqual(get()["text"], "週の投稿")
+        # 毎週（水だけ）に変えると、次の水曜へ
+        self.c.post(f"/post/{pid}/edit", data={"csrf": csrf, "text": "週の投稿", "at": "2030-01-07T21:30", "repeat": "weekly", "days": ["2"]})
+        self.assertEqual(logic.fmt_jst(get()["at"]), "01/09 21:30")
+        # 6時間ごと
+        self.c.post(f"/post/{pid}/edit", data={"csrf": csrf, "text": "週の投稿", "at": "2030-01-10T06:00", "repeat": "hours", "every_hours": "6"})
+        rep = json.loads(get()["repeat"])
+        self.assertEqual((rep["type"], rep["hours"], logic.fmt_jst(rep["anchor"])), ("hours", 6, "01/10 06:00"))
+        self.c.post(f"/post/{pid}/edit", data={"csrf": csrf, "text": "x", "at": "2030-01-10T06:00", "repeat": "hours", "every_hours": "999"})
+        self.assertEqual(get()["text"], "週の投稿")
+        # くり返しをやめる（1回だけの予約に）
+        self.c.post(f"/post/{pid}/edit", data={"csrf": csrf, "text": "1回だけ", "at": "2030-03-01T12:00", "repeat": "none"})
+        got = get()
+        self.assertEqual((got["repeat"], got["text"], logic.fmt_jst(got["at"])), (None, "1回だけ", "03/01 12:00"))
+        # 1回だけ → 毎日 にもできる
+        self.c.post(f"/post/{pid}/edit", data={"csrf": csrf, "text": "1回だけ", "at": "2030-03-01T12:00", "repeat": "daily"})
+        self.assertEqual(json.loads(get()["repeat"]), {"type": "daily", "time": "12:00"})
+        # 定期の「実行の記録」（parent つき）は編集できない
+        with store.db() as d:
+            d.execute("INSERT INTO posts(text, images, at, state, created, parent) VALUES('記録','[]',?,'dry',?,?)", (time.time(), time.time(), pid))
+            rec = d.execute("SELECT id FROM posts ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        self.c.post(f"/post/{rec}/edit", data={"csrf": csrf, "text": "変えない", "repeat": "none"})
+        with store.db() as d:
+            self.assertEqual(d.execute("SELECT text FROM posts WHERE id=?", (rec,)).fetchone()["text"], "記録")
+
     def test_post_with_image_and_validation(self):
         csrf = self.login()
         png = b"\x89PNG\r\n\x1a\n" + b"0" * 50
