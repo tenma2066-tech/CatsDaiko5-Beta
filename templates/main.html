@@ -2110,5 +2110,5 @@ const saved=sessionStorage.getItem('job');
 if(saved){ show('status'); watch(saved); }
 
 </script><script src="/static/qa.js?v=3" data-shop="nyanko" defer></script>
-{% set _pn = pay_notice() %}{% if _pn %}<script src="/static/paynotice.js?v=1" data-paypay="{{ 1 if _pn.paypay else 0 }}"></script>{% endif %}
+{% set _pn = pay_notice() %}{% if _pn %}<script src="/static/paynotice.js?v=2" data-paypay="{{ 1 if _pn.paypay else 0 }}"></script>{% endif %}
 </body></html>

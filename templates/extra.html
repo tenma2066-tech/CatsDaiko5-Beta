@@ -564,5 +564,5 @@ $('#claimGo').addEventListener('click',async()=>{
 });
 loadMine();
 </script>
-{% set _pn = pay_notice() %}{% if _pn %}<script src="/static/paynotice.js?v=1" data-paypay="{{ 1 if _pn.paypay else 0 }}"></script>{% endif %}
+{% set _pn = pay_notice() %}{% if _pn %}<script src="/static/paynotice.js?v=2" data-paypay="{{ 1 if _pn.paypay else 0 }}"></script>{% endif %}
 </body></html>

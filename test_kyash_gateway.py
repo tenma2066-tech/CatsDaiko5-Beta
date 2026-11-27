@@ -404,9 +404,9 @@ class PayNoticeTests(unittest.TestCase):
 
     def test_shown_to_customers_on_every_shop_page(self):
         for u, html in self.pages(self.A.app.test_client(), {"paypay": True, "kyash": True}).items():
-            self.assertIn('/static/paynotice.js?v=1" data-paypay="1"', html, u)
+            self.assertIn('/static/paynotice.js?v=2" data-paypay="1"', html, u)
         for u, html in self.pages(self.A.app.test_client(), {"paypay": False, "kyash": True}).items():
-            self.assertIn('/static/paynotice.js?v=1" data-paypay="0"', html, u)
+            self.assertIn('/static/paynotice.js?v=2" data-paypay="0"', html, u)
 
     def test_hidden_when_kyash_is_off(self):
         for u, html in self.pages(self.A.app.test_client(), {"paypay": True, "kyash": False}).items():

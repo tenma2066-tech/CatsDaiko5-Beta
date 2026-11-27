@@ -31,6 +31,11 @@
     var note = document.createElement("p");
     note.style.cssText = "margin:0 0 14px;font-size:13px;color:#5b6472";
     note.textContent = "入金が確認でき次第、自動で実行します。" + (paypay ? "PayPay の送金リンクも、これまでどおり使えます。" : "");
+    if (!paypay) {   /* PayPay を止めているあいだは、目立つように伝える */
+      var off = document.createElement("p");
+      off.style.cssText = "margin:0 0 10px;padding:8px 10px;border-radius:10px;background:#fdecec;color:#b42323;font-weight:800;font-size:14px";
+      off.textContent = "⚠ PayPay は現在、一時的にご利用いただけません。Kyash でお支払いください。";
+    }
     var ok = document.createElement("button");
     ok.type = "button";
     ok.textContent = "OK";
@@ -41,6 +46,7 @@
     wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
     document.addEventListener("keydown", onKey);
     box.append(h, p, ol, note, ok);
+    if (!paypay) p.after(off);
     wrap.append(box);
     document.body.append(wrap);
     ok.focus();
