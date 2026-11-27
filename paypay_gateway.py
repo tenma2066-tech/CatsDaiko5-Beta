@@ -307,7 +307,13 @@ def _verify_link(body, amount):
         raise PayPayError("order_mismatch", "送金リンクの注文情報が一致しません。")
     if not all(isinstance(msg.get(k), str) and msg[k] for k in ("messageId", "chatRoomId")) or not _parse_time(data.get("transactionAt")):
         raise PayPayError("link_incomplete", "送金リンクの取引情報が不足しています。")
-    return {"order_id":info["orderId"],"message_id":msg["messageId"],"chat_id":msg["chatRoomId"],
+    # 受け取りPOSTの requestId は、リンク側（message.data.requestId）の値をそのまま返す。
+    # 自分で作ったUUIDを送ると、PayPayは「受け取り」ではなく「断る」として処理する（送金者側に「断りました」と出る）。
+    # 値が無いときは、POSTする前に止める（お金は動かない）。
+    request_id = data.get("requestId")
+    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id):
+        raise PayPayError("link_incomplete", "送金リンクの取引情報（requestId）が不足しています。管理者に連絡してください（再送金はしないでください）。")
+    return {"order_id":info["orderId"],"message_id":msg["messageId"],"chat_id":msg["chatRoomId"],"request_id":request_id,
             "request_at":data["transactionAt"],"receiver":str(receiver["externalId"]),
             "sender_id":str(sender["externalId"])[:80],
             "sender_name":(sender.get("displayName") if isinstance(sender.get("displayName"), str) else "")[:40]}
@@ -417,7 +423,7 @@ async def _fresh_account(force: bool = False, manual: bool = False):
 
 async def _accept(session, account, code, verified, digest):
     """受け取りPOST。成功で digest を返す。保留/不明は台帳を更新して PayPayError。自動で再試行しない。"""
-    payload={"requestAt":verified["request_at"],"orderId":verified["order_id"],"requestId":str(uuid4()),
+    payload={"requestAt":verified["request_at"],"orderId":verified["order_id"],"requestId":verified["request_id"],
              "senderChannelUrl":verified["chat_id"],"senderMessageId":verified["message_id"],
              "verificationCode":code,"client_uuid":account["uuid"],
              "iosMinimumVersion":"3.45.0","androidMinimumVersion":"3.45.0"}

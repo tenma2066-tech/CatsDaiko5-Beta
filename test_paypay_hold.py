@@ -20,7 +20,7 @@ def link_body(status="PENDING", amount=AMOUNT):
                            "expiredAt": (now + timedelta(days=1)).isoformat(), "orderId": "prov-1"},
         "sender": {"externalId": "s"}, "receiver": {"externalId": "r"},
         "message": {"messageId": "m", "chatRoomId": "c",
-                    "data": {"orderId": "prov-1", "amount": amount, "status": "PENDING", "transactionAt": now.isoformat()}}}}
+                    "data": {"orderId": "prov-1", "amount": amount, "status": "PENDING", "requestId": "req-1", "transactionAt": now.isoformat()}}}}
 
 
 HOLD_REPLY = {"header": {"resultCode": "42007013"}, "payload": None}
@@ -71,6 +71,7 @@ class FakePayPay:
 
     def post(self, *a, **k):
         self.post_calls += 1
+        self.last_json = k.get("json")
         return self._resp(self.posts.pop(0))
 
 
@@ -105,6 +106,21 @@ class HoldReleaseTests(unittest.TestCase):
         self.assertEqual(fake2.post_calls, 1)
         # 以後は受け取り済み扱い（PayPayに問い合わせない）
         self.assertEqual(asyncio.run(G.confirm_received("abcDEF123456", "order-1", AMOUNT)), digest)
+
+    def test_accept_sends_link_request_id(self):
+        # 乱数のrequestIdを送るとPayPayは「断る」扱いにする。リンク側の値をそのまま返すこと。
+        fake = FakePayPay(gets=[link_body()], posts=[OK_REPLY])
+        self.assertTrue(self.run_with(fake, G.receive_payment("abcDEF123456", AMOUNT, "order-rid")))
+        self.assertEqual(fake.last_json["requestId"], "req-1")
+
+    def test_missing_request_id_stops_before_post(self):
+        body = link_body()
+        del body["payload"]["message"]["data"]["requestId"]
+        fake = FakePayPay(gets=[body], posts=[OK_REPLY])
+        with self.assertRaises(G.PayPayError) as e:
+            self.run_with(fake, G.receive_payment("abcDEF123456", AMOUNT, "order-norid"))
+        self.assertEqual(e.exception.code, "link_incomplete")
+        self.assertEqual(fake.post_calls, 0)
 
     def test_still_held_stays_hold(self):
         fake = FakePayPay(gets=[link_body()], posts=[HOLD_REPLY])

@@ -31,7 +31,7 @@ class PayPayGatewayValidationTests(unittest.TestCase):
                 "message": {
                     "messageId": "message-1", "chatRoomId": "chat-1",
                     "data": {"orderId": "provider-order-1", "amount": amount,
-                             "status": "PENDING", "transactionAt": datetime.now(timezone.utc).isoformat()}
+                             "status": "PENDING", "requestId": "req-1", "transactionAt": datetime.now(timezone.utc).isoformat()}
                 }
             }
         }
