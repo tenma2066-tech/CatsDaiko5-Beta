@@ -586,5 +586,5 @@ syncMode(); renderCart(); orders.loadResume();
 
 </script>
 <script src="/static/qa.js?v=3" data-shop="puni" defer></script>
-{% set _pn = pay_notice() %}{% if _pn %}<script src="/static/paynotice.js?v=2" data-paypay="{{ 1 if _pn.paypay else 0 }}"></script>{% endif %}
+{% set _pn = pay_notice() %}{% if _pn %}<script src="/static/paynotice.js?v=3" data-paypay="{{ 1 if _pn.paypay else 0 }}" data-off="{{ _pn.off }}"></script>{% endif %}
 </body></html>

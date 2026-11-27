@@ -349,9 +349,9 @@ class AppFlowTests(unittest.TestCase):
 
     def test_switched_off_paypay_refuses_paypay_link_without_holding_order(self):
         P.set_switches({"paypay": False, "kyash": True})
-        oid = self.order()
         with patch.object(G, "receive_payment", AsyncMock()) as pr, \
              patch.object(K, "status", return_value={"connected": True, "needs_admin": False}):
+            oid = self.order()
             r = self.c.post(f"/api/orders/{oid}/pay", json={"link": "https://pay.paypay.ne.jp/abcDEF123456"})
         self.assertEqual((r.status_code, r.get_json()["code"], r.get_json()["hold"]), (402, "method_off", False))
         self.assertIn("Kyash", r.get_json()["error"])
@@ -404,9 +404,9 @@ class PayNoticeTests(unittest.TestCase):
 
     def test_shown_to_customers_on_every_shop_page(self):
         for u, html in self.pages(self.A.app.test_client(), {"paypay": True, "kyash": True}).items():
-            self.assertIn('/static/paynotice.js?v=2" data-paypay="1"', html, u)
+            self.assertIn('/static/paynotice.js?v=3" data-paypay="1"', html, u)
         for u, html in self.pages(self.A.app.test_client(), {"paypay": False, "kyash": True}).items():
-            self.assertIn('/static/paynotice.js?v=2" data-paypay="0"', html, u)
+            self.assertIn('/static/paynotice.js?v=3" data-paypay="0"', html, u)
 
     def test_hidden_when_kyash_is_off(self):
         for u, html in self.pages(self.A.app.test_client(), {"paypay": True, "kyash": False}).items():
@@ -417,3 +417,58 @@ class PayNoticeTests(unittest.TestCase):
         with patch.object(self.A, "_is_admin", return_value=True):
             for u, html in self.pages(admin, {"paypay": True, "kyash": True}).items():
                 self.assertNotIn("paynotice.js", html, u)
+
+
+class PayPayOffDiscountTests(unittest.TestCase):
+    """PayPay が使えないあいだは全品20%オフ（支援BOXは対象外）。"""
+    KY_ONLY = {"paypay": False, "kyash": True}
+    BOTH = {"paypay": True, "kyash": True}
+
+    def setUp(self):
+        import app as A
+        self.A = A
+        self.p = [patch.object(A, "PAYMENTS_ENABLED", True), patch.dict(A._orders, {}, clear=True),
+                  patch.object(A, "_persist_orders")]
+        for x in self.p:
+            x.start()
+        self.c = A.app.test_client()
+
+    def tearDown(self):
+        for x in self.p:
+            x.stop()
+
+    def test_pct_only_when_kyash_open_and_paypay_closed(self):
+        for av, want in ((self.KY_ONLY, 20), (self.BOTH, 0), ({"paypay": False, "kyash": False}, 0), ({"paypay": True, "kyash": False}, 0)):
+            with patch.object(P, "available", return_value=av):
+                self.assertEqual(P.paypay_off_pct(), want, av)
+
+    def test_service_order_is_discounted(self):
+        with patch.object(P, "available", return_value=self.KY_ONLY):
+            j = self.c.post("/run", json={"items": ["XP"], "dry": True}).get_json()
+        self.assertEqual(j["amount"], 20)   # 25円 → 20%引き
+        self.assertEqual(self.A._orders[j["order"]]["base_amount"], 25)
+        self.assertTrue(any("PayPay休止中の割引（20%引き）" in b["label"] and b["unit"] == -5 for b in j["breakdown"]))
+        with patch.object(P, "available", return_value=self.BOTH):
+            j = self.c.post("/run", json={"items": ["XP"], "dry": True}).get_json()
+        self.assertEqual(j["amount"], 25)
+
+    def test_ticket_discounted_but_support_box_is_not(self):
+        with patch.object(P, "available", return_value=self.KY_ONLY):
+            t = self.c.post("/api/ticket/order", json={"plan": "once"}).get_json()
+            s = self.c.post("/api/support/order", json={"amount": 500}).get_json()
+        full = int(self.A.PRICES["ticket_once"])
+        self.assertEqual(t["amount"], full * 80 // 100)
+        self.assertEqual(self.A._orders[t["order"]]["base_amount"], full)
+        self.assertEqual(s["amount"], 500)
+
+    def test_banner_and_notice(self):
+        with patch.object(P, "available", return_value=self.KY_ONLY):
+            home = self.c.get("/").get_data(as_text=True)
+            support = self.c.get("/support").get_data(as_text=True)
+        self.assertIn("全品20%オフ", home)
+        self.assertIn('data-off="20"', home)
+        self.assertNotIn("全品20%オフ", support)
+        with patch.object(P, "available", return_value=self.BOTH):
+            home = self.c.get("/").get_data(as_text=True)
+        self.assertNotIn("全品20%オフ", home)
+        self.assertIn('data-off="0"', home)

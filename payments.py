@@ -75,6 +75,20 @@ def available() -> dict:
     return dict(value)
 
 
+# PayPay が使えない（止めている・接続が切れている）あいだは、Kyash で払う注文を全品この割合だけ割り引く
+PAYPAY_OFF_PCT = 20
+PAYPAY_OFF_LABEL = "PayPay休止中の割引"
+
+
+def paypay_off_pct() -> int:
+    """いまの割引率。Kyash が使えて PayPay が使えないときだけ PAYPAY_OFF_PCT、それ以外は 0。"""
+    try:
+        av = available()
+    except Exception:  # noqa: BLE001
+        return 0
+    return PAYPAY_OFF_PCT if av["kyash"] and not av["paypay"] else 0
+
+
 def available_json() -> str:
     """テンプレート用（script の data 属性に入れる）。"""
     return json.dumps(available())

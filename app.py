@@ -72,7 +72,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.31"
+APP_VERSION = "1.32"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -160,7 +160,7 @@ def _pay_notice():
         av = payments.available()
     except Exception:  # noqa: BLE001  お知らせのために画面を落とさない
         return None
-    return {"paypay": av["paypay"]} if av["kyash"] else None
+    return {"paypay": av["paypay"], "off": payments.paypay_off_pct()} if av["kyash"] else None
 
 
 def _csp_nonce() -> str:
@@ -672,6 +672,9 @@ def _page_banners(path: str) -> str:
         n = admin_ops.notice()
         if n:
             bars.append(("warn" if n["level"] == "warn" else "info", "📢 " + n["text"]))
+        off_pct = payments.paypay_off_pct()
+        if off_pct and shop != "support":
+            bars.append(("sale", f"🎉 PayPay休止中につき、全品{off_pct}%オフ！お支払いの金額から自動で割り引きます（支援BOXは対象外）"))
         sale = admin_ops.sale()
         if sale and (shop is None or shop in sale["shops"]):
             names = "・".join(admin_ops.SHOP_LABELS[x] for x in sale["shops"])
@@ -3593,6 +3596,12 @@ def _place_order(job: dict, arguments: tuple, transfer_key, amount: int, breakdo
         breakdown.append({"label": f"{sale_info.get('label') or 'セール'}（{sale_pct}%引き）", "count": 1,
                           "unit": discounted - amount, "coupon": True, "sale": True})
         amount = discounted
+    off_pct = 0 if free_coupon else payments.paypay_off_pct()
+    if off_pct and amount > 0:   # PayPay が使えないあいだは全品割引（Kyash で払うので）：ここまでの金額から、さらに割り引く
+        discounted = amount * (100 - off_pct) // 100
+        breakdown.append({"label": f"{payments.PAYPAY_OFF_LABEL}（{off_pct}%引き）", "count": 1,
+                          "unit": discounted - amount, "coupon": True, "sale": True})
+        amount = discounted
     me = _owner()
     trimmed_coupons = []
     with _orders_lock:
@@ -4231,9 +4240,17 @@ def _create_product_order(product: dict, amount: int, summary: str):
             _orders.pop(k, None)
         order_id = secrets.token_urlsafe(16)
         breakdown = [{"label": summary, "count": 1, "unit": amount}]
+        base_amount = amount
+        # PayPay が使えないあいだの全品割引。支援BOXは金額をお客さんが決める（お礼の気持ち）ので割り引かない
+        off_pct = payments.paypay_off_pct() if product.get("type") != "support" else 0
+        if off_pct and amount > 0:
+            discounted = amount * (100 - off_pct) // 100
+            breakdown.append({"label": f"{payments.PAYPAY_OFF_LABEL}（{off_pct}%引き）", "count": 1, "unit": discounted - amount,
+                              "coupon": True, "sale": True})
+            amount = discounted
         _orders[order_id] = {"owner": me, "uid": _uid(me), "state": "unpaid", "amount": amount, "created": time.time(),
                              "job": None, "arguments": None, "transfer_key": None, "product": product,
-                             "breakdown": breakdown, "skipped": [], "summary": summary, "coupon": None, "base_amount": amount,
+                             "breakdown": breakdown, "skipped": [], "summary": summary, "coupon": None, "base_amount": base_amount,
                              "ip": _client_ip()}
     _persist_orders()
     return jsonify(order=order_id, amount=amount, breakdown=breakdown)

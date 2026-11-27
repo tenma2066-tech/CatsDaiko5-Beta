@@ -5,6 +5,7 @@
   "use strict";
   var me = document.currentScript;
   var paypay = me && me.getAttribute("data-paypay") === "1";
+  var offPct = parseInt((me && me.getAttribute("data-off")) || "0", 10) || 0;   /* PayPay 休止中の全品割引（%） */
   function show() {
     var wrap = document.createElement("div");
     wrap.setAttribute("role", "dialog");
@@ -36,6 +37,15 @@
       off.style.cssText = "margin:0 0 10px;padding:8px 10px;border-radius:10px;background:#fdecec;color:#b42323;font-weight:800;font-size:14px";
       off.textContent = "⚠ PayPay は現在、一時的にご利用いただけません。Kyash でお支払いください。";
     }
+    if (offPct > 0) {
+      var deal = document.createElement("p");
+      deal.style.cssText = "margin:0 0 10px;padding:10px;border-radius:10px;background:#fff4cc;border:2px solid #ffc42e;color:#17181c;font-weight:800;font-size:17px;text-align:center";
+      deal.textContent = "🎉 そのかわり、いまは全品 " + offPct + "%オフ！";
+      var dealSub = document.createElement("small");
+      dealSub.style.cssText = "display:block;font-weight:600;font-size:12px;color:#5b6472;margin-top:2px";
+      dealSub.textContent = "お支払いの金額から自動で割り引きます（支援BOXは対象外）";
+      deal.append(dealSub);
+    }
     var ok = document.createElement("button");
     ok.type = "button";
     ok.textContent = "OK";
@@ -47,6 +57,7 @@
     document.addEventListener("keydown", onKey);
     box.append(h, p, ol, note, ok);
     if (!paypay) p.after(off);
+    if (offPct > 0) (paypay ? p : off).after(deal);
     wrap.append(box);
     document.body.append(wrap);
     ok.focus();
