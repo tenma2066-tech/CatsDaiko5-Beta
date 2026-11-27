@@ -72,7 +72,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.32"
+APP_VERSION = "1.33"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -3280,7 +3280,7 @@ def _site() -> str:
 def robots_txt():
     return Response(
         "User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n"
-        "Disallow: /status/\nDisallow: /health\n"
+        "Disallow: /status/\nDisallow: /health\nDisallow: /dya/\n"
         f"Sitemap: {_site()}/sitemap.xml\n",
         mimetype="text/plain",
     )

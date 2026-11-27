@@ -28,6 +28,11 @@ REVIEW_POST_ID = re.sub(r"\D", "", _env("REVIEW_POST_ID", "2119246650996932810")
 
 # 実績（完了後に星と感想を書いてもらう）を使うか。0 にすると、入力のお願いも /reviews も出さない。
 REVIEWS_ENABLED = _env("REVIEWS_ENABLED", "1") != "0"
+# ミニゲーム「ダイナマイト野球」（別コンテナの dya-proxy を Caddy が /dya/ に回す。deploy/vps/）。
+# サーバーに dya-proxy と暗証番号がそろったときだけ remote-setup.sh が DYA_ENABLED=1 にする。0 ならトップにカードを出さない。
+DYA_ENABLED = _env("DYA_ENABLED", "0") == "1"
+DYA_PATH = "/dya/"
+
 REVIEW_MIN_CHARS = 20            # 感想の最小文字数
 REVIEW_MAX_CHARS = 400
 
@@ -73,5 +78,5 @@ def template_context() -> dict:
     return {"shop_name": SHOP_NAME, "shop_x": SHOP_X_ID, "contact": contact_text(), "contact_url": contact_url(),
             "google_verification": GOOGLE_SITE_VERIFICATION, "review_post_id": REVIEW_POST_ID,
             "flow_images": flow_images(), "og": og_images(),
-            "reviews_on": REVIEWS_ENABLED, "past_reviews_url": past_reviews_url(),
+            "reviews_on": REVIEWS_ENABLED, "dya_enabled": DYA_ENABLED, "dya_path": DYA_PATH, "past_reviews_url": past_reviews_url(),
             "review_min": REVIEW_MIN_CHARS, "review_max": REVIEW_MAX_CHARS}

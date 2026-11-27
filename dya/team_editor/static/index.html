@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>🏟️ ダイナマイト野球 オリジナルチーム編集</title>
+  <link rel="stylesheet" href="/static/editor.css">
+</head>
+<body>
+  <header>
+    <div class="title">🏟️ Original Team Editor</div>
+    <div class="actions">
+      <button id="btn-new" class="ghost" title="初期データ（本家チーム）に戻す">🆕 新規</button>
+      <button id="btn-open" title="保存した JSON ファイルを読み込む">📂 開く</button>
+      <button id="btn-download" class="primary" title="編集中データを JSON ファイルでダウンロード">💾 ダウンロード</button>
+      <input type="file" id="file-input" accept=".json,application/json" hidden>
+      <span id="save-status"></span>
+      <span class="hint" style="margin-left:auto;font-size:11px;">編集後 💾 ダウンロード → /offline?original=1 でアップロードしてプレイ</span>
+    </div>
+  </header>
+
+  <main>
+    <aside id="team-list">
+      <h2>チーム</h2>
+      <ul id="teams-ul"></ul>
+    </aside>
+
+    <section id="player-panel">
+      <div id="team-header">
+        <input type="text" id="team-name-input" placeholder="チーム名" maxlength="20">
+        <input type="color" id="team-color-input" title="チームカラー">
+      </div>
+      <div class="players-header">
+        <h2>選手 (21名)</h2>
+        <input type="text" id="player-search" placeholder="名前で絞り込み..." />
+      </div>
+      <ol id="players-ul"></ol>
+      <div id="starting-order-section">
+        <h3>先発打順 (9名)</h3>
+        <div id="starting-order"></div>
+      </div>
+    </section>
+
+    <section id="edit-panel">
+      <div id="edit-empty" class="hint">左で選手を選んで編集</div>
+      <div id="edit-form" hidden>
+        <h2 id="edit-player-title">選手編集</h2>
+
+        <div class="quick-actions">
+          <button id="btn-clone" class="ghost" title="他のスロットへ複製">📋 複製...</button>
+          <span class="preset-label">プリセット:</span>
+          <select id="preset-select">
+            <option value="">適用するプリセットを選択</option>
+            <optgroup label="バッター">
+              <option value="batter_power">長距離砲（パワー型）</option>
+              <option value="batter_avg">アベレージヒッター</option>
+              <option value="batter_speed">スピードスター</option>
+              <option value="batter_balanced">バランス型</option>
+              <option value="batter_eye">選球眼の鬼</option>
+            </optgroup>
+            <optgroup label="投手">
+              <option value="pitcher_power">速球派</option>
+              <option value="pitcher_finesse">技巧派</option>
+              <option value="pitcher_stamina">スタミナ型</option>
+              <option value="pitcher_balanced">バランス型</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>名前 <small>(7文字まで)</small></label>
+          <input type="text" id="f-name" maxlength="7">
+        </div>
+
+        <div class="row">
+          <label>顔ベース</label>
+          <select id="f-face-ref"></select>
+          <span class="hint">(既存選手の顔を流用)</span>
+        </div>
+
+        <div class="row">
+          <label>肌色</label>
+          <input type="color" id="f-skin">
+        </div>
+
+        <div class="row">
+          <label>ポジションタイプ</label>
+          <select id="f-is-pitcher">
+            <option value="false">野手</option>
+            <option value="true">投手</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>副能力</label>
+          <select id="f-secondary"></select>
+        </div>
+
+        <fieldset>
+          <legend>基本能力</legend>
+          <div id="batter-stats"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>守備適性 (1-9: 投/捕/一/二/三/遊/左/中/右)</legend>
+          <div id="defensive-elig"></div>
+        </fieldset>
+
+        <fieldset id="pitcher-fieldset" hidden>
+          <legend>投手能力</legend>
+          <div id="pitcher-stats"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>バッター特殊能力</legend>
+          <div id="batter-flags" class="flag-grid"></div>
+        </fieldset>
+
+        <fieldset id="pitcher-flags-fieldset" hidden>
+          <legend>投手特殊球種</legend>
+          <div id="pitcher-flags" class="flag-grid"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>表示値 (ロスター画面用)</legend>
+          <div id="display-hint" class="display-grid"></div>
+        </fieldset>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/editor.js"></script>
+</body>
+</html>

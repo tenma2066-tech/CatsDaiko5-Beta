@@ -2,6 +2,7 @@ name: Deploy to VPS
 # 国内VPS（Ubuntu）へ、SSH（パスワードまたは鍵）でデプロイする。
 # 必要なシークレット: VPS_HOST（IPアドレス）, ADMIN_PASSWORD, VPS_PASSWORD（または VPS_SSH_KEY）
 # 任意: VPS_USER（既定 root）, SITE_DOMAIN（独自ドメイン。なければ <IP>.sslip.io で自動HTTPS）
+# 任意: DYA_PIN（ミニゲームの暗証番号・数字4〜12桁）。ミニゲームはこのリポジトリの dya/ を /dya/ で動かす。
 on:
   push:
     branches: [main]
@@ -82,6 +83,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          DYA_PIN: ${{ secrets.DYA_PIN }}
         run: |
           set -eu
           AF="/tmp/.ap-$GITHUB_RUN_ID"
@@ -99,12 +101,18 @@ jobs:
             TF="/tmp/.tk-$GITHUB_RUN_ID"
             printf 'TURNSTILE_SITE_KEY=%s\nTURNSTILE_SECRET_KEY=%s\n' "$TURNSTILE_SITE_KEY" "$TURNSTILE_SECRET_KEY" | $SSH_CMD "$TARGET" "umask 077; cat > $TF"
           fi
+          # ミニゲームの暗証番号（任意）。Secret があれば一時ファイルで渡す（第6引数）。未設定なら .env の値のまま。
+          DF=""
+          if [ -n "${DYA_PIN:-}" ]; then
+            DF="/tmp/.dp-$GITHUB_RUN_ID"
+            printf '%s' "$DYA_PIN" | $SSH_CMD "$TARGET" "umask 077; cat > $DF"
+          fi
           # sudo を使うユーザーの場合は、同じパスワードを標準入力で渡す（root なら不要）
           if [ -n "$SUDO" ] && [ -n "${USE_SSHPASS:-}" ]; then
-            printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF' '$TF'"
+            printf '%s\n' "$SSHPASS" | $SSH_CMD "$TARGET" "sudo -S -p '' bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF' '$TF' '$DF'"
           else
             AR="${{ github.event.inputs.allow_running || '0' }}"; case "$AR" in ''|*[!0-9]*) AR=0;; esac
-            $SSH_CMD "$TARGET" "ALLOW_RUNNING=$AR $SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF' '$TF'"
+            $SSH_CMD "$TARGET" "ALLOW_RUNNING=$AR $SUDO bash $NEW_SRC/deploy/vps/remote-setup.sh '$SITE_HOST' '$NEW_SRC' '$AF' '$KF' '$TF' '$DF'"
           fi
       - name: Health check
         if: env.SKIP != 'true'

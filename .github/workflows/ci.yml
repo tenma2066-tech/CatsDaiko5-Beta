@@ -67,6 +67,7 @@ jobs:
           python -m unittest -v test_github_runtime_store.py
           python -m unittest -v test_security.py
           python -m unittest -v test_seo.py
+          python -m unittest -v test_dya.py
           python -m unittest -v test_tsum.py
 
       - name: Lint (ruff)

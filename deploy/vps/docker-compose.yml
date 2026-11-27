@@ -37,12 +37,28 @@ services:
       TSUM_SOCKS_URL: "socks5h://host.docker.internal:9050"
       ADMIN_PASSWORD_FILE: /run/admin/admin_password
       SESSION_COOKIE_SECURE: "1"    # ログインの Cookie を HTTPS のときだけ送る（Caddy が HTTPS にしている）
+      # ミニゲーム（下の dya）のカードをトップに出すか。remote-setup.sh が .env に書く。
+      DYA_ENABLED: ${DYA_ENABLED:-0}
     extra_hosts:
       # app コンテナから、ホストで動く Tor（SOCKS 9050）へ届かせるため
       - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/data
       - ./admin_password:/run/admin/admin_password:ro
+    expose:
+      - "8080"
+
+  # ミニゲーム「ダイナマイト野球」（このリポジトリの dya/。tenma2066-tech/dya-proxy の写し）。Caddy が /dya/ をここへ回す。
+  # profile "dya" のときだけ起動する（remote-setup.sh が、ソースと暗証番号がそろったときに COMPOSE_PROFILES=dya を .env に書く）。
+  # お店の注文・台帳・データの置き場所には触れない（volumes なし）。
+  dya:
+    profiles: ["dya"]
+    build: ./src/dya
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      PROXY_AUTH_PIN: ${DYA_PIN:-}   # Render と同じ暗証番号。空なら profile が付かず起動しない＝必ず暗証番号が要る
+      DYA_BASE_PATH: /dya
     expose:
       - "8080"
 
