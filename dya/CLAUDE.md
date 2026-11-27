@@ -3767,3 +3767,35 @@ localStorage 読込 → ゲーム起動。**問題:** localStorage が永続的�
 
 ### 注意
 - ショップのデプロイは dya-proxy の **main** を取り込む。この変更が main に入るまでは `/dya/` のリンクが壊れる。
+
+---
+
+## 2026-11-27 HR 確定ボタン: CPU 戦では何度でも押せるように
+
+### 経緯
+ユーザー報告: 「ホームラン確定ボタンを使うと押せなくなる」。
+
+### 原因
+1 試合 1 回の仕様（`_hrUsed`）で、使うとその試合中は二度と出なかった。さらに、押したあとボールが判定位置（bz 170〜176）に来ないまま 10 秒経つと、`_hrPending` が立ったまま残り、次の打席で勝手に HR になる不具合もあった。
+
+### 変更（build.js の CHEAT_UI_BOOTSTRAP）
+- CPU 戦（`is_online === 0`）では `_hrUsed` を記録しない → 条件（ストライク・長打 7 以上）を満たす球が来るたびに出る
+- オンライン対戦は従来どおり 1 試合 1 回
+- 同じ球での二度押しは無視（`_hrPending` 中は return）
+- 10 秒たってもボールが来なければ `_hrPending` を倒す
+- 両 HTML を再ビルド
+
+### 再ビルドの手順（Windows 以外でも）
+`build.js` / `recover_assets.js` は素材の場所を環境変数 `DYA_ASSETS_DIR` で受け取れるようにした（未設定なら従来の `C:/Users/.../Temp/dya_assets`）。
+```
+DYA_ASSETS_DIR=/path/to/dya_assets node recover_assets.js   # dya_offline.html から素材を復元
+DYA_ASSETS_DIR=/path/to/dya_assets node build.js offline
+DYA_ASSETS_DIR=/path/to/dya_assets node build.js online
+```
+変更前の build.js で作り直した HTML は、スクリプト間の改行と `[SV BUILD]` の日時以外、コミット済みのものと一致した（復元が正しいことの確認）。
+
+### 確認
+- 両 HTML の全インライン script が `node --check` を通る
+- Chromium（Playwright）で `/offline?cheat=1` を開き、`__cheat.onPitch()` を直接呼んで確認:
+  CPU 戦 → 押す → 次の球でまた出る / 同じ球で 2 回押しても 1 回扱い / オンライン扱い → 押すと次の球からは出ない
+- 実際の試合での HR 発生は未確認（打撃判定そのものは変えていない）

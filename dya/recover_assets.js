@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC_HTML = path.resolve(__dirname, 'dya_offline.html');
-const ASSETS_DIR = 'C:/Users/中山天真/AppData/Local/Temp/dya_assets';
+const ASSETS_DIR = process.env.DYA_ASSETS_DIR || 'C:/Users/中山天真/AppData/Local/Temp/dya_assets';
 const BUILD_JS = path.resolve(__dirname, 'build.js');
 
 // === 1. Read offline HTML and build.js source ===
@@ -66,7 +66,7 @@ function collectOfflinePatches() {
       if (m === 'path') return require('path');
       throw new Error('require(' + m + ') unexpected');
     },
-    process: { argv: ['node', 'build.js', 'offline'], exit: () => {} },
+    process: { argv: ['node', 'build.js', 'offline'], env: { DYA_ASSETS_DIR: ASSETS_DIR }, exit: () => {} },
     console: {
       log: () => {},
       warn: () => {},

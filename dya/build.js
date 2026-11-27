@@ -11,7 +11,7 @@ if (MODE !== 'offline' && MODE !== 'online') {
 }
 const isOnline = MODE === 'online';
 
-const SRC = 'C:/Users/中山天真/AppData/Local/Temp/dya_assets';
+const SRC = process.env.DYA_ASSETS_DIR || 'C:/Users/中山天真/AppData/Local/Temp/dya_assets';
 const OUT = path.resolve(__dirname, isOnline ? 'dya_online.html' : 'dya_offline.html');
 
 function readb64(rel) { return fs.readFileSync(path.join(SRC, rel)).toString('base64'); }
@@ -671,7 +671,8 @@ const CHEAT_UI_BOOTSTRAP = `
   window.__cheat._ballTimer = null;
   window.__cheat._hrTimer = null;
   window.__cheat._progTimer = null;
-  // _hrUsed: 1 試合 1 回の使用記録 (match_start パッチでリセット)
+  // _hrUsed: 1 試合 1 回の使用記録 (match_start パッチでリセット)。
+  //          CPU 戦 (is_online==0) では記録しない＝何度でも押せる。オンライン対戦は 1 試合 1 回のまま。
   // _hrPending: 押した瞬間に立て、hit_md=4 ブランチで自動的に倒される
   window.__cheat._hrUsed = false;
   window.__cheat._hrPending = false;
@@ -707,7 +708,12 @@ const CHEAT_UI_BOOTSTRAP = `
           fired = true;
           clearInterval(poll);
         }
-        if(Date.now() - pollStart > 10000){ clearInterval(poll); }
+        if(Date.now() - pollStart > 10000){
+          // ボールが来ないまま終わった（見逃し・投球取り消しなど）。立てたままだと次の打席で
+          // 勝手に HR になるので倒す。CPU 戦なら次の球でまたボタンが出る。
+          window.__cheat._hrPending = false;
+          clearInterval(poll);
+        }
       } catch(e){ clearInterval(poll); }
     }, 8);
   }
@@ -718,9 +724,11 @@ const CHEAT_UI_BOOTSTRAP = `
 
   hrBtn.addEventListener('click', function(e){
     e.preventDefault(); e.stopPropagation();
-    if(window.__cheat._hrUsed) return;
+    var cpuGame = (window.is_online === 0);
+    if(window.__cheat._hrUsed && !cpuGame) return;
+    if(window.__cheat._hrPending) return;          // 同じ球で二度押し
     window.__cheat._hrPending = true;
-    window.__cheat._hrUsed = true;
+    if(!cpuGame) window.__cheat._hrUsed = true;
     hideHrBtn();
     fireHRWhenBallArrives();
   });
@@ -742,8 +750,8 @@ const CHEAT_UI_BOOTSTRAP = `
       showBallIndicator(px, py);
       startCountdownBar();
 
-      // HR ボタン表示判定: 未使用 + ストライク + 長打>=7
-      var canHr = (!window.__cheat._hrUsed)
+      // HR ボタン表示判定: (CPU 戦 or 未使用) + ストライク + 長打>=7
+      var canHr = (window.is_online === 0 || !window.__cheat._hrUsed)
                && (sb === 'S')
                && ((window.prm_pw|0) >= 7);
       hrBtn.style.display = canHr ? 'block' : 'none';
