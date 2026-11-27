@@ -296,6 +296,17 @@ if [ "$PW_CHANGED" = "1" ] && [ -n "$APP_BEFORE" ] && [ "$APP_BEFORE" = "$(docke
   echo "admin password changed -> recreate app"
   docker compose up -d --no-deps --force-recreate app
 fi
+# Caddy はバインドマウントの Caddyfile を自動で読み直さない（compose up -d ではファイル変更だけでは作り直さない）。
+# ルーティングを変えるデプロイ（/dya/ の追加など）が無反応にならないよう、毎回 reload で反映する。
+# reload は無停止。失敗した場合だけ restart（こちらは数秒の瞬断）でフォールバック。
+if [ -n "$(docker compose ps -q caddy 2>/dev/null || true)" ]; then
+  if docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+    echo "caddy: reloaded Caddyfile"
+  else
+    docker compose restart caddy >/dev/null 2>&1 || true
+    echo "caddy: restarted (reload unavailable)"
+  fi
+fi
 # 新しいコンテナ（または変更なしで動き続けたコンテナ）で、実行の開始を再び受け付ける
 for i in $(seq 1 30); do
   if docker compose exec -T app python3 -c "$APP_PY" drain 1 >/dev/null 2>&1; then break; fi
