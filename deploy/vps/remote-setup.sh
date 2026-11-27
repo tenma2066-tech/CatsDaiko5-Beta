@@ -3,6 +3,7 @@
 # 引数: $1 = SITE_HOST, $2 = 新しいソースを展開したディレクトリ, $3 = 管理者パスワードを書いたファイル（読んだら削除）,
 #       $4 = ANTHROPIC_API_KEY を書いたファイル（任意・読んだら削除。空なら .env は変更しない）
 #       $5 = TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY を書いたファイル（任意・読んだら削除。空なら .env は変更しない）
+#       $6 = ミニゲーム（ダイナマイト野球）の暗証番号を書いたファイル（任意・読んだら削除。空なら .env は変更しない）
 set -euo pipefail
 SITE_HOST="$1"
 NEW_SRC="$2"
@@ -83,6 +84,18 @@ if [ -n "$TURNSTILE_FILE" ] && [ -s "$TURNSTILE_FILE" ]; then
     echo "::warning::Turnstile の鍵の形が正しくないため、.env は変更しませんでした（これまでの設定のまま動きます）。"
   fi
   shred -u "$TURNSTILE_FILE" 2>/dev/null || rm -f "$TURNSTILE_FILE"
+fi
+# ミニゲームの暗証番号（数字4〜12桁）。第6引数のファイルがあれば .env の DYA_PIN に反映する。
+DYA_PIN_FILE="${6:-}"
+if [ -n "$DYA_PIN_FILE" ] && [ -s "$DYA_PIN_FILE" ]; then
+  DYA_PIN_VAL="$(tr -d '\r\n ' < "$DYA_PIN_FILE")"
+  if printf '%s' "$DYA_PIN_VAL" | grep -Eq '^[0-9]{4,12}$'; then
+    sed -i '/^DYA_PIN=/d' .env
+    printf 'DYA_PIN=%s\n' "$DYA_PIN_VAL" >> .env
+  else
+    echo "::warning::DYA_PIN は数字4〜12桁にしてください。.env は変更しませんでした。"
+  fi
+  shred -u "$DYA_PIN_FILE" 2>/dev/null || rm -f "$DYA_PIN_FILE"
 fi
 OLD_PW_SUM="$(sha256sum admin_password 2>/dev/null | cut -d' ' -f1 || true)"
 if [ -n "$ADMIN_PASSWORD" ]; then
@@ -197,6 +210,22 @@ if command -v tor >/dev/null 2>&1; then
   echo "tor: ${TOR_ACT}  listen=[$(ss -ltn 2>/dev/null | grep ':9050' | awk '{print $4}' | tr '\n' ' ')]"
 else
   echo "::warning::tor をホストに入れられませんでした。TSUM_SOCKS_URL は無効になり、LINEログインは直接接続のまま動きます。"
+fi
+
+# 4.9) ミニゲーム（dya-proxy）。ソース（src/dya/proxy.js）と暗証番号（.env の DYA_PIN）がそろったときだけ動かす。
+#      どちらかが無ければ止めて、トップのカードも出さない（暗証番号なしで公開しないため）。
+sed -i '/^COMPOSE_PROFILES=/d; /^DYA_ENABLED=/d' .env
+if [ -f "$APP_DIR/src/dya/proxy.js" ] && [ -f "$APP_DIR/src/dya/Dockerfile" ] && grep -Eq '^DYA_PIN=[0-9]{4,12}$' .env; then
+  printf 'COMPOSE_PROFILES=dya\nDYA_ENABLED=1\n' >> .env
+  echo "dya: enabled (/dya/)"
+else
+  echo "DYA_ENABLED=0" >> .env
+  docker compose --profile dya rm -sf dya >/dev/null 2>&1 || true
+  if [ -f "$APP_DIR/src/dya/proxy.js" ]; then
+    echo "::warning::ミニゲームのソースはありますが、暗証番号（シークレット DYA_PIN）が未設定のため動かしません。"
+  else
+    echo "dya: disabled (no source)"
+  fi
 fi
 
 # 5) 先にビルド（今のサイトは動いたまま）

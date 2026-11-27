@@ -16,6 +16,15 @@ Docker（アプリ + Caddy）で起動する。HTTPS は Let's Encrypt で自動
 | `ADMIN_PASSWORD` | ◯ | 管理画面（/admin）のパスコード |
 | `VPS_USER` | 任意 | 既定 `root` |
 | `SITE_DOMAIN` | 任意 | 独自ドメイン（なければ sslip.io） |
+| `DYA_PIN` | 任意 | ミニゲーム（ダイナマイト野球・`/dya/`）の暗証番号。数字4〜12桁。**無ければミニゲームは動かさない** |
+| `DYA_REPO_TOKEN` | 任意 | `tenma2066-tech/dya-proxy` が非公開なら、それを読める fine-grained トークン（Contents: Read） |
+
+## ミニゲーム（ダイナマイト野球）
+- デプロイのたびに `tenma2066-tech/dya-proxy` の `main` を `src/dya/` に取り込み、別コンテナ `dya`（Node）で動かす。お店の `app` とは別のコンテナで、注文・台帳・`data/` には触れない。
+- Caddy が `/dya/*` の先頭 `/dya` を外して `dya:8080` に回す（`deploy/vps/Caddyfile`）。`proxy.js` は `DYA_BASE_PATH=/dya` で、リンク・Cookie・中継 URL に `/dya` を付けて返す。
+- 暗証番号の画面を通らないと遊べない。チート版は配らない（`DYA_DISABLE_CHEAT=1`：ランチャーから外し、`?cheat=1` は `cheat=0` に転送）。
+- ソース（`src/dya/proxy.js`）と `DYA_PIN` がそろったときだけ、`remote-setup.sh` が `.env` に `COMPOSE_PROFILES=dya` と `DYA_ENABLED=1` を書く。そろわなければ `dya` を止め、トップのカードも隠す。
+- dya-proxy だけを更新したときは、このワークフローを手動実行（Run workflow）すると反映される。
 
 ## 動き
 1. 接続確認（OS・メモリを表示）

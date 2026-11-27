@@ -67,6 +67,7 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
 .gamecard .art.sc{background:linear-gradient(135deg,#cfe3ff,#8fb8ff)}
 .gamecard .art.bx{background:linear-gradient(135deg,#d6f5e3,#8fdcb4)}
 .gamecard .art.sp{background:linear-gradient(135deg,#ffd1e0,#ff9fbf)}
+.gamecard .art.dy{background:linear-gradient(135deg,#d9f2ff,#7cc4f0)}
 .gamecard .txt{padding:8px 10px 10px}
 .gamecard b{display:block;font-size:14.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gamecard small{display:block;margin-top:2px;font-size:12px;color:var(--muted)}
@@ -122,6 +123,10 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
       <span class="art bx" aria-hidden="true">📮</span><span class="new">NEW</span>
       <span class="txt"><b>意見・質問箱</b><small>意見・質問・不具合</small></span>
     </a>
+    {% if dya_enabled %}<a class="gamecard" href="{{ dya_path }}">
+      <span class="art dy" aria-hidden="true">⚾</span><span class="new">NEW</span>
+      <span class="txt"><b>ミニゲーム⚾</b><small>ダイナマイト野球・暗証番号が必要</small></span>
+    </a>{% endif %}
     <a class="gamecard" href="/source">
       <span class="art sc" aria-hidden="true">📦</span>
       <span class="txt"><b>ソースコード購入</b><small>このお店の仕組み一式 <em>{{ "{:,}".format(prices.source_code) }}円</em></small></span>
