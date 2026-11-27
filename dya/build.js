@@ -724,11 +724,9 @@ const CHEAT_UI_BOOTSTRAP = `
 
   hrBtn.addEventListener('click', function(e){
     e.preventDefault(); e.stopPropagation();
-    var cpuGame = (window.is_online === 0);
-    if(window.__cheat._hrUsed && !cpuGame) return;
-    if(window.__cheat._hrPending) return;          // 同じ球で二度押し
+    // 1試合1回の制限は撤廃。CPU 戦・オンライン対戦とも、条件を満たすたびに何度でも使える。
+    if(window.__cheat._hrPending) return;          // 同じ球で二度押しだけ防ぐ
     window.__cheat._hrPending = true;
-    if(!cpuGame) window.__cheat._hrUsed = true;
     hideHrBtn();
     fireHRWhenBallArrives();
   });
@@ -750,10 +748,8 @@ const CHEAT_UI_BOOTSTRAP = `
       showBallIndicator(px, py);
       startCountdownBar();
 
-      // HR ボタン表示判定: (CPU 戦 or 未使用) + ストライク + 長打>=7
-      var canHr = (window.is_online === 0 || !window.__cheat._hrUsed)
-               && (sb === 'S')
-               && ((window.prm_pw|0) >= 7);
+      // HR ボタン表示判定: ストライク + 長打>=7（使用回数の制限なし）
+      var canHr = (sb === 'S') && ((window.prm_pw|0) >= 7);
       hrBtn.style.display = canHr ? 'block' : 'none';
 
       if(window.__cheat._hudTimer) clearTimeout(window.__cheat._hudTimer);

@@ -103,7 +103,7 @@ images/parts17_dirt.glb|model/gltf-binary|Z2xURgIAAACkCxEA8CkAAEpTT057ImFzc2V0Ij
 
   // ビルドタイムスタンプ（HTML がキャッシュ済か新しい版かを console で即判定）。
   // F12 console に「色付き SV BUILD: <yyyy-mm-dd hh:mm>」が出れば最新版を読み込んでいる。
-  console.warn('%c[SV BUILD 2026-11-27 13:45]', 'background:#0a4d3a;color:#fff;padding:3px 8px;border-radius:4px;font-weight:bold');
+  console.warn('%c[SV BUILD 2026-11-27 13:51]', 'background:#0a4d3a;color:#fff;padding:3px 8px;border-radius:4px;font-weight:bold');
 
   // ===== モード選択 =====
   // proxy.js のランチャー (/) で選択し ?cheat=1 or ?cheat=0 を URL クエリで渡す。
@@ -1228,11 +1228,9 @@ images/parts17_dirt.glb|model/gltf-binary|Z2xURgIAAACkCxEA8CkAAEpTT057ImFzc2V0Ij
 
   hrBtn.addEventListener('click', function(e){
     e.preventDefault(); e.stopPropagation();
-    var cpuGame = (window.is_online === 0);
-    if(window.__cheat._hrUsed && !cpuGame) return;
-    if(window.__cheat._hrPending) return;          // 同じ球で二度押し
+    // 1試合1回の制限は撤廃。CPU 戦・オンライン対戦とも、条件を満たすたびに何度でも使える。
+    if(window.__cheat._hrPending) return;          // 同じ球で二度押しだけ防ぐ
     window.__cheat._hrPending = true;
-    if(!cpuGame) window.__cheat._hrUsed = true;
     hideHrBtn();
     fireHRWhenBallArrives();
   });
@@ -1254,10 +1252,8 @@ images/parts17_dirt.glb|model/gltf-binary|Z2xURgIAAACkCxEA8CkAAEpTT057ImFzc2V0Ij
       showBallIndicator(px, py);
       startCountdownBar();
 
-      // HR ボタン表示判定: (CPU 戦 or 未使用) + ストライク + 長打>=7
-      var canHr = (window.is_online === 0 || !window.__cheat._hrUsed)
-               && (sb === 'S')
-               && ((window.prm_pw|0) >= 7);
+      // HR ボタン表示判定: ストライク + 長打>=7（使用回数の制限なし）
+      var canHr = (sb === 'S') && ((window.prm_pw|0) >= 7);
       hrBtn.style.display = canHr ? 'block' : 'none';
 
       if(window.__cheat._hudTimer) clearTimeout(window.__cheat._hudTimer);
