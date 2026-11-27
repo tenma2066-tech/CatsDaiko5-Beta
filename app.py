@@ -70,7 +70,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.27"
+APP_VERSION = "1.28"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -1604,9 +1604,9 @@ def _run_job(job: dict, transfer: str, confirm: str, items, subs, others, qty=No
 
 # ---------------------------------------------------------------- 5. 認証・連打よけ・お店の設定
 _fail: dict[str, list[float]] = {}
-ADMIN_SESSION_SEC = 12 * 3600      # 管理者ログインの有効時間（そのあとは入り直し）
-ADMIN_IDLE_SEC = 60 * 60           # 管理画面にも何も触らないまま、この時間たったら自動でログアウト
-ADMIN_2FA_STEP_SEC = 5 * 60        # パスコードのあと、6桁を入れるまでの猶予
+# 管理者ログインは時間では切らない。Cookie（PERMANENT_SESSION_LIFETIME＝30日）が続くかぎり有効で、
+# 使うたびに期限を先延ばしする＝ときどき開いていれば切れない。終わらせたいときは「管理者モードを終了」。
+ADMIN_2FA_STEP_SEC = 5 * 60        # パスコードのあと、6桁を入れるまでの猶予（ここだけは短い＝ログインの途中の守り）
 
 
 def _too_many_fails(ip: str, limit: int = 5) -> bool:
@@ -1722,19 +1722,14 @@ def _local_request() -> bool:
 
 
 def _is_admin() -> bool:
-    """管理者としてログイン中か。ログインから ADMIN_SESSION_SEC を過ぎたら切る。"""
+    """管理者としてログイン中か。時間では切らない（Cookie が続くかぎり有効）。
+    使うたびに Cookie の期限を先延ばしして、ときどき開いていればログインが続くようにする。"""
     if not session.get("admin"):
         return False
-    at = session.get("admin_at")
-    if not isinstance(at, (int, float)):
-        session["admin_at"] = time.time()      # 以前からのログイン：いまから数える
-        return True
     now = time.time()
     seen = session.get("admin_seen")
-    if now - at > ADMIN_SESSION_SEC or (isinstance(seen, (int, float)) and now - seen > ADMIN_IDLE_SEC):
-        _admin_logout()
-        return False
     if not isinstance(seen, (int, float)) or now - seen > 60:      # 最後に使った時刻（1分に1回だけ書き直す）
+        session.permanent = True                                   # Cookie の30日を、使うたびに数え直す
         session["admin_seen"] = now
     return True
 
@@ -1746,6 +1741,7 @@ def _admin_logout() -> None:
 
 def _admin_login() -> None:
     session.pop("admin_2fa_at", None)
+    session.permanent = True                   # ログインを Cookie の寿命（30日）に乗せる＝すぐには切れない
     session["admin"] = True
     session["admin_at"] = session["admin_seen"] = time.time()
     session["admin_csrf"] = secrets.token_urlsafe(32)

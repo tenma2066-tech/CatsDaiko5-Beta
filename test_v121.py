@@ -313,12 +313,13 @@ class TwoStepLogin(Base):
             self.admin("unlock_2fa", c, code="123456")
             self.assertFalse(self.is_admin(c))
 
-    def test_idle_logout(self):
+    def test_login_is_kept_not_logged_out_when_idle(self):
+        # v1.28：無操作でのログアウトはやめた。長く触らなくても管理者のまま。
         self.login()
         self.assertTrue(self.is_admin())
         with self.c.session_transaction() as s:
-            s["admin_seen"] = time.time() - A.ADMIN_IDLE_SEC - 5
-        self.assertFalse(self.is_admin())
+            s["admin_seen"] = time.time() - 10 * 86400             # 10日さわっていない
+        self.assertTrue(self.is_admin())
 
 
 if __name__ == "__main__":

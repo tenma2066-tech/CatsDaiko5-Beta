@@ -64,15 +64,21 @@ class Security(unittest.TestCase):
             self._unlock(f"203.0.113.{i + 1}", "bad")            # IP を変えながらの総当たり
         self.assertFalse(self._unlock("198.51.100.7", "pass-1234")[1])
 
-    def test_admin_session_expires(self):
+    def test_admin_session_does_not_expire_on_time(self):
+        # v1.28：管理者ログインは時間では切らない。ずっと前にログインしていても、
+        # 何日も触っていなくても、Cookie（セッション）が残っていれば管理者のまま。
         c = A.app.test_client()
         with c.session_transaction() as s:
             s["admin"] = True
-            s["admin_at"] = time.time() - A.ADMIN_SESSION_SEC - 5
-        self.assertNotIn("管理者モードを終了", c.get("/admin").get_data(as_text=True))
+            s["admin_at"] = time.time() - 40 * 86400               # 40日前にログイン
+            s["admin_seen"] = time.time() - 10 * 86400             # 10日さわっていない
+        self.assertIn("管理者モードを終了", c.get("/admin").get_data(as_text=True))
         with c.session_transaction() as s:
-            self.assertNotIn("admin", s)
-            s["admin"] = True                                      # 以前からのログイン（時刻なし）は、いまから数える
+            self.assertTrue(s.get("admin"))                        # 切られていない
+            self.assertTrue(s.get("_permanent"))                  # Cookie の期限は延ばし直している
+        with c.session_transaction() as s:                        # 時刻の記録が無い古いログインも、管理者のまま
+            s.clear()
+            s["admin"] = True
         self.assertIn("管理者モードを終了", c.get("/admin").get_data(as_text=True))
 
     # ---- 基本の守りのヘッダー
