@@ -21,8 +21,8 @@ const ASSET_FILES = [
   'images/240904sound_dya.mp3',
   'images/close.png',
   'images/cs2_241212.jpg',
-  'images/cs1_pc_260413.png',
-  'images/cs1_mb_260413.png',
+  'images/cs1_pc_261031.png',
+  'images/cs1_mb_261031.png',
   'images/da_bg.jpg',
   'images/parts_skin_231221.png',
   'images/skin1_251205.png',
@@ -73,7 +73,7 @@ patch('CSS bg wait_bg.png',
 // 扱い（将来削除予定）でコンソールに警告を出すため、unload の方だけ削除して beforeunload
 // に一本化。機能影響なし。
 patch('drop deprecated window.onunload listener',
-  "window.onunload=function(){if (typeof is_online !== 'undefined'){if(is_online==1 && cnct_status!=-1){vs_inning_tb=98;socket.disconnect()}}};",
+  "window.onunload=function(){if(typeof is_online !=='undefined'){if(is_online==1 && cnct_status!=-1){vs_inning_tb=98;socket.disconnect()}}};",
   '');
 
 // 広告 iframe → about:blank（オンラインでも localhost からは AdSense 表示できないため共通）
@@ -154,8 +154,8 @@ patch('BEST cheat: override pitch_opr_flg3_cnt2 in pitch_dc (cheat)',
 // に gate して自分の打席だけブーストする。サーバには結果の打球（sx/sy/sz/hit_md）が送信
 // されるため、能力値そのものは送らない。「相手から見ると強い打球を打たれただけ」になる。
 patch('long-hit boost: +1 long/+1 hit when prm_pw>=7 (cheat)',
-  'switch (bt_pd[inning_tb][djn[inning_tb]][17]){case 0:prm_pw++;prm_ht++;break;case 1:prm_ht++;break;case 2:break;case 3:prm_ht--;break;case 4:prm_pw--;prm_ht--;break;default:};',
-  'switch (bt_pd[inning_tb][djn[inning_tb]][17]){case 0:prm_pw++;prm_ht++;break;case 1:prm_ht++;break;case 2:break;case 3:prm_ht--;break;case 4:prm_pw--;prm_ht--;break;default:};if(window.__cheat_enabled&&opr_mode==1&&prm_pw>=7){prm_pw++;prm_ht++};');
+  'switch(bt_pd[inning_tb][djn[inning_tb]][17]){case 0:prm_pw++;prm_ht++;break;case 1:prm_ht++;break;case 2:break;case 3:prm_ht--;break;case 4:prm_pw--;prm_ht--;break;default:};',
+  'switch(bt_pd[inning_tb][djn[inning_tb]][17]){case 0:prm_pw++;prm_ht++;break;case 1:prm_ht++;break;case 2:break;case 3:prm_ht--;break;case 4:prm_pw--;prm_ht--;break;default:};if(window.__cheat_enabled&&opr_mode==1&&prm_pw>=7){prm_pw++;prm_ht++};');
 
 // CPU 対戦の来球プレビュー HUD: CPU 投球 (is_online==0 path) で pitch_cpu/pitch_dec が呼ばれた
 // 直後にフック。プレイヤーがバッター時 (opr_mode==1) のみ HUD 表示。
@@ -221,8 +221,8 @@ patch('CPU diff shift: drop practice Rd handicap (cheat)',
 // window.__build_original_record を定義する。両方揃った時のみ
 // 各 case のレコードを差し替える（揃わない通常起動では何も起きない）。
 patch('ORIGINAL TEAM hook in team_data',
-  'var set_plr_dat=new Array(20);var set_shibi_ps="";switch (i){',
-  'var set_plr_dat=new Array(20);var set_shibi_ps="";if(window.__build_original_record&&window.__orig_teams_data&&window.__orig_teams_data.teams&&window.__orig_teams_data.teams[i]){var __ot=window.__orig_teams_data.teams[i];for(var __os=0;__os<21;__os++){set_plr_dat[__os]=window.__build_original_record(__ot.players[__os])};set_shibi_ps=(__ot.starting_order||[7,6,8,3,9,5,4,2,1]).join("")}else switch (i){');
+  'var set_plr_dat=new Array(20);var set_shibi_ps="";switch(i){',
+  'var set_plr_dat=new Array(20);var set_shibi_ps="";if(window.__build_original_record&&window.__orig_teams_data&&window.__orig_teams_data.teams&&window.__orig_teams_data.teams[i]){var __ot=window.__orig_teams_data.teams[i];for(var __os=0;__os<21;__os++){set_plr_dat[__os]=window.__build_original_record(__ot.players[__os])};set_shibi_ps=(__ot.starting_order||[7,6,8,3,9,5,4,2,1]).join("")}else switch(i){');
 
 // === モード別パッチ ===
 
@@ -254,15 +254,15 @@ if (!isOnline) {
   // `http://dya.jp:8080/socket.io/1/?...` が組まれて壊れる。
   // 絶対URL（location.host）+ resource override で host/port/path を完全指定する。
   patch('io.connect URL -> proxy (online)',
-    "io.connect('https://sv2.splaxserver.net:443/chat', {reconnection: false,transports: ['websocket'],})",
+    "io.connect('https://sv2.splaxserver.net:443/chat',{reconnection:false,transports:['websocket'],})",
     "io.connect((location.protocol==='https:'?'https://':'http://')+location.host+'/chat', {resource:'__proxy/sv2.splaxserver.net/socket.io',reconnection: false,transports: ['websocket'],})");
 
   // play.splax.net/dya/ip_chk2.php の応答による「オンライン対戦が中断されました」黄色バナー
   // と lgin_time=-2 強制を抑止。proxy 経由だと正の sv_ctch[0] が返ることがあり、その場合
   // オンライン機能が完全停止してしまう。proxy として必須なので両モード適用。
   patch('suppress ip_chk2 force-CPU + banner (online)',
-    'if(Math.floor(sv_ctch[0])>0){;lgin_time=-2;announcement_msg="123";announcement_msg_cnt=600}',
-    'if(false){;lgin_time=-2;announcement_msg="123";announcement_msg_cnt=600}');
+    'if(Math.floor(sv_ctch[0])>0){lgin_time=-2;announcement_msg="123";announcement_msg_cnt=600}',
+    'if(false){lgin_time=-2;announcement_msg="123";announcement_msg_cnt=600}');
 
   // マイチーム編成画面: 期限切れ選手がいるとチェックボタン（onflg=500時）が onflg=-99 で
   // 無効化される。期限切れキャラも試合に連れていけるよう、無効化条件を死コード化。
@@ -300,8 +300,8 @@ if (!isOnline) {
   // dya.jp/gk/oraaq2.cgi に送信）。プロキシ越しだと上流が 500 を返してコンソールが汚れるため
   // 関数本体を死コード化（試合進行には一切影響しない）。
   patch('disable onl_hkk telemetry (online)',
-    "function onl_hkk(i){if(test_nn_send==0){xhsd=new XMLHttpRequest();xhsd.open('POST', 'https://dya.jp/gk/oraaq2.cgi'",
-    "function onl_hkk(i){if(false){xhsd=new XMLHttpRequest();xhsd.open('POST', 'https://dya.jp/gk/oraaq2.cgi'");
+    "function onl_hkk(i){if(test_nn_send==0){xhsd=new XMLHttpRequest();xhsd.open('POST','https://dya.jp/gk/oraaq2.cgi'",
+    "function onl_hkk(i){if(false){xhsd=new XMLHttpRequest();xhsd.open('POST','https://dya.jp/gk/oraaq2.cgi'");
 
   // 注: "svt" 応答（IP違いロックアウト画面）の改変は試したが、サーバ側の
   // 「同一IPで別ID制限」自体は client から解除不可と判明したため、ロック画面の
@@ -1985,11 +1985,15 @@ html,body{margin:0;padding:0;background:#000;overflow:hidden;height:100%;width:1
 #myCanvas{display:block;}
 #chf2{position:absolute;left:0;top:0;}
 #__loading{position:fixed;left:0;top:0;width:100%;height:100%;background:#000;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:sans-serif;z-index:9999;font-size:14px;text-align:center;padding:0 20px;box-sizing:border-box;}
+#__ld_txt{margin-bottom:14px;letter-spacing:.08em;}
+#__ld_bw{width:min(70vw,320px);height:14px;background:#1b1b1b;border:1px solid #444;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.5) inset;}
+#__ld_bar{height:100%;width:0%;background:linear-gradient(90deg,#2bd46b,#7ff0a8);transition:width .15s ease;}
+#__ld_pct{margin-top:10px;font-size:13px;color:#9f9;font-variant-numeric:tabular-nums;}
 #__diag{position:fixed;left:6px;bottom:6px;color:#9f9;font:11px/1.3 monospace;background:rgba(0,0,0,.6);padding:4px 8px;max-width:90%;white-space:pre-wrap;z-index:9998;pointer-events:none;}
 </style>
 </head>
 <body>
-<div id="__loading">読み込み中…</div>
+<div id="__loading"><div id="__ld_txt">読み込み中…</div><div id="__ld_bw"><div id="__ld_bar"></div></div><div id="__ld_pct"></div></div>
 <div id="__diag"></div>
 <canvas id="myCanvas"></canvas>
 <div id="chf2"></div>
@@ -2004,10 +2008,14 @@ ${BOOTSTRAP}
 
   // 共通: ローディング進捗 / エラー収集
   var loadingEl = document.getElementById('__loading');
+  var ldTxt = document.getElementById('__ld_txt');
+  var ldBar = document.getElementById('__ld_bar');
+  var ldPct = document.getElementById('__ld_pct');
   var diagEl = document.getElementById('__diag');
-  function setMsg(t){ if(loadingEl) loadingEl.textContent = t; }
+  function setMsg(t){ if(ldTxt) ldTxt.textContent = t; }
+  function setBar(cnt, mx){ var pct = mx>0 ? Math.max(0, Math.min(100, Math.round(cnt/mx*100))) : 0; if(ldBar) ldBar.style.width = pct + '%'; if(ldPct) ldPct.textContent = mx>0 ? (pct + '%') : '…'; }
   function diag(t){ if(diagEl){ diagEl.textContent = (diagEl.textContent + '\\n' + t).slice(-1500); } }
-  setMsg('読み込み中… (準備中)');
+  setMsg('読み込み中…'); setBar(0, 0);
   diag('mode: ${MODE}');
   window.addEventListener('error', function(e){
     diag('ERR: ' + (e.message || e.error || '?') + ' @ ' + (e.filename||'').slice(-40) + ':' + e.lineno);
@@ -2021,7 +2029,7 @@ ${BOOTSTRAP}
     try {
       var mx = (typeof gldt_mx !== 'undefined') ? gldt_mx : 0;
       var cnt = (typeof gldt !== 'undefined') ? gldt : 0;
-      setMsg('読み込み中… ' + cnt + ' / ' + (mx || '?'));
+      setBar(cnt, mx);
       if(cnt !== lastCnt){ diag('progress: ' + cnt + '/' + mx); lastCnt = cnt; }
       if(mx > 0 && cnt >= mx){
         if(loadingEl && loadingEl.parentNode) loadingEl.parentNode.removeChild(loadingEl);
