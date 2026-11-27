@@ -72,7 +72,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.29"
+APP_VERSION = "1.30"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -147,7 +147,20 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
 def _shop_context() -> dict:
     """すべての画面で使える値：店名・問い合わせ先など（site_config.py）。"""
     return dict(site_config.template_context(), csp_nonce=_csp_nonce(), turnstile_key=human.site_key(),
-                pay_methods=payments.available_json)   # 支払いパネルで使える方法（呼んだときだけ読む）
+                pay_methods=payments.available_json,   # 支払いパネルで使える方法（呼んだときだけ読む）
+                pay_notice=_pay_notice)
+
+
+def _pay_notice():
+    """「Kyashの決済に移行しました」のお知らせを出すか（管理者以外・Kyash を受け付けているときだけ）。
+    出すなら {"paypay": PayPay もまだ使えるか}、出さないなら None。"""
+    if not PAYMENTS_ENABLED or _is_admin():
+        return None
+    try:
+        av = payments.available()
+    except Exception:  # noqa: BLE001  お知らせのために画面を落とさない
+        return None
+    return {"paypay": av["paypay"]} if av["kyash"] else None
 
 
 def _csp_nonce() -> str:

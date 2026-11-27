@@ -383,3 +383,37 @@ class AppFlowTests(unittest.TestCase):
             self.assertIn("/static/paymethods.js", html)
             self.assertIn("&#34;kyash&#34;: true", html)
             self.assertIn("&#34;paypay&#34;: false", html)
+
+
+class PayNoticeTests(unittest.TestCase):
+    """「Kyashの決済に移行しました」のお知らせ：管理者以外に、Kyash を受け付けているときだけ。"""
+    PAGES = ("/", "/nyanko", "/tsum", "/puni", "/ticket", "/support", "/source")
+
+    def setUp(self):
+        import app as A
+        self.A = A
+        self.p = patch.object(A, "PAYMENTS_ENABLED", True)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+
+    def pages(self, client, av):
+        with patch.object(P, "available", return_value=av):
+            return {u: client.get(u).get_data(as_text=True) for u in self.PAGES}
+
+    def test_shown_to_customers_on_every_shop_page(self):
+        for u, html in self.pages(self.A.app.test_client(), {"paypay": True, "kyash": True}).items():
+            self.assertIn('/static/paynotice.js?v=1" data-paypay="1"', html, u)
+        for u, html in self.pages(self.A.app.test_client(), {"paypay": False, "kyash": True}).items():
+            self.assertIn('/static/paynotice.js?v=1" data-paypay="0"', html, u)
+
+    def test_hidden_when_kyash_is_off(self):
+        for u, html in self.pages(self.A.app.test_client(), {"paypay": True, "kyash": False}).items():
+            self.assertNotIn("paynotice.js", html, u)
+
+    def test_hidden_for_admin(self):
+        admin = self.A.app.test_client()
+        with patch.object(self.A, "_is_admin", return_value=True):
+            for u, html in self.pages(admin, {"paypay": True, "kyash": True}).items():
+                self.assertNotIn("paynotice.js", html, u)
