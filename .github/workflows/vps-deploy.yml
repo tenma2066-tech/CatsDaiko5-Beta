@@ -2,8 +2,7 @@ name: Deploy to VPS
 # 国内VPS（Ubuntu）へ、SSH（パスワードまたは鍵）でデプロイする。
 # 必要なシークレット: VPS_HOST（IPアドレス）, ADMIN_PASSWORD, VPS_PASSWORD（または VPS_SSH_KEY）
 # 任意: VPS_USER（既定 root）, SITE_DOMAIN（独自ドメイン。なければ <IP>.sslip.io で自動HTTPS）
-# 任意: DYA_PIN（ミニゲームの暗証番号・数字4〜12桁）, DYA_REPO_TOKEN（dya-proxy が非公開リポジトリなら、それを読めるトークン）
-#       ミニゲームは tenma2066-tech/dya-proxy の main を取り込み、/dya/ で動かす。dya-proxy を更新したら手動実行で反映する。
+# 任意: DYA_PIN（ミニゲームの暗証番号・数字4〜12桁）。ミニゲームはこのリポジトリの dya/ を /dya/ で動かす。
 on:
   push:
     branches: [main]
@@ -26,16 +25,6 @@ jobs:
       VPS_USER: ${{ secrets.VPS_USER }}
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch minigame (dya-proxy)
-        # 取れなくてもお店のデプロイは続ける（ミニゲームが止まるだけ。remote-setup.sh がカードを隠す）
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: tenma2066-tech/dya-proxy
-          ref: main
-          path: dya
-          token: ${{ secrets.DYA_REPO_TOKEN || github.token }}
-          persist-credentials: false
       - name: Check secrets
         env:
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}

@@ -1,0 +1,161 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
+  background: #1c1f24;
+  color: #e9edf2;
+  font-size: 14px;
+}
+
+header {
+  background: linear-gradient(180deg, #2b303a, #1c1f24);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid #353a45;
+}
+header .title { font-weight: 700; font-size: 16px; }
+header .actions { display: flex; gap: 8px; align-items: center; }
+button {
+  padding: 6px 12px;
+  border: 1px solid #4a5160;
+  background: #2b303a;
+  color: #e9edf2;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+button:hover { background: #353a45; }
+button.primary { background: #2c6dd4; border-color: #4a90e2; }
+button.primary:hover { background: #3a7be0; }
+button.danger { background: #6b2c2c; border-color: #a04545; }
+button.danger:hover { background: #803838; }
+button.apply {
+  background: linear-gradient(180deg, #d8a82a, #946610);
+  border-color: #fff;
+  color: #1c1f24;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(220,180,80,0.4);
+}
+button.apply:hover { background: linear-gradient(180deg, #e8b83a, #a47620); }
+#save-status { font-size: 12px; opacity: 0.85; margin-left: 8px; min-width: 200px; }
+
+main {
+  display: grid;
+  grid-template-columns: 200px 320px 1fr;
+  height: calc(100vh - 50px);
+  overflow: hidden;
+}
+
+aside, section { padding: 12px; overflow-y: auto; border-right: 1px solid #353a45; }
+section:last-child { border-right: none; }
+
+h2 { font-size: 14px; margin: 6px 0 8px; color: #9aa3b1; text-transform: uppercase; letter-spacing: 1px; }
+h3 { font-size: 13px; margin: 12px 0 6px; color: #9aa3b1; }
+
+#team-list ul { list-style: none; padding: 0; margin: 0; }
+#team-list li {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#team-list li:hover { background: #252a33; }
+#team-list li.active { background: #2c4a7c; border-left-color: #4a90e2; }
+#team-list .team-color-dot {
+  width: 12px; height: 12px; border-radius: 50%; border: 1px solid #4a5160;
+}
+
+#team-header { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+#team-name-input { flex: 1; padding: 6px 8px; background: #252a33; color: #e9edf2; border: 1px solid #4a5160; border-radius: 4px; font-size: 14px; }
+#team-color-input { width: 32px; height: 28px; border: none; background: transparent; cursor: pointer; }
+
+#players-ul { list-style: decimal; padding: 0 0 0 28px; margin: 0; }
+#players-ul li {
+  padding: 6px 8px;
+  margin-bottom: 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#players-ul li:hover { background: #252a33; }
+#players-ul li.active { background: #2c4a7c; border-left-color: #4a90e2; }
+#players-ul .pitcher-badge {
+  font-size: 10px;
+  background: #b85522;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+#starting-order { display: flex; gap: 4px; flex-wrap: wrap; padding: 6px; background: #252a33; border-radius: 4px; }
+#starting-order .slot {
+  width: 32px; height: 32px;
+  background: #2b303a;
+  border: 1px solid #4a5160;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px;
+}
+
+#edit-empty { padding: 40px; text-align: center; opacity: 0.5; }
+.hint { opacity: 0.6; font-size: 12px; }
+
+#edit-form { max-width: 720px; }
+.row { display: grid; grid-template-columns: 100px 1fr auto; gap: 10px; align-items: center; margin-bottom: 8px; }
+.row label { font-weight: 600; color: #b8c2d4; }
+input[type="text"], select { padding: 6px 8px; background: #252a33; color: #e9edf2; border: 1px solid #4a5160; border-radius: 4px; font-size: 13px; min-width: 120px; }
+input[type="color"] { width: 40px; height: 30px; border: none; cursor: pointer; }
+
+fieldset { border: 1px solid #353a45; border-radius: 6px; padding: 10px 14px; margin: 14px 0; }
+legend { color: #9aa3b1; padding: 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+
+.stat-row { display: grid; grid-template-columns: 110px 1fr 30px; gap: 10px; align-items: center; margin: 6px 0; }
+.stat-row label { color: #b8c2d4; }
+.stat-row input[type="range"] { width: 100%; }
+.stat-row .stat-val {
+  font-weight: 700; font-family: monospace; text-align: right;
+  color: #4ad28f;
+}
+
+.flag-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 12px; }
+.flag-grid label {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.flag-grid label:hover { background: #252a33; }
+.flag-grid input[type="checkbox"] { cursor: pointer; }
+.flag-grid .ability-id { opacity: 0.5; font-family: monospace; font-size: 11px; }
+
+.display-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 14px; }
+.display-grid .dh-row { display: grid; grid-template-columns: 80px 1fr; gap: 6px; align-items: center; }
+.display-grid input { width: 70px; }
+
+/* Player list search */
+.players-header { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.players-header h2 { margin: 0; flex: 1; }
+#player-search { width: 130px; padding: 4px 6px; font-size: 12px; background: #252a33; color: #e9edf2; border: 1px solid #4a5160; border-radius: 4px; }
+#players-ul li.hidden { display: none; }
+
+/* Quick actions row above edit form */
+.quick-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px 10px; background: #252a33; border-radius: 6px; }
+.quick-actions .preset-label { color: #9aa3b1; font-size: 12px; margin-left: 8px; }
+button.ghost { background: transparent; border: 1px solid #4a5160; }
+button.ghost:hover { background: #2b303a; }
+#preset-select { font-size: 12px; }
+
+/* Collapsed unused stats */
+details.unused-stats { margin-top: 8px; padding: 4px 6px; background: rgba(60,70,90,0.2); border-radius: 4px; }
+details.unused-stats summary { color: #6e7689; font-size: 12px; cursor: pointer; padding: 2px 0; user-select: none; }
+details.unused-stats[open] summary { color: #9aa3b1; margin-bottom: 4px; }
+details.unused-stats .stat-row { opacity: 0.65; }

@@ -48,7 +48,7 @@ services:
     expose:
       - "8080"
 
-  # ミニゲーム「ダイナマイト野球」（tenma2066-tech/dya-proxy の proxy.js）。Caddy が /dya/ をここへ回す。
+  # ミニゲーム「ダイナマイト野球」（このリポジトリの dya/。tenma2066-tech/dya-proxy の写し）。Caddy が /dya/ をここへ回す。
   # profile "dya" のときだけ起動する（remote-setup.sh が、ソースと暗証番号がそろったときに COMPOSE_PROFILES=dya を .env に書く）。
   # お店の注文・台帳・データの置き場所には触れない（volumes なし）。
   dya:
