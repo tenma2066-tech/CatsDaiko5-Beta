@@ -32,6 +32,10 @@ REVIEWS_ENABLED = _env("REVIEWS_ENABLED", "1") != "0"
 # サーバーに dya-proxy と暗証番号がそろったときだけ remote-setup.sh が DYA_ENABLED=1 にする。0 ならトップにカードを出さない。
 DYA_ENABLED = _env("DYA_ENABLED", "0") == "1"
 DYA_PATH = "/dya/"
+# ミニゲーム「UltraOSERO」（別コンテナの osero を Caddy が /osero/ に回す。deploy/vps/）。
+# サーバーにソース（osero/server.js）があるとき remote-setup.sh が OSERO_ENABLED=1 にする。0 ならカードを出さない。
+OSERO_ENABLED = _env("OSERO_ENABLED", "0") == "1"
+OSERO_PATH = "/osero/"
 
 REVIEW_MIN_CHARS = 20            # 感想の最小文字数
 REVIEW_MAX_CHARS = 400
@@ -78,5 +82,6 @@ def template_context() -> dict:
     return {"shop_name": SHOP_NAME, "shop_x": SHOP_X_ID, "contact": contact_text(), "contact_url": contact_url(),
             "google_verification": GOOGLE_SITE_VERIFICATION, "review_post_id": REVIEW_POST_ID,
             "flow_images": flow_images(), "og": og_images(),
-            "reviews_on": REVIEWS_ENABLED, "dya_enabled": DYA_ENABLED, "dya_path": DYA_PATH, "past_reviews_url": past_reviews_url(),
+            "reviews_on": REVIEWS_ENABLED, "dya_enabled": DYA_ENABLED, "dya_path": DYA_PATH,
+            "osero_enabled": OSERO_ENABLED, "osero_path": OSERO_PATH, "past_reviews_url": past_reviews_url(),
             "review_min": REVIEW_MIN_CHARS, "review_max": REVIEW_MAX_CHARS}

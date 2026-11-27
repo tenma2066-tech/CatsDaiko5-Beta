@@ -81,6 +81,18 @@ services:
     expose:
       - "8080"
 
+  # ミニゲーム「UltraOSERO」（このリポジトリの osero/。最大6人オセロ・自前サーバ）。Caddy が /osero/ をここへ回す。
+  # profile "osero" のときだけ起動する（remote-setup.sh が、ソースがそろったときに COMPOSE_PROFILES へ osero を足す）。
+  # 外部通信なし・暗証番号なし。お店の注文・台帳・データには触れない（volumes なし）。
+  osero:
+    profiles: ["osero"]
+    build: ./src/osero
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+    expose:
+      - "8080"
+
   caddy:
     image: caddy:2
     restart: unless-stopped

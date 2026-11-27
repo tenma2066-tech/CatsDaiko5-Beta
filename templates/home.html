@@ -127,6 +127,10 @@ h1{margin:0 0 4px;font-size:24px;font-weight:800}
       <span class="art dy" aria-hidden="true">⚾</span><span class="new">NEW</span>
       <span class="txt"><b>ミニゲーム⚾</b><small>ダイナマイト野球・暗証番号が必要</small></span>
     </a>{% endif %}
+    {% if osero_enabled %}<a class="gamecard" href="{{ osero_path }}">
+      <span class="art os" aria-hidden="true">⚫</span><span class="new">NEW</span>
+      <span class="txt"><b>ミニゲーム⚫</b><small>UltraOSERO・最大6人オセロ</small></span>
+    </a>{% endif %}
     <a class="gamecard" href="/source">
       <span class="art sc" aria-hidden="true">📦</span>
       <span class="txt"><b>ソースコード購入</b><small>このお店の仕組み一式 <em>{{ "{:,}".format(prices.source_code) }}円</em></small></span>

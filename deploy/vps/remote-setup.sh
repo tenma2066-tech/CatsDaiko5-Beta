@@ -212,21 +212,35 @@ else
   echo "::warning::tor をホストに入れられませんでした。TSUM_SOCKS_URL は無効になり、LINEログインは直接接続のまま動きます。"
 fi
 
-# 4.9) ミニゲーム（dya-proxy）。ソース（src/dya/proxy.js）と暗証番号（.env の DYA_PIN）がそろったときだけ動かす。
-#      どちらかが無ければ止めて、トップのカードも出さない（暗証番号なしで公開しないため）。
-sed -i '/^COMPOSE_PROFILES=/d; /^DYA_ENABLED=/d' .env
+# 4.9) ミニゲーム。ソースがそろったものだけ起動する（COMPOSE_PROFILES に足す）。
+#      dya は暗証番号（.env の DYA_PIN）も必要。osero は外部通信なしのため暗証番号なしで公開してよい。
+sed -i '/^COMPOSE_PROFILES=/d; /^DYA_ENABLED=/d; /^OSERO_ENABLED=/d' .env
+PROFILES=""
+# --- ダイナマイト野球（dya）---
 if [ -f "$APP_DIR/src/dya/proxy.js" ] && [ -f "$APP_DIR/src/dya/Dockerfile" ] && grep -Eq '^DYA_PIN=[0-9]{4,12}$' .env; then
-  printf 'COMPOSE_PROFILES=dya\nDYA_ENABLED=1\n' >> .env
+  PROFILES="${PROFILES:+$PROFILES,}dya"
+  echo "DYA_ENABLED=1" >> .env
   echo "dya: enabled (/dya/)"
 else
   echo "DYA_ENABLED=0" >> .env
   docker compose --profile dya rm -sf dya >/dev/null 2>&1 || true
   if [ -f "$APP_DIR/src/dya/proxy.js" ]; then
-    echo "::warning::ミニゲームのソースはありますが、暗証番号（シークレット DYA_PIN）が未設定のため動かしません。"
+    echo "::warning::ミニゲーム（dya）のソースはありますが、暗証番号（シークレット DYA_PIN）が未設定のため動かしません。"
   else
     echo "dya: disabled (no source)"
   fi
 fi
+# --- UltraOSERO（osero）---
+if [ -f "$APP_DIR/src/osero/server.js" ] && [ -f "$APP_DIR/src/osero/Dockerfile" ]; then
+  PROFILES="${PROFILES:+$PROFILES,}osero"
+  echo "OSERO_ENABLED=1" >> .env
+  echo "osero: enabled (/osero/)"
+else
+  echo "OSERO_ENABLED=0" >> .env
+  docker compose --profile osero rm -sf osero >/dev/null 2>&1 || true
+  echo "osero: disabled (no source)"
+fi
+[ -n "$PROFILES" ] && echo "COMPOSE_PROFILES=$PROFILES" >> .env
 
 # 5) 先にビルド（今のサイトは動いたまま）
 docker compose build

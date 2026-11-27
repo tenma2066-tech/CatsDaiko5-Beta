@@ -3280,7 +3280,7 @@ def _site() -> str:
 def robots_txt():
     return Response(
         "User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n"
-        "Disallow: /status/\nDisallow: /health\nDisallow: /dya/\n"
+        "Disallow: /status/\nDisallow: /health\nDisallow: /dya/\nDisallow: /osero/\n"
         f"Sitemap: {_site()}/sitemap.xml\n",
         mimetype="text/plain",
     )

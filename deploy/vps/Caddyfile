@@ -6,6 +6,12 @@
 	handle_path /dya/* {
 		reverse_proxy dya:8080
 	}
+	# ミニゲーム（UltraOSERO）。osero コンテナが動いていないときは /osero/ だけ 502 になり、お店には影響しない。
+	# reverse_proxy は WebSocket(/osero/ws) も自動で通す。
+	redir /osero /osero/ 308
+	handle_path /osero/* {
+		reverse_proxy osero:8080
+	}
 	handle {
 		reverse_proxy app:8080
 	}
