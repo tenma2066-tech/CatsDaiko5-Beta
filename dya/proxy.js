@@ -39,6 +39,32 @@ const PUBLIC_PROXY_PREFIX = BASE_PATH + PROXY_PREFIX;
 // 配信する HTML のチート有効判定も常に false に書き換える）。
 const ALLOW_CHEAT = process.env.DYA_DISABLE_CHEAT !== '1';
 
+// ===== 対戦プロトコル採取（PvP 独立化の第一歩） =====
+// DYA_WS_CAPTURE=1（既定 1）で、対戦サーバ（*.splaxserver.net）との WebSocket を
+// 盗聴だけして（中継には干渉しない）、socket.io 0.9 のイベントを JSONL に落とす。
+// PIN 付きルート /__capture で取り出す。/__capture/clear で消す。VPS コンソール不要。
+const DATA_DIR = process.env.DYA_DATA_DIR || path.join(__dirname, 'data');
+const WS_CAPTURE = process.env.DYA_WS_CAPTURE !== '0';
+// 採取対象ホスト（試合中継のみ。login/DB は HTTP 側で別途キャプチャできる）
+function isCaptureHost(host) {
+  const h = String(host || '').toLowerCase().replace(/:\d+$/, '');
+  return h === 'splaxserver.net' || h.endsWith('.splaxserver.net');
+}
+const wsCapture = WS_CAPTURE ? (function(){
+  try { return require('./ws_capture').createWsCapture(DATA_DIR); }
+  catch (e) { console.log('[ws_capture] 無効化:', e && e.message); return null; }
+})() : null;
+
+// ===== 独立マッチサーバ（本家 sv2.splaxserver.net/chat の置き換え） =====
+// DYA_LOCAL_MATCH=1 で、対戦の socket.io 通信を本家ではなくこの中継サーバへ回す。
+// → 本家サーバ無しで、この VPS 上の players 同士が対戦できる（＝PvP も独立）。
+// 実行中に PIN 付きルート /__localmatch?on=0|1 で切替できる（VPS コンソール不要）。
+let LOCAL_MATCH = process.env.DYA_LOCAL_MATCH === '1';
+const matchServer = (function(){
+  try { return require('./match_server').createMatchServer({ log: (lvl, cid, msg) => log(lvl, '', `[match#${cid}] ${msg}`) }); }
+  catch (e) { console.log('[match_server] 無効化:', e && e.message); return null; }
+})();
+
 // Render 経由だと毎リクエストで TLS ハンドシェイクが発生 → 上流（dya.jp 等）が
 // ときどき ECONNRESET / socket hang up を返して 502 が出る。keep-alive プールを
 // 使い回すことでハンドシェイク回数と transient 失敗を激減させる。
@@ -741,6 +767,41 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
+  // 対戦プロトコル採取の取り出し（PIN 認証後のみ・VPS コンソール不要）
+  if (pathOnly === '/__capture' || pathOnly === '/__capture/clear') {
+    if (!wsCapture) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      return res.end('ws capture 無効（DYA_WS_CAPTURE=0）。\n');
+    }
+    if (pathOnly === '/__capture/clear') {
+      const n = wsCapture.clear();
+      log('CAP', id, `cleared ${n} capture file(s)  ip=${clientIp(req)}`);
+      res.writeHead(303, { 'Location': BASE_PATH + '/__capture', 'cache-control': 'no-store' });
+      return res.end();
+    }
+    const body = wsCapture.dump();
+    log('CAP', id, `dump ${Buffer.byteLength(body)} bytes  ip=${clientIp(req)}`);
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(body);
+  }
+
+  // 独立マッチの ON/OFF 切替＋状態（PIN 認証後のみ・VPS コンソール不要）
+  if (pathOnly === '/__localmatch') {
+    const m = /[?&]on=([01])/.exec(req.url);
+    if (m) {
+      LOCAL_MATCH = m[1] === '1';
+      log('MATCH', id, `local match -> ${LOCAL_MATCH ? 'ON' : 'OFF'}  by ip=${clientIp(req)}`);
+    }
+    const st = matchServer ? matchServer.stats() : { conns: 0, rooms: 0, matches: 0 };
+    const body =
+      `local match: ${LOCAL_MATCH ? 'ON  （この VPS 上の players 同士で対戦 / 本家に接続しない）' : 'OFF （本家 sv2.splaxserver.net に接続）'}\n` +
+      `接続中=${st.conns}  待機ルーム=${st.rooms}  累計マッチ=${st.matches}\n\n` +
+      `切替:  ${BASE_PATH}/__localmatch?on=1   （独立対戦に）\n` +
+      `       ${BASE_PATH}/__localmatch?on=0   （本家接続に戻す）\n`;
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(body);
+  }
+
   if (pathOnly === '/' || pathOnly === '/index.html') return serveLauncher(req, res, id);
   if (pathOnly === '/editor') return serveEditor(req, res, id);
   if (pathOnly === '/online')
@@ -762,7 +823,15 @@ const server = http.createServer((req, res) => {
   }
 
   const parsed = parseProxyUrl(req.url);
-  if (parsed) return handleProxy(req, res, parsed, id);
+  if (parsed) {
+    // 独立マッチ有効時: 対戦サーバの socket.io handshake をローカルで受ける
+    if (LOCAL_MATCH && matchServer && isCaptureHost(parsed.host)
+        && matchServer.isHandshakePath(parsed.path.split('?')[0])) {
+      log('MATCH', id, `handshake(local) ${parsed.host}${parsed.path}  ip=${clientIp(req)}`);
+      return matchServer.handleHandshake(req, res);
+    }
+    return handleProxy(req, res, parsed, id);
+  }
 
   log('404', id, `${req.method} ${req.url}  ip=${clientIp(req)}`);
   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
@@ -790,11 +859,27 @@ server.on('upgrade', (req, clientSocket, head) => {
     return clientSocket.destroy();
   }
 
+  // 独立マッチ有効時: 対戦 WebSocket をローカルのマッチサーバで受ける（本家へ行かない）
+  if (LOCAL_MATCH && matchServer && isCaptureHost(parsed.host)) {
+    const sid = matchServer.wsSidFromPath(parsed.path.split('?')[0]);
+    if (sid !== null) {
+      log('MATCH', id, `ws upgrade(local) ${parsed.host}${parsed.path}  ip=${ip}`);
+      return matchServer.handleUpgrade(req, clientSocket, head, sid);
+    }
+  }
+
   const target = `${parsed.host}${parsed.path}`;
   const startedAt = Date.now();
   let upBytes = 0;     // client -> upstream
   let downBytes = 0;   // upstream -> client
   let closed = false;
+
+  // 対戦プロトコル採取（盗聴のみ・中継には干渉しない）
+  const capSink = (wsCapture && isCaptureHost(parsed.host)) ? wsCapture.sink(id) : null;
+  if (capSink) {
+    log('WS', id, `  capturing socket.io frames -> ${capSink.file}`);
+    if (head && head.length) { try { capSink.feed('up', head); } catch (_) {} }
+  }
 
   log('WS+', id, `→ open ${target}  ip=${ip}`);
 
@@ -821,8 +906,8 @@ server.on('upgrade', (req, clientSocket, head) => {
   });
 
   // 双方向中継 + バイト数計測。.pipe() と data リスナは並存可能。
-  upstream.on('data', (c) => { downBytes += c.length; });
-  clientSocket.on('data', (c) => { upBytes += c.length; });
+  upstream.on('data', (c) => { downBytes += c.length; if (capSink) { try { capSink.feed('down', c); } catch (_) {} } });
+  clientSocket.on('data', (c) => { upBytes += c.length; if (capSink) { try { capSink.feed('up', c); } catch (_) {} } });
   upstream.pipe(clientSocket);
   clientSocket.pipe(upstream);
 

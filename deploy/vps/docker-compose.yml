@@ -59,6 +59,17 @@ services:
       PORT: "8080"
       PROXY_AUTH_PIN: ${DYA_PIN:-}   # Render と同じ暗証番号。空なら profile が付かず起動しない＝必ず暗証番号が要る
       DYA_BASE_PATH: /dya
+      DYA_DATA_DIR: /app/data
+      # 人対人オンライン対戦の独立化のため、対戦サーバとの socket.io フレームを採取する。
+      # 既定で有効。採取物は PIN 付きの /dya/__capture で取り出せる（/dya/__capture/clear で消去）。
+      # 止めたいときは .env に DYA_WS_CAPTURE=0 を書く。
+      DYA_WS_CAPTURE: ${DYA_WS_CAPTURE:-1}
+      # 独立マッチサーバ: 1 で対戦も本家不要（この VPS 上の players 同士で対戦）。
+      # 既定 0（本家 sv2.splaxserver.net 接続）。実行中に /dya/__localmatch?on=1 で切替可。
+      DYA_LOCAL_MATCH: ${DYA_LOCAL_MATCH:-0}
+    volumes:
+      # 採取した対戦プロトコル（ws_capture/*.jsonl）の置き場所。お店のデータとは別ディレクトリ。
+      - ./dya-data:/app/data
     expose:
       - "8080"
 

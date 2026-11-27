@@ -8,6 +8,8 @@ WORKDIR /app
 
 # 必要最小限のファイルのみコピー（.dockerignore で他は除外）
 COPY proxy.js ./
+COPY ws_capture.js ./
+COPY match_server.js ./
 COPY dya_online.html ./
 COPY dya_offline.html ./
 
