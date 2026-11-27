@@ -293,6 +293,7 @@ a.dl{text-decoration:none;color:#17181c}
   <p class="note" id="payOrderNo"></p>
 </div></div>
 
+<script src="/static/paymethods.js?v=1" data-methods="{{ pay_methods() }}"></script>
 <script>
 "use strict";
 const $=s=>document.querySelector(s);
@@ -449,7 +450,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('#payPanel').hi
 $('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
 $('#payGo').addEventListener('click',()=>{
   const link=$('#payLink').value.trim();
-  if(!$('#payLinkField').hidden&&!/pay\.paypay\.ne\.jp\//i.test(link)){ $('#payErr').textContent='PayPayの送金リンク（https://pay.paypay.ne.jp/…）を貼り付けてください。'; return; }
+  if(!$('#payLinkField').hidden){ const bad=window.PayMethods?window.PayMethods.check(link):(/pay\.paypay\.ne\.jp\/|kyash\.me\/payments\//i.test(link)?'':'PayPayかKyashの送金リンクを貼り付けてください。'); if(bad){ $('#payErr').textContent=bad; return; } }
   payNow(link);
 });
 async function payNow(link){

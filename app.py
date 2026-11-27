@@ -50,6 +50,8 @@ import item_catalog
 import asyncio
 import logging
 import paypay_gateway
+import kyash_gateway
+import payments
 import save_audit
 import save_repair
 import tsum_service
@@ -70,7 +72,7 @@ from pricing import (  # noqa: F401  料金の計算（pricing.py）。app.py �
     _one_legend_tier, chara_units, compute_amount, compute_puni_amount, compute_tsum_amount,
 )
 
-APP_VERSION = "1.28"
+APP_VERSION = "1.29"
 GAME_DATA_VERSION = engine.GAME_DATA_VERSION
 CAT_NAMES_CACHE_SCHEMA = 3   # 3: 配布元にまだ無い新キャラ（engine.SUPPLEMENT_CATS）を足すようにした
 
@@ -144,7 +146,8 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
 @app.context_processor
 def _shop_context() -> dict:
     """すべての画面で使える値：店名・問い合わせ先など（site_config.py）。"""
-    return dict(site_config.template_context(), csp_nonce=_csp_nonce(), turnstile_key=human.site_key())
+    return dict(site_config.template_context(), csp_nonce=_csp_nonce(), turnstile_key=human.site_key(),
+                pay_methods=payments.available_json)   # 支払いパネルで使える方法（呼んだときだけ読む）
 
 
 def _csp_nonce() -> str:
@@ -635,6 +638,7 @@ def _ensure_cleanup() -> None:
                     pass
         threading.Thread(target=cleanup_loop, daemon=True).start()
         threading.Thread(target=_hold_watcher, daemon=True).start()
+        threading.Thread(target=_kyash_keeper, daemon=True).start()
         _apply_slot_settings()   # 管理画面で変えた実行枠の数（再起動しても続く）
 
 
@@ -1930,6 +1934,7 @@ def admin():
 
 
 ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_login": "paypay", "pp_otp": "paypay", "pp_refresh": "paypay", "pp_recheck_all": "paypay",
+             "ky_login": "paypay", "ky_verify": "paypay", "ky_refresh": "paypay", "ky_logout": "paypay", "paymethods_save": "paypay",
              "maint_save": "settings", "price_save": "settings", "review_hide": "reviews", "review_show": "reviews", "review_words_save": "reviews", "coupon_free_issue": "settings", "coupon_revoke": "settings", "tfa_begin": "settings", "tfa_confirm": "settings", "tfa_cancel": "settings", "tfa_disable": "settings", "box_done": "box", "box_undo": "box", "box_delete": "box", "order_recheck": "orders", "order_start": "orders",
              "order_paid": "orders", "order_dead": "orders", "order_hold": "orders"}
 
@@ -1949,7 +1954,9 @@ AUDIT_LABELS = {"login": "ログイン", "login_step1": "ログイン（1段目�
                 "coupon_free_issue": "無料クーポンを発行", "coupon_revoke": "クーポンを取り消し", "review_hide": "実績を非表示", "review_show": "実績を再表示",
                 "review_words_save": "実績に載せない言葉を変更", "box_done": "意見箱：対応済み", "box_undo": "意見箱：未対応に戻す", "box_delete": "意見箱：削除",
                 "backup_download": "バックアップをダウンロード", "pp_login": "PayPayにログイン", "pp_otp": "PayPayのSMS認証", "pp_refresh": "PayPayの接続を更新",
-                "pp_recheck_all": "保留をまとめて再確認", "restart_save": "初期垢作成を変更", "restart_official": "初期垢作成を公式の中身に",
+                "pp_recheck_all": "保留をまとめて再確認",
+                "ky_login": "Kyashにログイン", "ky_verify": "Kyashの確認リンクを入力", "ky_refresh": "Kyashの接続を更新", "ky_logout": "Kyashの接続を解除",
+                "paymethods_save": "決済方法の受付を変更", "restart_save": "初期垢作成を変更", "restart_official": "初期垢作成を公式の中身に",
                 "tfa_begin": "2段階認証の設定開始", "tfa_confirm": "2段階認証を有効化", "tfa_cancel": "2段階認証の設定をやめた", "tfa_disable": "2段階認証を無効化"}
 
 
@@ -2097,6 +2104,62 @@ def _backup_response():
     return resp
 
 
+def _kyash_admin_action(action: str) -> str:
+    """管理画面の Kyash の接続・決済方法のスイッチ。戻り値は画面に出す一言。"""
+    f = request.form
+    try:
+        if action == "paymethods_save":
+            sw = payments.set_switches({m: f.get(m) == "1" for m in payments.METHODS})
+            on = [payments.LABELS[m] for m in payments.METHODS if sw[m]]
+            av = payments.available()
+            not_ready = [payments.LABELS[m] for m in payments.METHODS if sw[m] and not av[m]]
+            return ("受け付ける決済方法を保存しました（" + ("・".join(on) if on else "どれも受け付けない") + "）。"
+                    + (f"{'・'.join(not_ready)} は接続されていないので、接続するまでお客さんの画面には出ません。" if not_ready else ""))
+        if action == "ky_login":
+            res = kyash_gateway.begin_login(f.get("email", ""), f.get("password", ""))
+            payments.forget()
+            return ("Kyashから確認のメール（またはSMS）が届きます。届いたリンクを「② 確認リンク」に貼り付けてください。"
+                    if res["verify_required"] else "Kyashに接続しました。")
+        if action == "ky_verify":
+            kyash_gateway.finish_login(f.get("link", ""))
+            payments.forget()
+            return "Kyashに接続しました。"
+        if action == "ky_refresh":
+            asyncio.run(kyash_gateway.refresh_session())
+            payments.forget()
+            return "Kyashの接続を更新しました。"
+        if action == "ky_logout":
+            kyash_gateway.logout()
+            payments.forget()
+            return "Kyashの接続を解除しました（保存していたトークンとパスワードを消しました）。お客さんの画面からKyashが消えます。"
+    except paypay_gateway.PayPayError as exc:
+        payments.forget()
+        return exc.message
+    except OSError:
+        _log_orders.exception("kyash admin action failed")
+        return "保存できませんでした。"
+    except Exception:  # noqa: BLE001
+        _log_orders.exception("kyash admin action failed")
+        return "Kyashとのやり取りに失敗しました。少し待ってからもう一度お試しください。"
+    return ""
+
+
+def _kyash_keeper() -> None:
+    """Kyashの接続を見張る（20分ごと）。期限が近ければ更新し、切れていればパスワードで入り直す。"""
+    while True:
+        time.sleep(1200)
+        if not PAYMENTS_ENABLED or _draining():
+            continue
+        try:
+            before = payments.available().get("kyash")
+            kyash_gateway.keepalive()
+            payments.forget()
+            if before and not payments.available().get("kyash"):
+                _log_orders.warning("kyash connection lost")
+        except Exception:  # noqa: BLE001
+            _log_orders.exception("kyash keepalive failed")
+
+
 def _admin_post(token):
     """管理画面の操作。結果は次の画面（GET）で表示する＝再読み込みしても同じ操作が二重に送られない。"""
     msg = ""
@@ -2146,9 +2209,13 @@ def _admin_post(token):
     elif action == "pp_login":
         res, err = _pp(paypay_gateway.begin_login(request.form.get("phone", "").strip(), request.form.get("password", "")))
         msg = err or ("SMSの認証コードを入力してください。" if res["otp_required"] else "PayPayに接続しました。")
+        payments.forget()
     elif action == "pp_otp":
         res, err = _pp(paypay_gateway.finish_login(request.form.get("otp", "").strip()))
         msg = err or "PayPayに接続しました。"
+        payments.forget()
+    elif action in ("ky_login", "ky_verify", "ky_refresh", "ky_logout", "paymethods_save"):
+        msg = _kyash_admin_action(action)
     elif action == "maint_save":
         try:
             _set_maint(request.form.get("on") == "1", request.form.get("message", ""), request.form.get("url", ""))
@@ -2158,13 +2225,13 @@ def _admin_post(token):
     elif action == "order_recheck":
         oid = request.form.get("order", "")
         r = _recheck_and_start(oid, "admin")
-        msg = {"started": "PayPayで入金を確認できたので、実行を開始しました。",
-               "paid": "PayPayで入金を確認しました（支払い済み）。待機枠がいっぱいのため、利用者の画面に開始ボタンが出ます。",
+        msg = {"started": "入金を確認できたので、実行を開始しました。",
+               "paid": "入金を確認しました（支払い済み）。待機枠がいっぱいのため、利用者の画面に開始ボタンが出ます。",
                "skip": "この注文は再確認できません（送金リンクがない、または開始済み）。"}.get(r)
         if not msg:
             kind, _, code = r.partition(":")
             msg = (f"まだ入金を確認できません（{code}）。保留中のままです。90秒ごとに自動で確認します。" if kind == "wait"
-                   else f"PayPayの状態が受け取り不可でした（{code}）。PayPayアプリで着金を確認できた場合だけ「支払い済みにする」を押してください。")
+                   else f"受け取り不可の状態でした（{code}）。PayPay・Kyashのアプリで着金を確認できた場合だけ「支払い済みにする」を押してください。")
     elif action == "order_start":
         oid = request.form.get("order", "")
         with _orders_lock:
@@ -2319,7 +2386,7 @@ def _admin_post(token):
             r = _recheck_and_start(k, "admin")
             key = "開始" if r == "started" else ("支払い済み（開始待ち）" if r == "paid" else ("まだ保留" if r.startswith("wait") else ("要確認" if r.startswith("stop") else "対象外")))
             results[key] = results.get(key, 0) + 1
-        msg = ("保留・要確認の注文 {} 件をPayPayに確認しました：".format(len(targets[:20])) + "、".join(f"{k} {v}件" for k, v in results.items())) if targets else "再確認が必要な注文（保留・要確認で送金リンクのあるもの）はありません。"
+        msg = ("保留・要確認の注文 {} 件を確認しました：".format(len(targets[:20])) + "、".join(f"{k} {v}件" for k, v in results.items())) if targets else "再確認が必要な注文（保留・要確認で送金リンクのあるもの）はありません。"
     elif action == "restart_save":
         try:
             _save_restart(_parse_restart_form(request.form.get("items", ""), request.form.get("cats", ""),
@@ -2514,6 +2581,18 @@ def _health() -> list:
                     (f"有効（期限 {_jst(pp['expires_at'])}）" if pp["ready"] else "期限切れ・未接続（次の決済で再認証が必要）")))
     except Exception as exc:  # noqa: BLE001
         out.append(("PayPay の接続", "bad", f"確認できません（{type(exc).__name__}）"))
+    try:
+        ky = kyash_gateway.status()
+        sw = payments.switches()
+        if not ky["connected"]:
+            out.append(("Kyash の接続", "warn" if sw["kyash"] else "ok", "未接続" + ("（受付オンですが、接続するまでお客さんには出ません）" if sw["kyash"] else "（受付オフ）")))
+        else:
+            left = ky["expires_at"] - time.time() if ky["expires_at"] else None
+            state = "bad" if ky["needs_admin"] else ("warn" if left is not None and left < 86400 else "ok")
+            out.append(("Kyash の接続", state, (ky["last_error"] if ky["needs_admin"] else "有効")
+                        + (f"（期限 {_jst(ky['expires_at'])}）" if ky["expires_at"] else "") + ("" if sw["kyash"] else "・受付オフ")))
+    except Exception as exc:  # noqa: BLE001
+        out.append(("Kyash の接続", "bad", f"確認できません（{type(exc).__name__}）"))
     names = _names
     out.append(("にゃんこのゲームデータ", "ok" if names.get("state") == "ready" else "warn" if names.get("state") in ("loading", "none") else "bad",
                 f"版 {names.get('version') or '不明'}・キャラ {len(names.get('items') or [])}体・状態 {names.get('state')}"
@@ -2591,12 +2670,20 @@ FAQ_SHOPS = {"all": "全部の部門", "nyanko": "にゃんこ", "tsum": "ツム
 
 def _admin_page(msg):
     unlocked = _is_admin()
-    pp = {}
+    pp, ky, paym = {}, {}, {}
     if unlocked:
         try:
             pp = paypay_gateway.status()
         except paypay_gateway.PayPayError as exc:
             msg = msg or exc.message
+        try:
+            ky = kyash_gateway.status()
+        except paypay_gateway.PayPayError as exc:
+            ky = {"error": exc.message}
+        if ky.get("expires_at"):
+            ky["expires_ja"] = _jst(ky["expires_at"])
+        payments.forget()
+        paym = {"switch": payments.switches(), "live": payments.available()}
     orders = []
     if unlocked:
         _gc_orders()
@@ -2612,6 +2699,7 @@ def _admin_page(msg):
             orders.append({"unknown": unknown, "id": k, "uid": v.get("uid") or _uid(v["owner"]), "summary": v.get("summary", ""), "amount": v["amount"], "state": v["state"], "state_ja": "結果不明（完了扱い）" if unknown else names.get(v["state"], v["state"]),
                            "created": time.strftime("%m/%d %H:%M", time.localtime(v["created"])),
                            "diag": v.get("diag", ""), "ledger": paypay_gateway.link_diag(v.get("link_code") or ""),
+                           "provider": payments.LABELS[payments.provider_of(v.get("link_code"))] if v.get("link_code") else "",
                            "has_link": bool(v.get("link_code")), "superseded": str(v.get("diag", "")).startswith("superseded")})
     history, hist_user = [], (request.args.get("user", "") or "").strip()[:80]
     if unlocked:
@@ -2721,7 +2809,7 @@ def _admin_page(msg):
     tfa = {"on": admin_2fa.enabled(), "waiting": not unlocked and _admin_2fa_waiting(),
            "setup": admin_2fa.pending("admin", site_config.SHOP_NAME) if unlocked and not admin_2fa.enabled() else None}
     return render_template_string(ADMIN_HTML, tfa=tfa, ops=ops, faq_shops=FAQ_SHOPS, coupons=coupons, reviews=reviews, box=box, box_open=sum(1 for b in box if not b["done"]), review_words="\n".join(review_extra_words()), review_stats=_review_stats() if unlocked else None, rp=rp, all_subs=SUBS, rp_text=rp_text, rp_cats=_compress(rp["cats"]) if rp["cats"] else "",
-                                  maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, orders=orders,
+                                  maint=_maint(), msg=msg, csrf=session["admin_csrf"], unlocked=unlocked, pp=pp, ky=ky, paym=paym, orders=orders,
                                   history=history, hist_user=hist_user, dash=dash,
                                   prices=PRICES, price_labels=PRICE_LABELS, payments=PAYMENTS_ENABLED,
                                   coupon_min=COUPON_MIN, coupon_days=COUPON_DAYS)
@@ -4682,7 +4770,10 @@ def _adopt_existing_link(order_id: str, order: dict) -> None:
 
 RECHECK_WAIT = ("temporary_hold", "accept_uncertain", "accept_unconfirmed", "still_pending", "link_network", "link_check",
                 "rate_limited", "paypay_unavailable", "session_rejected", "login_required", "otp_required", "cookie_missing",
-                "oauth_rejected", "oauth_network", "oauth_response", "runtime_store", "account_unreadable", "missing_key", "invalid_key")
+                "oauth_rejected", "oauth_network", "oauth_response", "runtime_store", "account_unreadable", "missing_key", "invalid_key",
+                "ky_network", "ky_unavailable", "ky_rate_limited", "ky_busy", "ky_login_required", "ky_verify_required", "ky_unconfirmed")
+# Kyash: 受け取りの結果を明細で確かめられていない（自動で確認を続ける）
+HOLDISH = ("temporary_hold", "accept_uncertain", "accept_unconfirmed", "ky_unconfirmed")
 
 
 def _release_unused_coupon(order_id: str, order: dict) -> None:
@@ -4704,7 +4795,7 @@ def _recheck_and_start(order_id: str, who: str) -> str:
         previous = order["state"]
         order["state"] = "paying"
     try:
-        asyncio.run(paypay_gateway.confirm_received(order["link_code"], order_id, order["amount"]))
+        asyncio.run(payments.confirm_received(order["link_code"], order_id, order["amount"]))
     except paypay_gateway.PayPayError as exc:
         with _orders_lock:
             if exc.code == "not_found":  # このリンクは一度も受け付けていない（検証で弾かれた等）→ 状態は変えない
@@ -4811,28 +4902,25 @@ def _pay_order(order_id: str):
         else:
             need_pay = False
     if need_pay:
-        HOLDISH = ("temporary_hold", "accept_uncertain", "accept_unconfirmed")
         try:
             if mode == "link":
                 raw = str(data.get("link", ""))
-                order["link_code"] = paypay_gateway._normalize_link(raw) or order.get("link_code")
+                order["link_code"] = payments.normalize(raw) or order.get("link_code")
                 _persist_orders()  # 送金リンクを受け取る前に保存（途中で再起動しても同じリンクを再確認できる）
                 try:
-                    asyncio.run(paypay_gateway.receive_payment(raw, order["amount"], order_id))
+                    asyncio.run(payments.receive_payment(raw, order["amount"], order_id))
                 except paypay_gateway.PayPayError as dup:
                     if dup.code != "duplicate" or not order.get("link_code"):
                         raise
                     # 以前の注文（保留・停止で実行されなかった）と同じリンク → この注文に付け替えて確認し直す
                     _adopt_existing_link(order_id, order)
                     mode = "recheck"
-                    asyncio.run(paypay_gateway.confirm_received(order["link_code"], order_id, order["amount"]))
+                    asyncio.run(payments.confirm_received(order["link_code"], order_id, order["amount"]))
             else:
-                asyncio.run(paypay_gateway.confirm_received(order.get("link_code"), order_id, order["amount"]))
+                asyncio.run(payments.confirm_received(order.get("link_code"), order_id, order["amount"]))
         except paypay_gateway.PayPayError as exc:
             # 待てば直るもの（PayPay側の保留・混雑・通信、こちらのPayPay接続切れなど）
-            WAITING = ("still_pending", "temporary_hold", "link_network", "link_check", "rate_limited", "paypay_unavailable",
-                       "session_rejected", "login_required", "otp_required", "cookie_missing", "oauth_rejected",
-                       "oauth_network", "oauth_response", "runtime_store", "account_unreadable", "missing_key", "invalid_key")
+            WAITING = RECHECK_WAIT
             if not (mode == "recheck" and exc.code in WAITING):
                 _note_fail("paypay:" + order_id)
             hold = bool(order.get("link_code")) and (exc.code in HOLDISH or (mode == "recheck" and exc.code in WAITING))

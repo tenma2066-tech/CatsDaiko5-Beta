@@ -109,7 +109,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <button class="tab" role="tab" data-sec="sales">売上</button>
 <button class="tab" role="tab" data-sec="orders">注文{% if dash.attention %}<span class="badge">{{ dash.attention|length }}</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="history">履歴</button>
-<button class="tab" role="tab" data-sec="paypay">PayPay{% if not pp.ready %}<span class="badge">!</span>{% endif %}</button>
+<button class="tab" role="tab" data-sec="paypay">決済{% if not (paym.live and (paym.live.paypay or paym.live.kyash)) or (paym.switch and paym.switch.paypay and not pp.ready) or (paym.switch and paym.switch.kyash and not paym.live.kyash) %}<span class="badge">!</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="reviews">実績</button>
 <button class="tab" role="tab" data-sec="box">意見箱{% if box_open %}<span class="badge">{{ box_open }}</span>{% endif %}</button>
 <button class="tab" role="tab" data-sec="ops">運用{% if ops.paused_count or ops.sale or ops.notice_on %}<span class="badge warn">{{ (ops.paused_count or 0) + (1 if ops.sale else 0) + (1 if ops.notice_on else 0) }}</span>{% endif %}</button>
@@ -120,7 +120,8 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <section class="view" id="sec-home">
 <div class="card"><h2>いまの状態</h2>
 <div class="grid">
-<div class="stat {{ 'ok' if pp.ready else 'bad' }}"><small>PayPay 接続</small><b>{% if pp.ready %}接続済み{% elif pp.connected %}再認証が必要{% else %}未接続{% endif %}</b></div>
+<div class="stat {{ 'ok' if pp.ready else 'bad' }}"><small>PayPay 接続{% if paym.switch and not paym.switch.paypay %}（受付オフ）{% endif %}</small><b>{% if pp.ready %}接続済み{% elif pp.connected %}再認証が必要{% else %}未接続{% endif %}</b></div>
+<div class="stat {{ 'ok' if paym.live and paym.live.kyash else ('bad' if ky.needs_admin else 'warn') }}"><small>Kyash 接続{% if paym.switch and not paym.switch.kyash %}（受付オフ）{% endif %}</small><b>{% if ky.needs_admin %}入り直しが必要{% elif ky.connected %}接続済み{% else %}未接続{% endif %}</b></div>
 <div class="stat {{ 'warn' if maint.on else '' }}"><small>メンテナンス表示</small><b>{{ 'オン' if maint.on else 'オフ' }}</b></div>
 <div class="stat"><small>実行中 / 待機</small><b>{{ dash.running }} / {{ dash.queued }}</b><span>同時実行の上限 {{ dash.max_jobs }}</span></div>
 <div class="stat"><small>長時間レーン（ぷにぷにの長い周回）</small><b>{{ dash.long_running }} / {{ dash.long_queued }}</b><span>専用の枠 {{ dash.long_slots }}（実行中 / 待機）</span></div>
@@ -150,22 +151,22 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <!-- ===== 注文 ===== -->
 <section class="view" id="sec-orders">
 <div class="card"><h2>未完了の注文</h2>
-<p class="sub">保留などで止まった注文です。<b>PayPayアプリで着金を確認できたら「支払い済みにする」</b>を押してください。押すとすぐ実行が始まり、利用者の画面は自動で切り替わります。</p>
+<p class="sub">保留などで止まった注文です。<b>PayPay・Kyashのアプリで着金を確認できたら「支払い済みにする」</b>を押してください。押すとすぐ実行が始まり、利用者の画面は自動で切り替わります。</p>
 {% for o in orders %}
 <div class="order {{ 'bad' if o.state=='dead' else ('warn' if o.state in ('hold','paid') else '') }}">
 <div class="top"><span class="chip {{ 'bad' if o.state=='dead' else ('warn' if o.state in ('hold','paid') else '') }}">{{ o.state_ja }}</span><span class="chip">{{ o.created }}</span><span class="amt">{{ o.amount }}円</span></div>
 <div class="sum">{{ o.summary }}</div>
 <div class="meta">USERID <a href="/admin?user={{ o.uid }}#history"><code>{{ o.uid }}</code></a>　注文番号 <code>{{ o.id }}</code></div>
-<div class="meta">最後の結果: {{ o.diag or "-" }}{% if o.ledger %}　／　PayPay: {{ o.ledger }}{% endif %}{% if not o.has_link %}　／　リンク未送信{% endif %}</div>
+<div class="meta">最後の結果: {{ o.diag or "-" }}{% if o.ledger %}　／　{{ o.provider or "PayPay" }}: {{ o.ledger }}{% endif %}{% if not o.has_link %}　／　リンク未送信{% endif %}</div>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="order" value="{{ o.id }}">
 {% if o.unknown %}<div class="note bad">実行の途中で結果が分からなくなり、完了の扱いになっています（自動でのやり直しは止めています）。お客さんに状況を確認し、必要なら「1回無料クーポン」を発行して、もう一度注文してもらってください。</div>
 {% elif o.superseded %}<div class="note bad">この注文の支払いは、同じ利用者の新しい注文に引き継ぎ済みです。支払い済みにしないでください（二重に実行されます）。</div>
 {% elif o.state != "paid" %}{% if not o.has_link %}<div class="note">この注文には送金リンクの記録がありません（未払いの可能性が高いです）。</div>{% endif %}{% endif %}
 {% if o.state == "paid" and not o.has_link %}<div class="note">この注文には送金リンク（入金）の記録がありません。同じ人の別の注文と重複していないか確認してから開始してください。</div>{% endif %}
 <div class="row">
-{% if o.has_link and o.state in ("hold", "unpaid", "dead") %}<button class="btn" name="action" value="order_recheck">PayPayに再確認する</button>{% endif %}
+{% if o.has_link and o.state in ("hold", "unpaid", "dead") %}<button class="btn" name="action" value="order_recheck">{{ o.provider or "PayPay" }}に再確認する</button>{% endif %}
 {% if o.state == "paid" %}<button class="btn pri" name="action" value="order_start" data-confirm="この注文の実行を開始しますか？">実行を開始する</button>{% endif %}
-{% if not o.superseded and o.state != "paid" and not o.unknown %}<button class="btn {{ 'pri' if o.has_link else '' }}" name="action" value="order_paid" data-confirm="{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}PayPayアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
+{% if not o.superseded and o.state != "paid" and not o.unknown %}<button class="btn {{ 'pri' if o.has_link else '' }}" name="action" value="order_paid" data-confirm="{% if not o.has_link %}この注文には入金の記録がありません。{% endif %}{{ o.provider or "PayPay" }}のアプリで {{ o.amount }}円 の着金を確認しましたか？（同じ人の別の注文を、すでに支払い済みにしていませんか？）">{{ "支払い済みにする" if o.has_link else "入金記録なし・それでも支払い済みにする" }}</button>{% endif %}
 {% if o.state != "dead" and not o.unknown %}<button class="btn danger" name="action" value="order_dead" data-confirm="この注文を停止しますか？">停止する</button>{% endif %}
 </div></form></div>
 {% else %}<div class="empty">未完了の注文はありません 🎉</div>{% endfor %}
@@ -190,19 +191,47 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 {% if h.received %}<span class="chip ok">入金済</span>{% endif %}<span class="chip">{{ h.when }}</span><span class="amt">{{ h.amount }}円</span></div>
 <div class="l2">{{ h.summary }}</div>
 <div class="l2">USERID <a href="/admin?user={{ h.user_id }}#history"><code>{{ h.user_id }}</code></a>{% if h.sender_id %}　送金者 {{ h.sender_name or "(名前なし)" }} <a href="/admin?user={{ h.sender_id }}#history"><code>{{ h.sender_id[:16] }}</code></a>{% endif %}</div>
-<details><summary>くわしく</summary>メモ: {{ h.diag or "-" }}{% if h.last_status %}<br>PayPay: {{ h.last_status }}{% endif %}<br>注文番号: <code>{{ h.order_id }}</code></details></div>
+<details><summary>くわしく</summary>メモ: {{ h.diag or "-" }}{% if h.last_status %}<br>決済: {{ h.last_status }}{% endif %}<br>注文番号: <code>{{ h.order_id }}</code></details></div>
 {% else %}<div class="empty">まだありません</div>{% endfor %}
 </div></div></section>
 
-<!-- ===== PayPay ===== -->
+<!-- ===== 決済（PayPay・Kyash） ===== -->
 <section class="view" id="sec-paypay">
+<div class="card"><h2>受け付ける決済方法</h2>
+<p class="sub">オンにした方法のうち、受取用アカウントが接続済みのものだけがお客さんの支払い画面に出ます。お客さんが貼ったリンク（PayPay／Kyash）で、どちらで受け取るかは自動で決まります。オフにしても、受け付け済みの注文（保留中など）の確認は続けます。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="paymethods_save">
+<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="paypay" value="1" {% if paym.switch and paym.switch.paypay %}checked{% endif %}> PayPay を受け付ける <span class="chip {{ 'ok' if paym.live and paym.live.paypay else '' }}">{{ 'お客さんに表示中' if paym.live and paym.live.paypay else '表示していない' }}</span></label>
+<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="kyash" value="1" {% if paym.switch and paym.switch.kyash %}checked{% endif %}> Kyash を受け付ける <span class="chip {{ 'ok' if paym.live and paym.live.kyash else '' }}">{{ 'お客さんに表示中' if paym.live and paym.live.kyash else '表示していない' }}</span></label>
+<button class="btn pri full">保存</button></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
+<button class="btn full" name="action" value="pp_recheck_all" data-confirm="保留・要確認の注文を、いますぐ全部（PayPay・Kyash）確認します。入金済みのものは実行まで進みます。よろしいですか？">🔍 保留中の注文をまとめて再確認</button>
+</form></div>
+
+<div class="card"><h2>Kyash 受取アカウント</h2>
+<p><span class="chip {{ 'bad' if ky.needs_admin or ky.error else ('ok' if ky.ready else ('warn' if ky.connected else 'bad')) }}">{% if ky.error %}{{ ky.error }}{% elif ky.needs_admin %}入り直しが必要{% elif ky.ready %}接続済み（有効）{% elif ky.connected %}接続済み（期限切れ。自動で更新します）{% else %}未接続{% endif %}</span>
+{% if ky.user_name %}<span class="chip">ID {{ ky.user_name }}</span>{% endif %}{% if ky.expires_ja %}<span class="chip">期限 {{ ky.expires_ja }}</span>{% endif %}</p>
+{% if ky.last_error %}<p class="sub">最近のエラー：{{ ky.last_error }}</p>{% endif %}
+<p class="sub">20分ごとに自動で接続を確かめ、期限が近ければ更新します。切れたときは保存したパスワードで入り直します（メールでの確認を求められたときだけ、下の②が必要です）。換金ボットとは別の、お店専用のKyashアカウントを使ってください。</p>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
+<button class="btn full" name="action" value="ky_refresh">🔄 Kyashの接続を更新</button>
+<button class="btn full" name="action" value="ky_logout" data-confirm="Kyashの接続を解除します（保存したトークンとパスワードを消します）。お客さんの画面からKyashが消えます。よろしいですか？">⏏ Kyashの接続を解除</button>
+</form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="ky_login">
+<h3>① ログイン</h3>
+<label for="kyem">メールアドレス</label><input id="kyem" name="email" type="email" autocomplete="off" required value="{{ ky.email or '' }}">
+<label for="kypw">パスワード</label><input id="kypw" name="password" type="password" autocomplete="off" required>
+<button class="btn pri full">Kyashにログイン</button></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="ky_verify">
+<h3>② 確認リンク{% if ky.verify_waiting %} <span class="chip warn">入力待ち</span>{% endif %}</h3>
+<label for="kylink">Kyashから届いたメール（SMS）のリンクを、開かずにコピーして貼り付け</label><input id="kylink" name="link" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false">
+<button class="btn full">確認</button></form></div>
+
 <div class="card"><h2>PayPay 受取アカウント</h2>
 <p><span class="chip {{ 'ok' if pp.ready else ('warn' if pp.connected else 'bad') }}">{% if pp.ready %}接続済み（有効）{% elif pp.connected %}接続済み（セッション期限切れ。次の決済時に再認証）{% else %}未接続{% endif %}</span></p>
 <h3>手動での更新</h3>
 <p class="sub">それぞれ別々に使えます。押したあと画面を再読み込みしても、同じ操作がもう一度送られることはありません。</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
 <button class="btn full" name="action" value="pp_refresh" data-confirm="保存済みの電話番号・パスワードでPayPayにログインし直します。SMS認証を求められることがあります。よろしいですか？">🔄 PayPayの接続を更新（ログインし直す）</button>
-<button class="btn full" name="action" value="pp_recheck_all" data-confirm="保留・要確認の注文を、いますぐ全部PayPayに確認します。入金済みのものは実行まで進みます。よろしいですか？">🔍 保留中の注文をまとめて再確認</button>
 </form>
 <a class="btn full" href="/admin?r={{ csp_nonce[:8] }}#paypay" style="display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink)">↻ 状態を表示し直す（何も送らない）</a>
 <p class="sub" style="margin-top:12px">初めて接続するとき・接続が切れたときは、① 電話番号とパスワードでログイン → ② SMS で届いた4桁のコードを入力、の順です。</p>
@@ -259,7 +288,7 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 </section>
 <!-- ===== 売上 ===== -->
 <section class="view" id="sec-sales">
-<div class="card"><h2>売上の推移</h2><p class="sub">PayPay で入金を確認できた注文だけを数えます（無料クーポン・管理者の無料実行は0円なので入りません）。返金は「注文の詳細」で記録した分を差し引きます。</p>
+<div class="card"><h2>売上の推移</h2><p class="sub">PayPay・Kyash で入金を確認できた注文だけを数えます（無料クーポン・管理者の無料実行は0円なので入りません）。返金は「注文の詳細」で記録した分を差し引きます。</p>
 <div class="filters" id="sf" role="group" aria-label="期間">
 <button class="btn" type="button" data-range="today">今日</button><button class="btn" type="button" data-range="7">7日</button>
 <button class="btn" type="button" data-range="30" aria-pressed="true">30日</button><button class="btn" type="button" data-range="90">90日</button>

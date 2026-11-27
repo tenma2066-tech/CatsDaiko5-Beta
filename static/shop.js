@@ -16,7 +16,7 @@
 
   var STATE_JA = { unpaid: "お支払い待ち", paying: "確認中", hold: "保留中（自動で確認しています）", paid: "お支払い済み・開始待ち",
                    starting: "開始処理中", started: "実行中", done: "完了", dead: "自動では確認できませんでした" };
-  var HOLD_MSG = "保留中です。送金した方がPayPayアプリで保留を解除すると、自動で確認して実行します。" +
+  var HOLD_MSG = "保留中です。送金した方がアプリで保留を解除する（Kyashは明細に反映される）と、自動で確認して実行します。" +
                  "同じリンクを送り直したり、再送金したりしないでください。この画面は閉じても大丈夫です。";
   var WAITING = ["hold", "paying", "starting"];
   /* ほかの画面の注文番号を入れたときの行き先 */
@@ -136,8 +136,10 @@
     $("#payLink").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); $("#payGo").click(); } });
     $("#payGo").addEventListener("click", function () {
       var link = $("#payLink").value.trim();
-      if (!linkField().hidden && !/pay\.paypay\.ne\.jp\//i.test(link)) {
-        $("#payErr").textContent = "PayPayの送金リンク（https://pay.paypay.ne.jp/…）を貼り付けてください。"; return;
+      if (!linkField().hidden) {   /* PayPay・Kyash のどちらか（いま受け付けている方）。paymethods.js が無ければ両方を通す */
+        var bad = window.PayMethods ? window.PayMethods.check(link)
+          : (/pay\.paypay\.ne\.jp\/|kyash\.me\/payments\//i.test(link) ? "" : "PayPayかKyashの送金リンクを貼り付けてください。");
+        if (bad) { $("#payErr").textContent = bad; return; }
       }
       payNow(link);
     });

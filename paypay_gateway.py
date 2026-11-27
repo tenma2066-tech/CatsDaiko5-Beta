@@ -34,6 +34,8 @@ USER_AGENT = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
               "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
 LINK_RE = re.compile(r"https://pay\.paypay\.ne\.jp/([A-Za-z0-9]{6,128})(?![A-Za-z0-9])", re.I)
 CODE_RE = re.compile(r"[A-Za-z0-9]{6,128}\Z")
+# 台帳（links）のキーにする送金リンクのコード。PayPay はそのまま、Kyash は "ky:" を付けて区別する（kyash_gateway.py）。
+LEDGER_CODE_RE = re.compile(r"(?:[A-Za-z0-9]{6,128}|ky:[A-Za-z0-9_-]{6,80})\Z")
 UUID_RE = re.compile(r"^[a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}$")
 OTP_RE = re.compile(r"^[0-9]{4}$")
 SESSION_MAX_SECONDS = 7200
@@ -359,7 +361,8 @@ def _ledger():
             db.execute("""CREATE TABLE IF NOT EXISTS order_events (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL,
                           at REAL NOT NULL, state TEXT, text TEXT)""")
             db.execute("CREATE INDEX IF NOT EXISTS order_events_order ON order_events(order_id)")
-            for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER", "sender_id TEXT", "sender_name TEXT", "accept_status TEXT"):
+            for column in ("receiver TEXT", "last_status TEXT", "amount INTEGER", "used INTEGER", "sender_id TEXT", "sender_name TEXT", "accept_status TEXT",
+                           "provider TEXT", "extra TEXT"):
                 try:
                     db.execute("ALTER TABLE links ADD COLUMN " + column)
                 except sqlite3.OperationalError:
@@ -589,7 +592,7 @@ async def _confirm_once(code: str, purchase_id: str, amount: int | None, force_l
 
 def mark_used(code: str):
     """このリンクの支払いで実行を開始した（以後、別の注文では使えない）。"""
-    if isinstance(code, str) and CODE_RE.fullmatch(code):
+    if isinstance(code, str) and LEDGER_CODE_RE.fullmatch(code):
         with _ledger() as db:
             db.execute("UPDATE links SET used=1 WHERE digest=?", (hashlib.sha256(code.encode()).hexdigest(),))
 
@@ -597,7 +600,7 @@ def mark_used(code: str):
 def adopt_link(code: str, new_purchase_id: str, amount: int):
     """以前の注文（保留・停止のまま実行されなかったもの）で送られたリンクを、同じ金額の新しい注文に付け替える。
     実行に使われたリンク、金額の違うリンクは付け替えない。呼び出し側で古い注文を無効にしておくこと。"""
-    if not isinstance(code, str) or not CODE_RE.fullmatch(code):
+    if not isinstance(code, str) or not LEDGER_CODE_RE.fullmatch(code):
         raise PayPayError("not_found", "確認できる送金リンクがありません。")
     digest = hashlib.sha256(code.encode()).hexdigest()
     with _ledger() as db:
@@ -932,7 +935,7 @@ async def refresh_session():
 
 def link_order_id(code: str):
     """台帳で、このリンクがどの注文のものとして記録されているか。"""
-    if not isinstance(code, str) or not CODE_RE.fullmatch(code):
+    if not isinstance(code, str) or not LEDGER_CODE_RE.fullmatch(code):
         return None
     with _ledger() as db:
         row = db.execute("SELECT order_id FROM links WHERE digest=?", (hashlib.sha256(code.encode()).hexdigest(),)).fetchone()
@@ -941,7 +944,7 @@ def link_order_id(code: str):
 
 def link_diag(code: str) -> str:
     """管理画面用: 台帳の状態と、最後にPayPayが返した状態名。"""
-    if not isinstance(code, str) or not CODE_RE.fullmatch(code):
+    if not isinstance(code, str) or not LEDGER_CODE_RE.fullmatch(code):
         return ""
     try:
         with _ledger() as db:
@@ -953,7 +956,7 @@ def link_diag(code: str) -> str:
 
 def mark_paid_by_admin(code: str, purchase_id: str):
     """管理者がPayPayアプリで着金を確認したうえで、手動で支払い済みにする。"""
-    if isinstance(code, str) and CODE_RE.fullmatch(code):
+    if isinstance(code, str) and LEDGER_CODE_RE.fullmatch(code):
         with _ledger() as db:
             db.execute("UPDATE links SET state='paid' WHERE digest=? AND order_id=?", (hashlib.sha256(code.encode()).hexdigest(), purchase_id))
 

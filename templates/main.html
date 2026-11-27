@@ -817,6 +817,7 @@ details.more > summary small{font-size:12.5px;color:var(--muted)}
 <div class="updbanner" id="updBanner" role="status" hidden><b>アップデート中です</b><span>入力した内容はそのまま残ります。自動で再接続して続きを行うので、このままお待ちください。</span></div>
 <div class="toast" id="toast" hidden></div>
 
+<script src="/static/paymethods.js?v=1" data-methods="{{ pay_methods() }}"></script>
 <script src="/static/review.js?v=4"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -1802,7 +1803,17 @@ function restoreDraft(){
 let payOrder=null, payDead=false;
 const PAY_MSG={
   empty_link:['リンクが空です','PayPayで作った送金リンクを貼り付けてください。'],
-  not_paypay_link:['PayPayのリンクではありません','「https://pay.paypay.ne.jp/」で始まる送金リンクを貼ってください。'],
+  not_paypay_link:['送金リンクではありません','PayPay（https://pay.paypay.ne.jp/…）か Kyash（https://kyash.me/payments/…）の送金リンクを貼ってください。'],
+  method_off:['その支払い方法は止めています',''],
+  pay_closed:['ただいまお支払いを受け付けていません','しばらくしてからお試しください（送金はしないでください）。'],
+  ky_network:['Kyashと通信できませんでした','少し待ってから、もう一度ボタンを押してください（送金はそのままで大丈夫です）。'],
+  ky_unavailable:['Kyash側の一時エラー','しばらく待ってから、もう一度ボタンを押してください。'],
+  ky_rate_limited:['Kyashが混み合っています','しばらく待ってから、もう一度ボタンを押してください。'],
+  ky_busy:['混み合っています','少し待ってから、もう一度ボタンを押してください（送金はそのままで大丈夫です）。'],
+  ky_login_required:['現在、Kyashでの決済を受け付けられません','受取側Kyashが未接続です。管理者にお知らせください。'],
+  ky_verify_required:['現在、Kyashでの決済を受け付けられません','受取側Kyashが再認証待ちです。管理者にお知らせください。'],
+  ky_unconfirmed:['入金の反映を待っています','Kyashの明細に反映されしだい、自動で実行します。同じリンクを送り直したり、再送金したりしないでください（この画面は閉じても大丈夫です）。'],
+  ky_claim_rejected:['Kyashで受け取れませんでした','送金リンクはそのまま残っています。管理者にお知らせください。'],
   multiple_links:['リンクが複数あります','1件だけにして、もう一度貼り付けてください。'],
   link_too_long:['入力が長すぎます','リンクだけを貼り付けてください。'],
   bad_link:['リンクの形式が正しくありません','前後に余計な文字が入っていないか確認してください。'],
@@ -1847,7 +1858,8 @@ const PAY_MSG={
   internal:['予期しないエラー','PayPayアプリで送金状態を確認し、送金済みなら管理者に連絡してください。'],
 };
 function payError(j,fallback,lv){
-  const m=PAY_MSG[j&&j.code]||[(j&&j.error)||fallback,''];
+  let m=PAY_MSG[j&&j.code]||[(j&&j.error)||fallback,''];
+  if(m[1]===''&&j&&j.error&&PAY_MSG[j.code]) m=[m[0],j.error];   /* 一言だけ決めてあるもの（method_off など）は、サーバーの説明を添える */
   $('#payErrTitle').textContent=m[0];
   $('#payErrHint').textContent=(m[1]||'')+(()=>{ const m=(j&&j.code==='amount_mismatch'&&j.error)?j.error.match(/（(リンク[^）]*)）/):null; return m?' ['+m[1]+']':''; })();
   $('#payErr').dataset.lv=lv||'bad'; $('#payErr').hidden=false;
@@ -1868,7 +1880,7 @@ function openPay(id,amount,breakdown,skipped,state){
 let holdTimer=null, holdTries=0;
 function setHold(on){
   $('#payLinkField').hidden=on; $('#payGo').textContent=on?'今すぐ確認する':'支払って実行する'; $('#paySteps').hidden=on;
-  if(on) $('#payInfo').textContent='保留中です。送金した方がPayPayアプリで保留を解除（承認）すると、自動で確認して実行します。同じリンクを送り直したり、再送金したりしないでください。この画面を閉じても、サーバーが確認を続けます。あとで同じブラウザで開けば、結果（引継ぎコード）を見られます。';
+  if(on) $('#payInfo').textContent='保留中です。送金した方がアプリで保留を解除（承認）する（Kyashは明細に反映される）と、自動で確認して実行します。同じリンクを送り直したり、再送金したりしないでください。この画面を閉じても、サーバーが確認を続けます。あとで同じブラウザで開けば、結果（引継ぎコード）を見られます。';
   $('#payCancel').textContent=on?'閉じる（確認は続きます）':'やめる';
   if(!on){ clearInterval(holdTimer); holdTimer=null; holdTries=0; return; }
   if(holdTimer) return; /* すでに自動確認中（回数は引き継ぐ） */
@@ -1879,6 +1891,7 @@ $('#payCancel').addEventListener('click',()=>{ closePay(); show('confirm'); });
 $('#payLink').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#payGo').click(); } });
 $('#payGo').addEventListener('click',async()=>{
   if(!payOrder||payDead) return;
+  if(!$('#payLinkField').hidden&&window.PayMethods){ const bad=window.PayMethods.check($('#payLink').value.trim()); if(bad){ payError({error:bad},bad); return; } }
   const btn=$('#payGo'); btn.disabled=true; payError({error:'決済を確認しています…',code:'x'},'決済を確認しています…','wait');
   $('#payErrTitle').textContent='決済を確認しています…'; $('#payErrHint').textContent='画面を閉じずにお待ちください。';
   try{

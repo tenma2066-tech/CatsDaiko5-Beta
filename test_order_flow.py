@@ -546,7 +546,7 @@ class OrderFlow(unittest.TestCase):
                 return "d"
             with patch.object(G, "confirm_received", side_effect=fake_confirm), patch.object(A, "_start_job", side_effect=start):
                 page = admin.post("/admin", follow_redirects=True, data={"action": "pp_recheck_all", "csrf": csrf}).get_data(as_text=True)
-            self.assertIn("2 件をPayPayに確認しました", page)
+            self.assertIn("2 件を確認しました", page)
             self.assertIn("開始 1件", page)
             self.assertIn("まだ保留 1件", page)
         self.assertEqual((A._orders[j["order"]]["state"], A._orders[k["order"]]["state"]), ("started", "hold"))

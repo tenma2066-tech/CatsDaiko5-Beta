@@ -237,7 +237,7 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
 <details class="card" id="s-faq">
   <summary><b>❓ よくある質問</b></summary>
   <div class="faq">
-    <p><b>支払い方法は？</b><br>PayPayの送金リンクのみです。金額ちょうどのリンクを作って貼り付けてください。</p>
+    <p><b>支払い方法は？</b><br>PayPay か Kyash の送金リンクです（お支払い画面に出ている方が使えます）。金額ちょうどのリンクを作って貼り付けてください。</p>
     <p><b>どれくらいで終わる？</b><br>ガチャ・ひとだまは数分、周回・回し放題は内容により数分〜数時間です。画面を閉じても注文番号から続きを確認できます。</p>
     <p><b>結果が消えた／見られない</b><br>「このブラウザの注文」か、控えた<b>注文番号</b>で再開できます。別の端末でも番号で確認できます。</p>
     <p><b>注文を消したい</b><br>完了・停止・未払いの注文は「削除」で一覧から消せます（進行中・支払い済みは完了後に）。</p>
@@ -272,8 +272,9 @@ h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em}
   <p class="note" id="payOrderNo"></p>
 </div></div>
 
+<script src="/static/paymethods.js?v=1" data-methods="{{ pay_methods() }}"></script>
 <script src="/static/review.js?v=4"></script>
-<script src="/static/shop.js?v=11"></script>
+<script src="/static/shop.js?v=12"></script>
 <script>
 "use strict";
 const MENUS={{ menus|tojson }};
