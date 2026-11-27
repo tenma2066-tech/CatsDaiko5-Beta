@@ -65,6 +65,38 @@ const matchServer = (function(){
   catch (e) { console.log('[match_server] 無効化:', e && e.message); return null; }
 })();
 
+// ===== セッション別 Tor（利用者ごとに別の出口IP） =====
+// 複数人が1つの VPS 経由で本家に繋ぐと、本家の「同一IP=同一ID」制限に当たる。
+// 上流中継（login/DB/ip_chk/対戦）を host の Tor(SOCKS5) 経由にし、SOCKS の
+// username を利用者ごとに変える（Tor の IsolateSOCKSAuth で別サーキット＝別IP）。
+// DYA_SOCKS_URL=socks5h://host.docker.internal:9050 を与えると使える。
+// DYA_TOR=1 で既定 ON。実行中に PIN 付き /__tor?on=0|1 で切替可。
+const { socksConnect, parseSocksUrl } = require('./socks5');
+const SOCKS = parseSocksUrl(process.env.DYA_SOCKS_URL || '');
+let TOR_ON = process.env.DYA_TOR === '1';
+function torEnabled() { return !!(SOCKS && TOR_ON); }
+// 利用者の識別: 実IP（Caddy の X-Forwarded-For）＋ ブラウザごとの dya_sess cookie。
+// 同一回線の別ブラウザも分けられるよう cookie も混ぜる。
+function sessionKey(req) {
+  const ip = clientIp(req) || '0';
+  const s = getCookie(req, 'dya_sess') || '';
+  return (ip + '|' + s).slice(0, 255).replace(/[^\x21-\x7e]/g, '_');
+}
+// HTTP 上流用の Tor Agent。createConnection で SOCKS5→その上に TLS を張る。
+// セッション鍵はリクエスト options の _sessKey で受け取る（keep-alive 無効で使い回さない）。
+const torAgent = new https.Agent({ keepAlive: false, maxSockets: 256 });
+torAgent.createConnection = function (options, cb) {
+  const sessKey = options._sessKey || '';
+  const dstHost = options._dstHost;
+  const dstPort = options._dstPort;
+  if (!SOCKS) return cb(new Error('no SOCKS configured'));
+  socksConnect({ host: SOCKS.host, port: SOCKS.port, dstHost, dstPort, user: sessKey, pass: sessKey }, (err, raw) => {
+    if (err) return cb(err);
+    const tlsSock = tls.connect({ socket: raw, servername: options.servername || dstHost, ALPNProtocols: ['http/1.1'] }, () => cb(null, tlsSock));
+    tlsSock.once('error', (e) => cb(e));
+  });
+};
+
 // Render 経由だと毎リクエストで TLS ハンドシェイクが発生 → 上流（dya.jp 等）が
 // ときどき ECONNRESET / socket hang up を返して 502 が出る。keep-alive プールを
 // 使い回すことでハンドシェイク回数と transient 失敗を激減させる。
@@ -486,15 +518,26 @@ function log(level, id, msg) {
   console.log(`${ts()} [${lvl}] ${idStr}${msg}`);
 }
 
+// ブラウザごとの dya_sess cookie（セッション別 Tor の識別に使う）。既にあれば付けない。
+function sessionCookieHeaders(req, base) {
+  const h = Object.assign({}, base);
+  if (!getCookie(req, 'dya_sess')) {
+    const sess = require('crypto').randomBytes(9).toString('hex');
+    const secure = isHttps(req) ? '; Secure' : '';
+    h['set-cookie'] = `dya_sess=${sess}; Path=${BASE_PATH || '/'}; HttpOnly${secure}; SameSite=Lax; Max-Age=31536000`;
+  }
+  return h;
+}
+
 function serveLauncher(req, res, id) {
   const ip = clientIp(req);
   log('HTML', id, `→ GET / (launcher)  ip=${ip}`);
   const buf = Buffer.from(LAUNCHER_PAGE, 'utf8');
-  res.writeHead(200, {
+  res.writeHead(200, sessionCookieHeaders(req, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': buf.length,
-  });
+  }));
   res.end(buf);
   log('HTML', id, `← 200  launcher  out=${fmtBytes(buf.length)}`);
 }
@@ -663,14 +706,24 @@ function handleProxy(req, res, parsed, id) {
   function sendOnce() {
     attempt++;
     const attemptStart = Date.now();
-    const upstreamReq = https.request({
+    const reqOpts = {
       hostname: parsed.host,
       port: parsed.port,
       path: parsed.path,
       method: req.method,
       headers: rewriteRequestHeaders(req.headers, parsed.host + (parsed.port !== 443 ? ':' + parsed.port : '')),
-      agent: UPSTREAM_AGENT,
-    }, (upstreamRes) => {
+      servername: parsed.host,
+    };
+    if (torEnabled()) {
+      // per-session Tor: カスタム Agent が SOCKS5→TLS でダイヤルする。
+      reqOpts.agent = torAgent;
+      reqOpts._sessKey = sessionKey(req);
+      reqOpts._dstHost = parsed.host;
+      reqOpts._dstPort = parsed.port;
+    } else {
+      reqOpts.agent = UPSTREAM_AGENT;
+    }
+    const upstreamReq = https.request(reqOpts, (upstreamRes) => {
       const newHeaders = rewriteResponseHeaders(upstreamRes.headers);
       res.writeHead(upstreamRes.statusCode || 502, upstreamRes.statusMessage, newHeaders);
       upstreamRes.on('data', (c) => { resBytes += c.length; });
@@ -802,6 +855,23 @@ const server = http.createServer((req, res) => {
     return res.end(body);
   }
 
+  // セッション別 Tor の ON/OFF 切替＋状態（PIN 認証後のみ・VPS コンソール不要）
+  if (pathOnly === '/__tor') {
+    const m = /[?&]on=([01])/.exec(req.url);
+    if (m) { TOR_ON = m[1] === '1'; log('TOR', id, `-> ${TOR_ON ? 'ON' : 'OFF'}  by ip=${clientIp(req)}`); }
+    const avail = SOCKS ? `SOCKS=${SOCKS.host}:${SOCKS.port}` : 'SOCKS 未設定（DYA_SOCKS_URL を設定してください）';
+    const state = torEnabled() ? 'ON （利用者ごとに別の出口IP / 本家への中継は Tor 経由）'
+      : (TOR_ON && !SOCKS) ? 'ON 希望だが SOCKS 未設定のため無効（直結）'
+      : 'OFF （直結）';
+    const body =
+      `per-session Tor: ${state}\n${avail}\n` +
+      `あなたのセッション鍵: ${sessionKey(req)}\n\n` +
+      `切替:  ${BASE_PATH}/__tor?on=1   （利用者ごとに別IP）\n` +
+      `       ${BASE_PATH}/__tor?on=0   （直結に戻す）\n`;
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(body);
+  }
+
   if (pathOnly === '/' || pathOnly === '/index.html') return serveLauncher(req, res, id);
   if (pathOnly === '/editor') return serveEditor(req, res, id);
   if (pathOnly === '/online')
@@ -883,15 +953,17 @@ server.on('upgrade', (req, clientSocket, head) => {
 
   log('WS+', id, `→ open ${target}  ip=${ip}`);
 
-  // 上流に TLS 接続 → 生 HTTP で WebSocket Upgrade を送信 → 双方向 pipe
-  const upstream = tls.connect({
-    host: parsed.host,
-    port: parsed.port,
-    servername: parsed.host,
-    ALPNProtocols: ['http/1.1'],
-  }, () => {
+  // 上流に TLS 接続 → 生 HTTP で WebSocket Upgrade を送信 → 双方向 pipe。
+  // per-session Tor 有効時は SOCKS5 で宛先までダイヤルしてから TLS を被せる
+  // （IsolateSOCKSAuth により利用者ごとに別の出口IPになる）。
+  function closeOnce(reason) {
+    if (closed) return;
+    closed = true;
+    const dur = Date.now() - startedAt;
+    log('WS-', id, `← closed (${reason})  ${target}  dur=${dur}ms  up=${fmtBytes(upBytes)} down=${fmtBytes(downBytes)}`);
+  }
+  function onTlsConnect(upstream, via) {
     const tlsMs = Date.now() - startedAt;
-    // ヘッダ書換: Host を upstream に
     const headers = { ...req.headers, host: parsed.host + (parsed.port !== 443 ? ':' + parsed.port : '') };
     if (headers.origin) headers.origin = 'https://' + parsed.host;
     let lines = `${req.method} ${parsed.path} HTTP/1.1\r\n`;
@@ -902,34 +974,42 @@ server.on('upgrade', (req, clientSocket, head) => {
     lines += '\r\n';
     upstream.write(lines);
     if (head && head.length) upstream.write(head);
-    log('WS', id, `  TLS connected to ${parsed.host}:${parsed.port}  (${tlsMs}ms)  upgrade sent`);
-  });
-
-  // 双方向中継 + バイト数計測。.pipe() と data リスナは並存可能。
-  upstream.on('data', (c) => { downBytes += c.length; if (capSink) { try { capSink.feed('down', c); } catch (_) {} } });
-  clientSocket.on('data', (c) => { upBytes += c.length; if (capSink) { try { capSink.feed('up', c); } catch (_) {} } });
-  upstream.pipe(clientSocket);
-  clientSocket.pipe(upstream);
-
-  function closeOnce(reason) {
-    if (closed) return;
-    closed = true;
-    const dur = Date.now() - startedAt;
-    log('WS-', id, `← closed (${reason})  ${target}  dur=${dur}ms  up=${fmtBytes(upBytes)} down=${fmtBytes(downBytes)}`);
+    log('WS', id, `  TLS connected to ${parsed.host}:${parsed.port}${via}  (${tlsMs}ms)  upgrade sent`);
+  }
+  function wireUpstream(upstream) {
+    upstream.on('data', (c) => { downBytes += c.length; if (capSink) { try { capSink.feed('down', c); } catch (_) {} } });
+    clientSocket.on('data', (c) => { upBytes += c.length; if (capSink) { try { capSink.feed('up', c); } catch (_) {} } });
+    upstream.pipe(clientSocket);
+    clientSocket.pipe(upstream);
+    upstream.on('error', (err) => {
+      log('ERR', id, `✗ ws upstream ${target}: ${err.code||''} ${err.message}`);
+      closeOnce('upstream-error');
+      clientSocket.destroy();
+    });
+    clientSocket.on('error', (err) => {
+      log('ERR', id, `✗ ws client ${target}: ${err.code||''} ${err.message}`);
+      closeOnce('client-error');
+      upstream.destroy();
+    });
+    clientSocket.on('close', () => { closeOnce('client-close'); upstream.destroy(); });
+    upstream.on('close', () => { closeOnce('upstream-close'); clientSocket.destroy(); });
   }
 
-  upstream.on('error', (err) => {
-    log('ERR', id, `✗ ws upstream ${target}: ${err.code||''} ${err.message}`);
-    closeOnce('upstream-error');
-    clientSocket.destroy();
-  });
-  clientSocket.on('error', (err) => {
-    log('ERR', id, `✗ ws client ${target}: ${err.code||''} ${err.message}`);
-    closeOnce('client-error');
-    upstream.destroy();
-  });
-  clientSocket.on('close', () => { closeOnce('client-close'); upstream.destroy(); });
-  upstream.on('close', () => { closeOnce('upstream-close'); clientSocket.destroy(); });
+  if (torEnabled()) {
+    const sessKey = sessionKey(req);
+    socksConnect({ host: SOCKS.host, port: SOCKS.port, dstHost: parsed.host, dstPort: parsed.port, user: sessKey, pass: sessKey }, (err, raw) => {
+      if (err) {
+        log('ERR', id, `✗ ws socks ${target}: ${err.message}`);
+        closeOnce('socks-error');
+        return clientSocket.destroy();
+      }
+      const upstream = tls.connect({ socket: raw, servername: parsed.host, ALPNProtocols: ['http/1.1'] }, () => onTlsConnect(upstream, ` via Tor[${sessKey}]`));
+      wireUpstream(upstream);
+    });
+  } else {
+    const upstream = tls.connect({ host: parsed.host, port: parsed.port, servername: parsed.host, ALPNProtocols: ['http/1.1'] }, () => onTlsConnect(upstream, ''));
+    wireUpstream(upstream);
+  }
 });
 
 function getLanAddresses() {

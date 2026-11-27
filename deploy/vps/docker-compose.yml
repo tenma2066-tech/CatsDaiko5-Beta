@@ -67,6 +67,14 @@ services:
       # 独立マッチサーバ: 1 で対戦も本家不要（この VPS 上の players 同士で対戦）。
       # 既定 0（本家 sv2.splaxserver.net 接続）。実行中に /dya/__localmatch?on=1 で切替可。
       DYA_LOCAL_MATCH: ${DYA_LOCAL_MATCH:-0}
+      # セッション別 Tor: 本家への中継を host の Tor(SOCKS5) 経由にし、利用者ごとに
+      # 別の出口IPにする（本家の「同一IP=同一ID」制限よけ）。app と同じホスト Tor を使う。
+      # DYA_TOR=1 で既定 ON。実行中に /dya/__tor?on=1 で切替可（既定は OFF）。
+      DYA_SOCKS_URL: "socks5h://host.docker.internal:9050"
+      DYA_TOR: ${DYA_TOR:-0}
+    extra_hosts:
+      # dya コンテナから、ホストで動く Tor(SOCKS 9050) へ届かせるため（app と同じ）
+      - "host.docker.internal:host-gateway"
     volumes:
       # 採取した対戦プロトコル（ws_capture/*.jsonl）の置き場所。お店のデータとは別ディレクトリ。
       - ./dya-data:/app/data
