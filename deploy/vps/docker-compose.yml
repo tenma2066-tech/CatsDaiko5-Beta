@@ -39,6 +39,8 @@ services:
       SESSION_COOKIE_SECURE: "1"    # ログインの Cookie を HTTPS のときだけ送る（Caddy が HTTPS にしている）
       # ミニゲーム（下の dya）のカードをトップに出すか。remote-setup.sh が .env に書く。
       DYA_ENABLED: ${DYA_ENABLED:-0}
+      # ミニゲーム（下の osero）のカードをトップのメニューに出すか。remote-setup.sh が .env に書く。
+      OSERO_ENABLED: ${OSERO_ENABLED:-0}
     extra_hosts:
       # app コンテナから、ホストで動く Tor（SOCKS 9050）へ届かせるため
       - "host.docker.internal:host-gateway"
