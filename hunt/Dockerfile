@@ -7,6 +7,7 @@ WORKDIR /app
 COPY server.js ./
 COPY engine.js ./
 COPY accounts.js ./
+COPY gacha.js ./
 COPY index.html ./
 
 ENV NODE_ENV=production

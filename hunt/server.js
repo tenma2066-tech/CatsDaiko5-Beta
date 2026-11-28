@@ -11,6 +11,7 @@ const path = require('path');
 const crypto = require('crypto');
 const E = require('./engine.js');
 const Accounts = require('./accounts.js');
+const G = require('./gacha.js');
 
 const PORT = +process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -31,7 +32,7 @@ const MAX_MSG = 8 * 1024;
 const RATE = 12, BURST = 24;
 const MAX_PER_IP = 10;
 const MAX_ROOMS = 200;
-const MAX_PLAYERS = E.PARTY.length;
+const MAX_PLAYERS = 5;   // 席は5つ。いる人で順番に分ける
 // 持ち時間
 const TURN_MS = +process.env.HUNT_TURN_MS || 40000;        // 自分の番で考えられる時間
 const OFFLINE_MS = +process.env.HUNT_OFFLINE_MS || 5000;   // 切断中の人の番は、これだけ待ったら自動で通常攻撃
@@ -119,7 +120,8 @@ server.on('upgrade', (req, sock) => {
 /* ---------- プレイヤーと部屋 ---------- */
 const players = new Map();   // token -> player
 const rooms = new Map();     // code -> room
-const DEFS = E.defs();
+const DEFS = Object.assign(E.defs(), { gacha: G.info() });
+const AUTO_MS = +process.env.HUNT_AUTO_MS || 700;   // オートのとき、演出のあと次の行動までの間
 
 const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f<>&"']/g, '').trim().slice(0, 12) || 'ハンター';
 function newCode() {
@@ -128,11 +130,39 @@ function newCode() {
 const online = (p) => !!(p && p.conn);
 function broadcast(r, o) { for (const p of r.players) if (p.conn) p.conn.send(o); }
 
+/* その人が遊べるステージか（ゲストは草原だけ・ログインしている人は前のステージをクリアしたら） */
+function stageOpen(p, stage) {
+  if (!E.STAGES[stage]) return false;
+  if (!p.user) return E.STAGES[stage].world === 'meadow';
+  return accounts.stageOpen(p.user, stage);
+}
+/* その人の編成（{ key, dup } の並び）。ゲストは R だけ */
+function deckOf(p) {
+  if (p.user) return accounts.partyOf(p.user) || E.R_KEYS.map((key) => ({ key, dup: 0 }));
+  return (p.guestDeck && p.guestDeck.length ? p.guestDeck : E.R_KEYS).map((key) => ({ key, dup: 0 }));
+}
+/* 5つの席を、いる人に順番に配る（席 k は k 番目の人の、その人の編成の k/人数 番目） */
+function buildParty(r) {
+  const n = r.players.length, decks = r.players.map(deckOf), used = r.players.map(() => new Set());
+  const party = [];
+  for (let k = 0; k < 5; k++) {
+    for (let t = 0; t < n; t++) {
+      const owner = (k + t) % n, deck = decks[owner];
+      const c = deck.find((x) => !used[owner].has(x.key));
+      if (!c) continue;
+      used[owner].add(c.key);
+      party.push({ key: c.key, dup: c.dup, owner });
+      break;
+    }
+  }
+  return party;
+}
+
 function roomView(r, p) {
   return {
-    t: 'room', code: r.code, quest: r.quest, public: r.public, phase: r.phase, host: r.players[0] ? r.players[0].id : null,
+    t: 'room', code: r.code, stage: r.stage, public: r.public, phase: r.phase, solo: !!r.solo, host: r.players[0] ? r.players[0].id : null,
     you: p.id, max: MAX_PLAYERS,
-    players: r.players.map((x) => ({ id: x.id, name: x.name, online: online(x), member: !!x.user })),
+    players: r.players.map((x) => ({ id: x.id, name: x.name, online: online(x), member: !!x.user, auto: !!x.auto, deck: deckOf(x).map((d) => d.key) })),
   };
 }
 function sendRoom(r) { for (const p of r.players) if (p.conn) p.conn.send(roomView(r, p)); notifyLobby(); }
@@ -141,7 +171,7 @@ function listRooms() {
   const out = [];
   for (const r of rooms.values()) {
     if (!r.public || r.phase !== 'lobby' || r.players.length >= MAX_PLAYERS || !online(r.players[0])) continue;
-    out.push({ code: r.code, quest: r.quest, host: r.players[0].name, n: r.players.length });
+    out.push({ code: r.code, stage: r.stage, host: r.players[0].name, n: r.players.length });
   }
   return out.slice(0, 30);
 }
@@ -150,21 +180,23 @@ function notifyLobby() {
   for (const p of players.values()) if (p.conn && !p.room && p.wantList) p.conn.send({ t: 'rooms', rooms: list });
 }
 
-function createRoom(p, quest, isPublic) {
-  if (rooms.size >= MAX_ROOMS) return p.conn.send({ t: 'error', msg: 'いま部屋がいっぱいです。少し待ってからお試しください。' });
+function createRoom(p, stage, isPublic, solo) {
+  if (rooms.size >= MAX_ROOMS) { p.conn.send({ t: 'error', msg: 'いま部屋がいっぱいです。少し待ってからお試しください。' }); return null; }
   const now = Date.now();
-  if (now - (p.lastCreate || 0) < 2000) return p.conn.send({ t: 'error', msg: '少し待ってからもう一度お試しください。' });
+  if (now - (p.lastCreate || 0) < 1500) { p.conn.send({ t: 'error', msg: '少し待ってからもう一度お試しください。' }); return null; }
+  if (!stageOpen(p, stage)) stage = '1-1';
   p.lastCreate = now;
   leaveRoom(p);
-  const r = { code: newCode(), quest: E.QUESTS[quest] ? quest : 'hibashiri', public: !!isPublic, phase: 'lobby',
+  const r = { code: newCode(), stage, public: !!isPublic && !solo, solo: !!solo, phase: 'lobby',
               players: [p], state: null, timer: null, deadline: 0, touched: now };
   rooms.set(r.code, r); p.room = r;
   sendRoom(r);
+  return r;
 }
 
 function joinRoom(p, code) {
   const r = rooms.get(String(code || ''));
-  if (!r) return p.conn.send({ t: 'error', msg: 'その合言葉の部屋は見つかりません。' });
+  if (!r || r.solo) return p.conn.send({ t: 'error', msg: 'その合言葉の部屋は見つかりません。' });
   if (r.players.includes(p)) return sendRoom(r);
   if (r.phase !== 'lobby') return p.conn.send({ t: 'error', msg: 'その部屋はもう狩りに出ています。' });
   if (r.players.length >= MAX_PLAYERS) return p.conn.send({ t: 'error', msg: 'その部屋は満員です。' });
@@ -189,9 +221,8 @@ function leaveRoom(p) {
   if (!r.players.length) return dropRoom(r);
   // 狩りの途中で抜けた人のハンターは、残った人に配り直す
   if (r.phase === 'battle' && r.state) {
-    const hs = E.hunters(r.state);
     let k = 0;
-    for (const u of hs) {
+    for (const u of E.hunters(r.state)) {
       if (u.owner === idx) u.owner = k++ % r.players.length;
       else if (u.owner > idx) u.owner--;
     }
@@ -215,20 +246,22 @@ function sendState(r, events) {
   for (const p of r.players) if (p.conn) p.conn.send({ t: 'state', state: v, events, now: Date.now() });
 }
 
-/* 持ち時間の時計。演出が終わるころから数えはじめる */
+/* 持ち時間の時計。演出が終わるころから数えはじめる。オートの人の番は、演出のあとすぐ AI が動く */
 function armTimer(r, nEvents) {
   clearTimeout(r.timer);
   const s = r.state;
   if (!s || s.phase !== 'input') { r.deadline = 0; return; }
   const p = ownerOf(r);
-  const wait = Math.min(nEvents * EVENT_MS, 12000) + (online(p) ? TURN_MS : OFFLINE_MS);
-  r.deadline = Date.now() + wait;
+  const anim = Math.min(nEvents * EVENT_MS, 15000);
+  const auto = p && p.auto;
+  const wait = anim + (auto ? AUTO_MS : online(p) ? TURN_MS : OFFLINE_MS);
+  r.deadline = auto ? 0 : Date.now() + wait;
   r.timer = setTimeout(() => {
     if (r.state !== s || s.phase !== 'input') return;
     const who = E.unit(s, s.turn);
-    const res = E.autoAct(s);
+    const res = E.aiTurn(s);
     if (!res.ok) return;
-    res.events.unshift({ t: 'auto', u: who.id });
+    if (!auto) res.events.unshift({ t: 'auto', u: who.id });
     afterAct(r, res.events);
   }, wait);
 }
@@ -240,8 +273,8 @@ function recordResult(r) {
   const s = r.state;
   for (const p of r.players) {
     if (!p.user) continue;
-    const res = accounts.record(p.user, { quest: s.quest, win: !!s.win, turns: s.turns, breaks: r.breaks | 0, players: r.players.length });
-    if (res && p.conn) { p.conn.send({ t: 'reward', stones: res.stones, unlocked: res.unlocked }); sendMe(p); }
+    const res = accounts.record(p.user, { stage: s.stage, win: !!s.win, turns: s.turns, breaks: r.breaks | 0, players: r.players.length });
+    if (res && p.conn) { p.conn.send({ t: 'reward', stones: res.stones, first: res.first, unlocked: res.unlocked }); sendMe(p); }
   }
 }
 
@@ -254,7 +287,9 @@ function afterAct(r, events) {
 }
 
 function startBattle(r) {
-  r.state = E.createBattle(r.quest, r.players.length, crypto.randomInt(1, 2 ** 31 - 1));
+  const party = buildParty(r);
+  if (!party.length) return;
+  r.state = E.createBattle(r.stage, party, crypto.randomInt(1, 2 ** 31 - 1));
   r.phase = 'battle'; r.breaks = 0;
   const ev = E.start(r.state);
   sendRoom(r);
@@ -270,7 +305,7 @@ function handle(c, m) {
       if (p.conn && p.conn !== c) { p.conn.player = null; p.conn.sock.destroy(); }   // 同じ人の古い接続は切る
     } else {
       const token = crypto.randomBytes(16).toString('hex');
-      p = { token, id: crypto.randomBytes(4).toString('hex'), name: cleanName(m.name), room: null, conn: null, wantList: false };
+      p = { token, id: crypto.randomBytes(4).toString('hex'), name: cleanName(m.name), room: null, conn: null, wantList: false, auto: false };
       players.set(token, p);
     }
     if (m.name) p.name = cleanName(m.name);
@@ -293,6 +328,12 @@ function handle(c, m) {
   if (!p) return;
   p.seen = Date.now();
   const r = p.room;
+  const battle = () => (r && r.phase === 'battle' && r.state ? r.state : null);
+  const mine = (s, uid) => {
+    if (!s || s.phase !== 'input' || s.turn !== uid) return false;
+    if (ownerOf(r) !== p) { c.send({ t: 'error', msg: 'ほかの人のハンターです。' }); return false; }
+    return true;
+  };
   switch (m.t) {
     case 'name': if (!p.user) { p.name = cleanName(m.name); if (r) sendRoom(r); } break;
     case 'register':
@@ -318,39 +359,96 @@ function handle(c, m) {
     case 'claim': {
       if (!p.user) { c.send({ t: 'error', msg: 'ログインすると受け取れます。' }); break; }
       const res = accounts.claim(p.user, String(m.id || ''));
+      if (res.error) c.send({ t: 'error', msg: res.error }); else c.send({ t: 'claimed', id: m.id, reward: res.reward });
+      sendMe(p);
+      break;
+    }
+    case 'daily': {
+      if (!p.user) { c.send({ t: 'error', msg: 'ログインすると受け取れます。' }); break; }
+      const res = accounts.daily(p.user);
+      if (res.error) c.send({ t: 'error', msg: res.error }); else c.send({ t: 'claimed', id: 'daily', reward: res.reward });
+      sendMe(p);
+      break;
+    }
+    case 'deck': {   // 編成。ゲストは R のキャラだけ
+      const keys = Array.isArray(m.keys) ? m.keys.map(String) : [];
+      if (p.user) { const res = accounts.setDeck(p.user, keys); if (res.error) c.send({ t: 'error', msg: res.error }); sendMe(p); }
+      else {
+        const d = [...new Set(keys)].filter((k) => E.R_KEYS.includes(k)).slice(0, 5);
+        if (!d.length) c.send({ t: 'error', msg: 'ゲストは R のキャラだけ使えます。' }); else p.guestDeck = d;
+        c.send({ t: 'guestDeck', deck: p.guestDeck || E.R_KEYS });
+      }
+      if (r && r.phase === 'lobby') sendRoom(r);
+      break;
+    }
+    case 'gacha': {
+      if (!p.user) { c.send({ t: 'error', msg: 'ガチャはログインすると引けます。' }); break; }
+      const now = Date.now();
+      if (now - (p.lastPull || 0) < 800) break;   // 連打よけ
+      p.lastPull = now;
+      const res = accounts.pull(p.user, String(m.banner || ''), m.count === 10 ? 10 : 1);
       if (res.error) c.send({ t: 'error', msg: res.error });
-      else c.send({ t: 'claimed', id: m.id, reward: res.reward });
+      else c.send({ t: 'gacha', banner: m.banner, results: res.results, stones: res.stones, pity: res.pity, unlocked: res.unlocked });
       sendMe(p);
       break;
     }
     case 'rooms': p.wantList = true; c.send({ t: 'rooms', rooms: listRooms() }); break;
-    case 'create': p.wantList = false; createRoom(p, String(m.quest || ''), !!m.public); break;
+    case 'solo': {   // ひとりで出撃: 自分だけの部屋を作ってすぐ始める
+      p.wantList = false;
+      const stage = String(m.stage || '');
+      if (!stageOpen(p, stage)) { c.send({ t: 'error', msg: 'そのステージはまだ遊べません。' }); break; }
+      const nr = createRoom(p, stage, false, true);
+      if (nr) startBattle(nr);
+      break;
+    }
+    case 'create': p.wantList = false; createRoom(p, String(m.stage || '1-1'), !!m.public, false); break;
     case 'join': p.wantList = false; joinRoom(p, m.code); break;
     case 'quick': {   // すぐ入る: 待っている部屋があれば入り、なければ公開の部屋を作る
       p.wantList = false;
       const open = listRooms()[0];
-      if (open) joinRoom(p, open.code); else createRoom(p, String(m.quest || 'hibashiri'), true);
+      if (open) joinRoom(p, open.code); else createRoom(p, String(m.stage || '1-1'), true, false);
       break;
     }
     case 'leave': leaveRoom(p); c.send({ t: 'left' }); break;
-    case 'quest':
-      if (r && r.phase !== 'battle' && r.players[0] === p && E.QUESTS[m.quest]) { r.quest = m.quest; r.phase = 'lobby'; r.state = null; sendRoom(r); }
+    case 'stage':
+      if (r && r.phase !== 'battle' && r.players[0] === p) {
+        if (!stageOpen(p, String(m.stage))) { c.send({ t: 'error', msg: 'そのステージはまだ遊べません。' }); break; }
+        r.stage = String(m.stage); r.phase = 'lobby'; r.state = null; sendRoom(r);
+      }
       break;
     case 'start':
       if (r && r.phase !== 'battle' && r.players[0] === p) startBattle(r);
       break;
+    case 'auto':
+      p.auto = !!m.on;
+      if (r) { sendRoom(r); if (battle() && ownerOf(r) === p) armTimer(r, 0); }
+      break;
+    case 'move': {
+      const s = battle(); if (!mine(s, String(m.u))) break;
+      const res = E.move(s, String(m.u), m.x | 0, m.z | 0);
+      if (!res.ok) { c.send({ t: 'error', msg: res.error }); break; }
+      r.touched = Date.now();
+      sendState(r, res.events);   // 時計は動かしたまま（動いても持ち時間は増えない）
+      break;
+    }
     case 'act': {
-      if (!r || r.phase !== 'battle' || !r.state) break;
-      const s = r.state;
-      if (s.phase !== 'input' || s.turn !== m.u) break;
-      if (ownerOf(r) !== p) { c.send({ t: 'error', msg: 'ほかの人のハンターです。' }); break; }
+      const s = battle(); if (!mine(s, String(m.u))) break;
       const res = E.act(s, String(m.u), m.si | 0, m.target == null ? null : String(m.target));
       if (!res.ok) { c.send({ t: 'error', msg: res.error }); break; }
       afterAct(r, res.events);
       break;
     }
-    case 'again':   // 結果画面から、同じ仲間で部屋へ戻る
-      if (r && r.phase === 'result' && r.players[0] === p) { r.phase = 'lobby'; r.state = null; sendRoom(r); }
+    case 'wait': {
+      const s = battle(); if (!mine(s, String(m.u))) break;
+      const res = E.wait(s, String(m.u));
+      if (!res.ok) { c.send({ t: 'error', msg: res.error }); break; }
+      afterAct(r, res.events);
+      break;
+    }
+    case 'again':   // 結果画面から、同じ仲間で部屋へ戻る（ひとりのときは、もう一度出撃）
+      if (r && r.phase === 'result' && r.players[0] === p) {
+        if (r.solo) startBattle(r); else { r.phase = 'lobby'; r.state = null; sendRoom(r); }
+      }
       break;
     case 'ping': c.send({ t: 'pong' }); break;
     default: break;
