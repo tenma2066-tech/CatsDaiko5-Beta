@@ -1,0 +1,6 @@
+# コンテナに入れないもの（server.js / engine.js / index.html だけをデプロイする）
+README.md
+*.md
+test_engine.js
+.git
+.gitignore

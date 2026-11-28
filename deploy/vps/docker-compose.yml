@@ -103,6 +103,18 @@ services:
     expose:
       - "8080"
 
+  # ミニゲーム「彩狩 -IROGARI-」（このリポジトリの hunt/。1〜5人の協力ターン制バトル・自前サーバ）。Caddy が /hunt/ をここへ回す。
+  # profile "hunt" のときだけ起動する（remote-setup.sh が、ソースがそろったときに COMPOSE_PROFILES へ hunt を足す）。
+  # 外部通信なし・暗証番号なし・保存なし。お店の注文・台帳・データには触れない（volumes なし）。
+  hunt:
+    profiles: ["hunt"]
+    build: ./src/hunt
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+    expose:
+      - "8080"
+
   caddy:
     image: caddy:2
     restart: unless-stopped

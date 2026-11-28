@@ -12,6 +12,11 @@
 	handle_path /osero/* {
 		reverse_proxy osero:8080
 	}
+	# ミニゲーム（彩狩）。hunt コンテナが動いていないときは /hunt/ だけ 502 になり、お店には影響しない。
+	redir /hunt /hunt/ 308
+	handle_path /hunt/* {
+		reverse_proxy hunt:8080
+	}
 	handle {
 		reverse_proxy app:8080
 	}

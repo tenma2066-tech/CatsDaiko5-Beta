@@ -242,6 +242,14 @@ else
   docker compose --profile osero rm -sf osero >/dev/null 2>&1 || true
   echo "osero: disabled (no source)"
 fi
+# --- 彩狩（hunt）---
+if [ -f "$APP_DIR/src/hunt/server.js" ] && [ -f "$APP_DIR/src/hunt/Dockerfile" ]; then
+  PROFILES="${PROFILES:+$PROFILES,}hunt"
+  echo "hunt: enabled (/hunt/)"
+else
+  docker compose --profile hunt rm -sf hunt >/dev/null 2>&1 || true
+  echo "hunt: disabled (no source)"
+fi
 [ -n "$PROFILES" ] && echo "COMPOSE_PROFILES=$PROFILES" >> .env
 
 # 4.95) ミニゲームが書き込む場所。コンテナは node ユーザ（uid 1000）で動くので、持ち主を合わせておく
