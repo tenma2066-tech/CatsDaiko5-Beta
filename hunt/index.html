@@ -735,7 +735,9 @@ const glyph = (name) => (name || '?')[0];
 
 let ws = null, me = null, defs = null, room = null, st = null, timeOff = 0, acct = null, lastReward = null, guestDeck = null;
 let sel = { si: -1, part: null, focus: null, pv: null };
-let queue = [], playing = false, disp = {}, showTurn = null, speed = +(store.get('hunt_speed') || 1) || 1, wantHome = false;
+let queue = [], playing = false, disp = {}, showTurn = null, userSpeed = +(store.get('hunt_speed') || 1) || 1, speed = userSpeed, wantHome = false;
+const AUTO_BOOST = 1.6;   // オート中は演出を少し速く
+function syncSpeed() { speed = userSpeed * (amAuto() ? AUTO_BOOST : 1); }
 
 /* ---------------- 通信 ---------------- */
 function connect() {
@@ -774,10 +776,11 @@ function onMsg(m) {
     case 'gacha': showGacha(m); break;
     case 'rooms': drawRoomList(m.rooms); break;
     case 'room':
-      room = m;
+      room = m; syncSpeed();
       if (m.phase === 'lobby' && !m.solo) { st = null; queue = []; disp = {}; lastReward = null; drawLobby(); show('lobby'); }
       break;
     case 'state':
+      lastSeq = m.seq | 0;
       timeOff = m.now - Date.now(); st = m.state;
       if ($('hud').classList.contains('hidden')) { show('hud'); disp = {}; queue = []; sel = { si: -1, part: null, focus: null, pv: null }; queue.push({ t: '_intro' }); }
       if (!Object.keys(disp).length) { syncDisp(); if (m.events.length) rewindDisp(m.events); }
@@ -1233,7 +1236,7 @@ function drawSkills() {
   const box = $('skills'), pv = $('passive'); box.innerHTML = ''; pv.innerHTML = '';
   const cur = st && U(st.turn), can = canAct();
   $('bAuto').classList.toggle('on', amAuto()); $('bAuto').textContent = amAuto() ? 'AUTO中' : 'AUTO';
-  $('bSpeed').textContent = '×' + speed; $('bSpeed').classList.toggle('on', speed > 1);
+  syncSpeed(); $('bSpeed').textContent = '×' + userSpeed; $('bSpeed').classList.toggle('on', userSpeed > 1);
   if (!can || st.moved) pend = null;
   if (!can) {
     $('moveOk').classList.add('hidden'); $('desc').classList.add('hidden'); sel.si = -1; sel.pv = null;
@@ -1338,7 +1341,7 @@ function onBoard(hit, touch) {
   pend = null; drawHud();
 }
 $('bAuto').onclick = () => { send({ t: 'auto', on: !amAuto() }); };
-$('bSpeed').onclick = () => { speed = speed === 1 ? 2 : 1; store.set('hunt_speed', String(speed)); drawSkills(); };
+$('bSpeed').onclick = () => { userSpeed = userSpeed === 1 ? 2 : 1; store.set('hunt_speed', String(userSpeed)); syncSpeed(); drawSkills(); };
 $('bMenu').onclick = () => { const l = $('logList'); l.innerHTML = ''; for (const t of LOG.slice(-25)) { const d = document.createElement('div'); d.textContent = t; l.appendChild(d); } $('menu').classList.remove('hidden'); l.scrollTop = 1e6; };
 $('mClose').onclick = () => $('menu').classList.add('hidden');
 $('mQuit').onclick = () => { $('menu').classList.add('hidden'); wantHome = true; send({ t: 'leave' }); };
@@ -1408,10 +1411,11 @@ $('bHelp').onclick = () => $('tut').classList.remove('hidden');
 $('tutOk').onclick = () => { store.set('hunt_tut', '1'); $('tut').classList.add('hidden'); };
 const nameOf = (id) => { const u = U(id); return u ? u.name : ''; };
 
+let lastSeq = 0, idleSent = 0;   // 再生しおわった state の番号をサーバーへ知らせる（オートがすぐ動ける）
 function pump() {
   if (playing) return;
   const e = queue.shift();
-  if (!e) { drawHud(); return; }
+  if (!e) { drawHud(); if (lastSeq && idleSent !== lastSeq) { idleSent = lastSeq; send({ t: 'idle', seq: lastSeq }); } return; }
   playing = true;
   const wait = playEvent(e);
   const go = () => { if (scene3d.busy && scene3d.busy()) return setTimeout(go, 50); playing = false; pump(); };
@@ -1425,7 +1429,7 @@ function playEvent(e) {
       const u = U(e.u); showTurn = e.u; scene3d.focus(e.u);
       for (const c of document.querySelectorAll('.card')) c.classList.toggle('now', c.id === 'card_' + e.u);
       if (u) { turnBand(u); const ts = $('turnBox'); ts.classList.toggle('foe', u.side === 'm'); $('tbEm').style.setProperty('--c', u.side === 'm' ? '#ff4a3c' : EL[u.el]); faceInto($('tbG'), u); $('tbName').textContent = `${u.name} のターン`; $('tbWho').textContent = u.side === 'm' ? '敵の行動' : isMine(u) ? 'あなたの番です' : `${ownerName(u)} さんの番`; }
-      return 620;
+      return u && u.side === 'm' ? 380 : 460;
     }
     case 'auto': log(`${nameOf(e.u)} は時間切れ。オートで行動`); return 300;
     case 'move': { const u = U(e.u); if (u) { u.x = e.path[e.path.length - 1][0]; u.z = e.path[e.path.length - 1][1]; } return scene3d.moveUnit(e.u, e.path); }
@@ -1439,7 +1443,7 @@ function playEvent(e) {
       if (u.side === 'h' && (e.kind === 'special' || e.kind === 'ultimate')) return scene3d.cine(e.u, e.center || e.targets[0], e.kind, col, e.name, defs.kindName[e.kind]);
       if (u.side === 'm' && e.kind === 'special') return scene3d.cine(e.u, e.targets[0], 'boss', '#ff4a3c', e.name, '大技');
       scene3d.act(e.u, e.targets); scene3d.attack(e.u, e.targets, e.type, e.kind, e.tiles);
-      return u.side === 'm' ? 900 : 740;
+      return u.side === 'm' ? 760 : 640;
     }
     case 'dmg': {
       disp[e.u] = Math.max(0, (disp[e.u] || 0) - e.v);

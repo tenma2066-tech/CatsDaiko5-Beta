@@ -121,7 +121,8 @@ server.on('upgrade', (req, sock) => {
 const players = new Map();   // token -> player
 const rooms = new Map();     // code -> room
 const DEFS = Object.assign(E.defs(), { gacha: G.info() });
-const AUTO_MS = +process.env.HUNT_AUTO_MS || 700;   // オートのとき、演出のあと次の行動までの間
+const AUTO_MS = +process.env.HUNT_AUTO_MS || 700;   // オートのとき、演出のあと次の行動までの間（画面から「再生おわり」が来なかったときの目安）
+const AUTO_FAST_MS = +process.env.HUNT_AUTO_FAST_MS || 60;   // 画面の再生が終わってから、オートが動くまでの間
 
 const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f<>&"']/g, '').trim().slice(0, 12) || 'ハンター';
 function newCode() {
@@ -242,8 +243,8 @@ function ownerOf(r) {
 
 function sendState(r, events) {
   const v = E.view(r.state);
-  v.deadline = r.deadline;
-  for (const p of r.players) if (p.conn) p.conn.send({ t: 'state', state: v, events, now: Date.now() });
+  v.deadline = r.deadline; r.seq = (r.seq | 0) + 1;
+  for (const p of r.players) if (p.conn) p.conn.send({ t: 'state', state: v, events, now: Date.now(), seq: r.seq });
 }
 
 /* 持ち時間の時計。演出が終わるころから数えはじめる。オートの人の番は、演出のあとすぐ AI が動く */
@@ -254,16 +255,19 @@ function armTimer(r, nEvents) {
   const p = ownerOf(r);
   const anim = Math.min(nEvents * EVENT_MS, 15000);
   const auto = p && p.auto;
-  const wait = anim + (auto ? AUTO_MS : online(p) ? TURN_MS : OFFLINE_MS);
+  // オートは演出の目安が過ぎたら動く。画面の再生が先に終わったら（idle）、そこで早める
+  const wait = auto ? anim + AUTO_MS : anim + (online(p) ? TURN_MS : OFFLINE_MS);
   r.deadline = auto ? 0 : Date.now() + wait;
-  r.timer = setTimeout(() => {
+  r.autoAct = () => {
     if (r.state !== s || s.phase !== 'input') return;
     const who = E.unit(s, s.turn);
     const res = E.aiTurn(s);
     if (!res.ok) return;
     if (!auto) res.events.unshift({ t: 'auto', u: who.id });
     afterAct(r, res.events);
-  }, wait);
+  };
+  r.autoAt = Date.now() + wait;
+  r.timer = setTimeout(r.autoAct, wait);
 }
 
 function sendMe(p) { if (p.conn) p.conn.send({ t: 'me', me: p.user ? accounts.profile(p.user) : null }); }
@@ -421,7 +425,7 @@ function handle(c, m) {
       break;
     case 'auto':
       p.auto = !!m.on;
-      if (r) { sendRoom(r); if (battle() && ownerOf(r) === p) armTimer(r, 0); }
+      if (r) { sendRoom(r); if (battle() && ownerOf(r) === p) { armTimer(r, 0); if (p.auto && r.autoAct) { clearTimeout(r.timer); r.autoAt = Date.now() + AUTO_FAST_MS; r.timer = setTimeout(r.autoAct, AUTO_FAST_MS); } } }
       break;
     case 'move': {
       const s = battle(); if (!mine(s, String(m.u))) break;
@@ -450,6 +454,12 @@ function handle(c, m) {
         if (r.solo) startBattle(r); else { r.phase = 'lobby'; r.state = null; sendRoom(r); }
       }
       break;
+    case 'idle': {   // 画面の再生が終わった。いまの番がこの人のオートなら、すぐ動かす
+      const s = battle();
+      if (!s || s.phase !== 'input' || (m.seq | 0) !== r.seq || ownerOf(r) !== p || !p.auto || !r.autoAct) break;
+      if ((r.autoAt || 0) - Date.now() > AUTO_FAST_MS) { clearTimeout(r.timer); r.autoAt = Date.now() + AUTO_FAST_MS; r.timer = setTimeout(r.autoAct, AUTO_FAST_MS); }
+      break;
+    }
     case 'ping': c.send({ t: 'pong' }); break;
     default: break;
   }
