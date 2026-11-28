@@ -117,6 +117,8 @@ umask 077; mkdir -p "$B"; chmod 700 "$B"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/data"
 cp -a "$D/data/." "$T/data/" 2>/dev/null || true
+# ミニゲームの戦績（osero の stats.json）も残す
+[ -d "$D/osero-data" ] && cp -a "$D/osero-data" "$T/" 2>/dev/null || true
 # 台帳（SQLite）は使用中でも壊れない写し方で取り直す
 for f in $(find "$D/data" -name '*.sqlite3' 2>/dev/null); do
   rel=${f#"$D/data/"}
@@ -241,6 +243,11 @@ else
   echo "osero: disabled (no source)"
 fi
 [ -n "$PROFILES" ] && echo "COMPOSE_PROFILES=$PROFILES" >> .env
+
+# 4.95) ミニゲームが書き込む場所。コンテナは node ユーザ（uid 1000）で動くので、持ち主を合わせておく
+#       （root のままだと書き込めず、戦績や採取ファイルが保存されない）
+mkdir -p "$APP_DIR/osero-data" "$APP_DIR/dya-data"
+chown 1000:1000 "$APP_DIR/osero-data" "$APP_DIR/dya-data" 2>/dev/null || true
 
 # 5) 先にビルド（今のサイトは動いたまま）
 docker compose build

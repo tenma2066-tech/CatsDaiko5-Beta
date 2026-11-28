@@ -165,6 +165,30 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
 #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:3;mix-blend-mode:screen}
 #hint{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 92px);transform:translateX(-50%);font-size:12px;color:var(--mut);pointer-events:none;z-index:2;opacity:0;transition:opacity .3s;white-space:nowrap;padding:4px 12px;border-radius:99px;background:rgba(0,0,0,.45)}
 #hint.show{opacity:1}
+#bar[hidden],#bar button[hidden]{display:none}
+#turn small.clk{color:var(--gold2);font-weight:700;font-variant-numeric:tabular-nums}
+#turn small.clk:empty{display:none}
+#turn small.clk.warn{color:#ff8a7a}
+#stampPick{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 88px);transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:8px;border-radius:16px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:6;width:min(440px,calc(100% - 24px));box-shadow:0 10px 40px rgba(0,0,0,.5)}
+#stampPick[hidden]{display:none}
+#stampPick button{min-height:44px;padding:0 4px;font-size:14px;font-weight:700}
+#stamps{position:fixed;left:0;right:0;top:calc(var(--hudh) + 54px);display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;z-index:5}
+.stamp{display:flex;align-items:center;gap:8px;padding:7px 15px 7px 8px;border-radius:999px;background:rgba(10,18,15,.9);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.45);animation:stamp 2.8s ease both}
+.stamp span{color:var(--mut);font-size:13px}
+.stamp b{color:var(--gold2);font-size:17px}
+@keyframes stamp{0%{opacity:0;transform:translateY(-8px) scale(.92)}8%{opacity:1;transform:none}80%{opacity:1}100%{opacity:0;transform:translateY(-6px)}}
+#rbar{position:fixed;left:0;right:0;bottom:0;padding:10px 12px calc(env(safe-area-inset-bottom) + 12px);display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;z-index:2;background:linear-gradient(rgba(3,7,5,0),rgba(3,7,5,.85) 35%)}
+#rbar[hidden]{display:none}
+#rbar button{padding:0 12px}
+#rbar svg{width:20px;height:20px;display:block}
+#rpCount{min-width:5.5em;text-align:center;font-variant-numeric:tabular-nums;font-weight:700}
+.rate{margin:12px 0 0;padding:10px 12px;border-radius:12px;background:rgba(216,178,100,.1);border:1px solid rgba(216,178,100,.3);font-size:15px}
+.rate[hidden]{display:none}
+.rate b{font-size:20px;color:var(--gold2);font-variant-numeric:tabular-nums}
+.rate .up{color:#7fe9ad;font-weight:700}.rate .dn{color:#ff8a7a;font-weight:700}
+.rkme{margin:0 0 12px;padding:12px;border-radius:12px;background:rgba(216,178,100,.1);border:1px solid rgba(216,178,100,.35);font-size:14px;line-height:1.7}
+.rkme b{font-size:22px;color:var(--gold2)}
+.rank li small{color:var(--mut);font-size:12px;margin-left:6px}
 #nogl{position:fixed;inset:0;display:none;place-items:center;padding:24px;text-align:center;z-index:20}
 @media(prefers-reduced-motion:reduce){#cutin.show{animation-duration:1.2s}.card,.tcard{animation:none}}
 </style>
@@ -177,6 +201,8 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
   <div id="scorebar" aria-hidden="true"></div>
 </header>
 <div id="toast" role="status"></div>
+<div id="stamps" aria-live="polite"></div>
+<div id="stampPick" hidden aria-label="スタンプを送る"></div>
 <div id="cutin" aria-hidden="true"><div class="main"></div><div class="sub"></div></div>
 <div id="flash"></div>
 <div id="hint">タップで演出をスキップ</div>
@@ -184,9 +210,21 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
 <nav id="bar">
   <button id="bNew"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>新しいゲーム</span></button>
   <button id="bUndo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><span>戻す</span></button>
+  <button id="bStamp" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5h16v11H10l-5 4v-4H4z"/><path d="M8 10h.01M12 10h.01M16 10h.01" stroke-linecap="round"/></svg><span>スタンプ</span></button>
   <button id="bNet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span>オンライン</span></button>
   <button id="bHelp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1.9-1.1 1.7"/><path d="M12 17h.01"/></svg><span>遊び方</span></button>
   <button id="bSet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span>設定</span></button>
+</nav>
+
+<nav id="rbar" hidden aria-label="リプレイ">
+  <button id="rpFirst" aria-label="最初へ"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM19 5 9 12l10 7z"/></svg></button>
+  <button id="rpPrev" aria-label="1手戻る"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 5 7 12l10 7z"/></svg></button>
+  <button id="rpPlay" class="primary" aria-label="再生"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z"/></svg></button>
+  <button id="rpNext" aria-label="1手進む"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l10 7-10 7z"/></svg></button>
+  <button id="rpLast" aria-label="最後へ"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM5 5l10 7-10 7z"/></svg></button>
+  <span id="rpCount"></span>
+  <button id="rpCopy">棋譜をコピー</button>
+  <button id="rpClose" class="ghost">閉じる</button>
 </nav>
 
 <div class="sheet" id="title" hidden>
@@ -210,6 +248,7 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
       </select></label>
       <label>サイズ<select id="sSize"></select></label>
       <label>人数<select id="sPlayers"></select></label>
+      <label>持ち時間（オンライン）<select id="sTime"><option value="15">1手 15秒</option><option value="30">1手 30秒</option><option value="60">1手 60秒</option><option value="0">なし</option></select></label>
       <label>壁ブロック<select id="sWalls"><option value="0">なし</option><option value="2">2個</option><option value="4">4個</option><option value="6">6個</option><option value="8">8個</option></select></label>
     </div>
     <label class="check"><input type="checkbox" id="sChain"><div>連鎖返し<span>返った石がさらに挟んで、連鎖的に返していく</span></div></label>
@@ -226,6 +265,7 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
     <p class="note" id="nStatus"></p>
     <div id="nForm">
       <label>名前<input id="nName" maxlength="12" autocomplete="nickname"></label>
+      <div class="row start"><button class="ghost" id="nRank">ランキングを見る</button></div>
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="free" aria-selected="true">フリールーム</button>
         <button role="tab" data-tab="friend" aria-selected="false">友達と遊ぶ</button>
@@ -259,8 +299,11 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
     <div class="set">
       <div class="set-row wrap"><div>大技の演出<span>カメラが寄る派手な演出の量</span></div>
         <div class="seg" id="oFx"><button data-fx="full">フル</button><button data-fx="short">短め</button><button data-fx="off">オフ</button></div></div>
+      <div class="set-row wrap"><div>画質<span>動きが重いときは「軽量」に</span></div>
+        <div class="seg" id="oGfx"><button data-gfx="high">高</button><button data-gfx="mid">標準</button><button data-gfx="low">軽量</button></div></div>
       <div class="set-row"><div>効果音</div><button class="tg" id="oSnd" aria-label="効果音"></button></div>
       <div class="set-row"><div>置ける場所を表示<span>盤に丸で示す</span></div><button class="tg" id="oHint" aria-label="置ける場所を表示"></button></div>
+      <div class="set-row"><div>スタンプを表示<span>オンラインで届いたスタンプ</span></div><button class="tg" id="oStamp" aria-label="スタンプを表示"></button></div>
     </div>
     <div class="row"><button class="ghost" id="oTitle">タイトルに戻る</button><button class="primary" data-close>閉じる</button></div>
   </div>
@@ -276,9 +319,21 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
       <section><h4>3人以上のとき</h4><p>自分以外の石なら、だれの石でもはさんで返せます。</p></section>
       <section><h4>特別ルール</h4><p><b>壁ブロック</b>は置けない・返せないマス。<b>連鎖返し</b>をオンにすると、返った石がさらに石をはさんで連鎖します。</p></section>
       <section><h4>操作</h4><p>マスを<kbd>タップ</kbd>（<kbd>クリック</kbd>）して置きます。大技の演出中はタップ（<kbd>Space</kbd>）でスキップ。「戻す」で自分の手番まで戻れます（CPU戦のみ）。</p></section>
+      <section><h4>持ち時間とスタンプ</h4><p>オンラインでは1手ごとに持ち時間があり、時間切れや通信が切れたときはCPUが代わりに打ちます（3回続くとCPUに交代）。対局中は「スタンプ」であいさつを送れます。</p></section>
+      <section><h4>リプレイとランキング</h4><p>終局後の「リプレイ」で1手ずつ見返せます。人間どうしのオンライン対局はレートに記録され、「ランキング」で見られます。</p></section>
       <section><h4>オンライン対戦</h4><p>「部屋を作る」で出る4文字のコードを友達に伝え、友達が参加したらホストが「対局開始」。空いた席にはCPUが入ります。</p></section>
     </div>
     <div class="row"><button class="primary" data-close>閉じる</button></div>
+  </div>
+</div>
+
+<div class="sheet" id="rankSheet" hidden>
+  <div class="card">
+    <h2>ランキング</h2>
+    <div class="rkme" id="rkMe"></div>
+    <ol class="rank" id="rkList"></ol>
+    <p class="note">オンラインで人間どうし（2人以上）が対局したときに記録されます。対局の途中で抜けると負けになります。</p>
+    <div class="row"><button class="ghost" id="rkBack">戻る</button><button class="primary" data-close>閉じる</button></div>
   </div>
 </div>
 
@@ -294,8 +349,9 @@ h3 small{font-weight:500;color:var(--mut);margin-left:6px}
   <div class="card">
     <h2 id="rTitle"></h2>
     <ol class="rank" id="rList"></ol>
+    <p class="rate" id="rRate" hidden></p>
     <p class="note" id="rNote"></p>
-    <div class="row"><button class="ghost" id="rHome">タイトル</button><button class="ghost" id="rView">盤面を見る</button><button class="ghost" id="rSetup">設定を変える</button><button class="primary" id="rAgain">もう一度</button></div>
+    <div class="row"><button class="ghost" id="rHome">タイトル</button><button class="ghost" id="rReplay">リプレイ</button><button class="ghost" id="rView">盤面を見る</button><button class="ghost" id="rSetup">設定を変える</button><button class="primary" id="rAgain">もう一度</button></div>
   </div>
 </div>
 
@@ -415,6 +471,13 @@ let seats = [];                 // seats[p-1] = {type:'human'|'cpu', level, name
 let history = [], busy = false, gameToken = 0, thinking = 0, pendingMove = false;
 let fxMode = store.get('uo_fx', 'full'), soundOn = store.get('uo_snd', true), hintsOn = store.get('uo_hint', true);
 let idle = true;                // タイトル表示中（盤は見本で、まだ対局していない）
+let stampsOn = store.get('uo_stamp', true);
+let gfx = store.get('uo_gfx', matchMedia('(pointer:coarse)').matches ? 'mid' : 'high');
+let kifu = null;                // 棋譜 {start, moves:[{i,p}]}
+let replay = null;              // リプレイ中 {states, moves, k, timer}
+let clock = null;               // オンラインの持ち時間 {p, until, limit, offline}
+let rated = null;               // 直近の対局で変わったレート
+const STAMP_TEXT = ['よろしく！', 'ナイス！', 'うまい！', 'まいった…', '考え中…', 'ありがとう', 'GG', 'えっ!?'];
 let lastCfg = null, lastSeats = null;
 
 /* ---------- board meshes ---------- */
@@ -531,7 +594,7 @@ let shake = 0, camAway = false;
 function computeHome() {
   const a = innerWidth / innerHeight;
   camera.aspect = a;
-  const top = $('#hud').offsetHeight + 8, bot = $('#bar').offsetHeight + 8;
+  const top = $('#hud').offsetHeight + 8, bot = ($('#rbar').hidden ? $('#bar') : $('#rbar')).offsetHeight + 8;
   const free = Math.max(0.45, 1 - (top + bot) / innerHeight);
   const t = Math.tan(THREE.MathUtils.degToRad(home.fov / 2));
   // 縦は HUD と操作バーを除いた空きに、横は画面幅いっぱい（左右に少しだけ余白）に収める
@@ -571,6 +634,7 @@ const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.12, map
 points.frustumCulled = false; scene.add(points);
 let pHead = 0;
 function burst(P, color, count, speed) {
+  if (gfx === 'low') count = Math.round(count * 0.4);
   const c = new THREE.Color(color);
   for (let n = 0; n < count; n++) {
     const k = pHead; pHead = (pHead + 1) % PN;
@@ -657,12 +721,19 @@ function seatName(q) {
 const isMine = (q) => { const s = seats[q - 1]; return !!s && s.type === 'human' && (mode === 'local' || q - 1 === mySeat); };
 function turnHTML() {
   if (idle) return { cls: 'idle', html: 'メニューから対局を始めよう' };
+  if (replay) {
+    const k = replay.k, n = replay.states.length - 1;
+    if (!k) return { cls: 'idle', html: `リプレイ 0 / ${n}・はじめの盤面` };
+    const mv = replay.moves[k - 1];
+    return { cls: '', html: `<i class="dot" style="--c:${PCOL[mv.p]}"></i><span class="tx">リプレイ ${k} / ${n}</span><small>${esc(seatName(mv.p))} の手</small>` };
+  }
   if (G.over) return { cls: 'idle', html: '対局終了' };
   const q = thinking || G.turn, dot = `<i class="dot" style="--c:${PCOL[q]}"></i>`;
   if (thinking) return { cls: '', html: `${dot}<span class="tx">${esc(seatName(q))} が考え中</span><span class="spin"></span>` };
   const nm = seatName(q), mine = isMine(q);
   const who = mine && (nm === 'あなた' || q - 1 === mySeat) ? 'あなたの番' : nm + ' の番';
-  return { cls: mine ? 'mine' : '', html: `${dot}<span class="tx">${esc(who)}</span><small>置ける場所 ${E.moves(G, q).length}</small>` };
+  const clk = mode === 'online' ? '<small class="clk" id="tclk"></small>' : '';
+  return { cls: mine ? 'mine' : '', html: `${dot}<span class="tx">${esc(who)}</span><small>置ける場所 ${E.moves(G, q).length}</small>${clk}` };
 }
 let lastHudH = 0;
 function renderHUD() {
@@ -680,6 +751,8 @@ function renderHUD() {
   const t = turnHTML(), el = $('#turn');
   el.className = t.cls; el.innerHTML = t.html;
   $('#bUndo').disabled = idle || mode !== 'local' || !history.length;
+  const online = mode === 'online' && !!room && !replay;
+  $('#bUndo').hidden = online; $('#bStamp').hidden = !online;
   // HUD の高さが変わったら、盤が隠れないようにカメラを合わせ直す
   const hh = $('#hud').offsetHeight;
   document.documentElement.style.setProperty('--hudh', hh + 'px');
@@ -800,7 +873,7 @@ async function showMove(rec, before) {
 
 /* ---------- turns (local) ---------- */
 function canInput() {
-  if (!G || idle || G.over || busy || pendingMove) return false;
+  if (!G || idle || replay || G.over || busy || pendingMove) return false;
   const s = seats[G.turn - 1];
   if (!s || s.type !== 'human') return false;
   return mode === 'local' || G.turn - 1 === mySeat;
@@ -813,7 +886,7 @@ function startLocal(cfg, seatDefs) {
   lastCfg = cfg; lastSeats = seatDefs;
   G = E.createGame(cfg);
   seats = seatDefs.slice(0, G.n);
-  history = [];
+  history = []; kifu = { start: E.toData(G), moves: [] }; rated = null;
   closeSheets(); renderHUD(); buildBoard(); placeMarker(-1); renderHUD();
   nextTurn();
 }
@@ -842,6 +915,7 @@ async function commitLocal(i) {
   history.push(E.toData(G));
   const before = E.counts(G);
   const rec = E.play(G, i);
+  if (kifu) kifu.moves.push({ i, p: rec.p });
   await showMove(rec, before);
   renderHUD(); passNote(rec);
   if (G.over) { showResult(); return; }
@@ -891,6 +965,7 @@ function undo() {
   let d = history.pop();
   while (history.length && seats[d.turn - 1].type !== 'human') d = history.pop();
   G = E.fromData(d);
+  if (kifu) kifu.moves.length = history.length;
   closeSheets(); syncStones(); placeMarker(-1);
   nextTurn();
 }
@@ -907,13 +982,23 @@ function showResult() {
   $('#rAgain').hidden = mode === 'online' && !host;
   $('#rSetup').hidden = mode === 'online';
   $('#rNote').textContent = mode === 'online' && !host ? 'ホストが次の対局を始めるのを待っています。' : '';
+  $('#rReplay').hidden = !(kifu && kifu.moves.length);
+  renderRated();
   openSheet('result');
+}
+function renderRated() {
+  const el = $('#rRate');
+  if (!rated || mode !== 'online') { el.hidden = true; return; }
+  const d = rated.delta, st = rated.stats || {};
+  el.hidden = false;
+  el.innerHTML = `レート <b>${rated.rating}</b> <span class="${d >= 0 ? 'up' : 'dn'}">（${d >= 0 ? '+' : ''}${d}）</span>　${st.wins || 0}勝 ${st.losses || 0}敗${st.draws ? ' ' + st.draws + '分' : ''}`;
 }
 
 /* ---------- sheets ---------- */
 let confirmRes = null;
 function openSheet(id) {
   if (id !== 'net') lobby(false);
+  $('#stampPick').hidden = true;
   for (const s of document.querySelectorAll('.sheet')) s.hidden = s.id !== id;
   const f = $('#' + id).querySelector('button.primary, button');
   if (f && matchMedia('(pointer:fine)').matches) f.focus({ preventScroll: true });
@@ -935,7 +1020,8 @@ document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('cli
 document.querySelectorAll('.sheet').forEach((s) => s.addEventListener('click', (e) => { if (e.target === s && !['result', 'title', 'confirm'].includes(s.id)) closeSheets(); }));
 
 // setup form
-const setupState = store.get('uo_setup', { shape: 'square', size: 8, players: 2, walls: 0, chain: false, seats: ['h', 'c3', 'c3', 'c3', 'c3', 'c3'] });
+const setupState = store.get('uo_setup', { shape: 'square', size: 8, players: 2, walls: 0, chain: false, time: 30, seats: ['h', 'c3', 'c3', 'c3', 'c3', 'c3'] });
+if (![0, 15, 30, 60].includes(setupState.time)) setupState.time = 30;
 $('#sSize').innerHTML = [6, 8, 10, 12, 14, 16].map((v) => `<option value="${v}">${v}×${v}</option>`).join('');
 $('#sPlayers').innerHTML = [2, 3, 4, 5, 6].map((v) => `<option value="${v}">${v}人</option>`).join('');
 function renderSeats() {
@@ -953,17 +1039,17 @@ function renderSeats() {
 }
 function loadSetup() {
   $('#sShape').value = setupState.shape; $('#sSize').value = setupState.size; $('#sPlayers').value = setupState.players;
-  $('#sWalls').value = setupState.walls; $('#sChain').checked = setupState.chain;
+  $('#sWalls').value = setupState.walls; $('#sChain').checked = setupState.chain; $('#sTime').value = String(setupState.time);
   renderSeats();
 }
 function readSetup() {
   setupState.shape = $('#sShape').value; setupState.size = +$('#sSize').value; setupState.players = +$('#sPlayers').value;
-  setupState.walls = +$('#sWalls').value; setupState.chain = $('#sChain').checked;
+  setupState.walls = +$('#sWalls').value; setupState.chain = $('#sChain').checked; setupState.time = +$('#sTime').value;
   store.set('uo_setup', setupState);
   const n = setupState.players, need = n + 4 + ((n + 4) % 2), size = Math.max(setupState.size, need);
   const cfg = { shape: setupState.shape, w: size, h: size, players: n, walls: setupState.walls, chain: setupState.chain };
   const sd = setupState.seats.slice(0, n).map((v) => (v === 'h' ? { type: 'human' } : { type: 'cpu', level: +v.slice(1) }));
-  return { cfg, seats: sd };
+  return { cfg, seats: sd, time: setupState.time };
 }
 $('#sPlayers').addEventListener('change', renderSeats);
 $('#sSize').addEventListener('change', renderSeats);
@@ -980,6 +1066,24 @@ function renderFx() {
   for (const b of document.querySelectorAll('#oFx button')) b.setAttribute('aria-pressed', String(b.dataset.fx === fxMode));
   $('#oSnd').setAttribute('aria-pressed', String(soundOn));
   $('#oHint').setAttribute('aria-pressed', String(hintsOn));
+  $('#oStamp').setAttribute('aria-pressed', String(stampsOn));
+  for (const b of document.querySelectorAll('#oGfx button')) b.setAttribute('aria-pressed', String(b.dataset.gfx === gfx));
+}
+$('#oGfx').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; gfx = b.dataset.gfx; store.set('uo_gfx', gfx); renderFx(); applyGfx(); });
+$('#oStamp').addEventListener('click', () => { stampsOn = !stampsOn; store.set('uo_stamp', stampsOn); renderFx(); });
+// 画質: 高 = 2倍解像度・影2048 / 標準 = 1.5倍・影1024 / 軽量 = 1倍・影なし・火花少なめ
+function applyGfx() {
+  const dpr = window.devicePixelRatio || 1;
+  renderer.setPixelRatio(gfx === 'high' ? Math.min(dpr, 2) : gfx === 'mid' ? Math.min(dpr, 1.5) : 1);
+  const shadows = gfx !== 'low', size = gfx === 'high' ? 2048 : 1024;
+  if (renderer.shadowMap.enabled !== shadows || sun.shadow.mapSize.x !== size) {
+    renderer.shadowMap.enabled = shadows; sun.castShadow = shadows;
+    sun.shadow.mapSize.set(size, size);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+    scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; }); });
+    stoneMat.forEach((m) => { if (m) m.needsUpdate = true; });
+  }
+  fitCamera(false);
 }
 $('#oFx').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; fxMode = b.dataset.fx; store.set('uo_fx', fxMode); renderFx(); });
 $('#oSnd').addEventListener('click', () => { soundOn = !soundOn; store.set('uo_snd', soundOn); renderFx(); if (soundOn) { audio(); sClick(); } });
@@ -998,6 +1102,93 @@ $('#rAgain').addEventListener('click', () => { if (mode === 'online') { send({ t
 $('#rSetup').addEventListener('click', () => { loadSetup(); openSheet('setup'); });
 $('#rView').addEventListener('click', closeSheets);
 $('#rHome').addEventListener('click', goTitle);
+$('#rReplay').addEventListener('click', startReplay);
+
+/* ---------- リプレイ ---------- */
+function startReplay() {
+  if (!kifu || !kifu.moves.length) return;
+  const states = [kifu.start], g = E.fromData(kifu.start);
+  for (const mv of kifu.moves) { E.play(g, mv.i); states.push(E.toData(g)); }
+  replay = { states, moves: kifu.moves.slice(), k: 0, timer: 0 };
+  closeSheets(); hideHints(); hover.visible = false;
+  $('#bar').hidden = true; $('#rbar').hidden = false;
+  fitCamera(false);
+  replayGo(0, false);
+}
+function replayGo(k, animate) {
+  const r = replay;
+  if (!r) return;
+  if (busy) { r.pending = [k, animate]; skipping = true; return; } // 演出中の操作は、早送りしてから実行
+  const n = r.states.length - 1;
+  k = Math.max(0, Math.min(n, k));
+  if (animate && k === r.k + 1) {
+    G = E.fromData(r.states[r.k]); syncStones();
+    const before = E.counts(G), res = E.play(G, r.moves[r.k].i);
+    r.k = k; renderReplayBar();
+    const saved = fxMode; if (fxMode === 'full') fxMode = 'short'; // 見返すときは演出を短めに
+    showMove(res, before).then(() => {
+      fxMode = saved;
+      if (!replay) return;
+      renderHUD();
+      if (replay.pending) { const [pk, pa] = replay.pending; replay.pending = null; replayGo(pk, pa); }
+    });
+    return;
+  }
+  r.k = k;
+  G = E.fromData(r.states[k]); syncStones();
+  placeMarker(k > 0 ? r.moves[k - 1].i : -1);
+  renderHUD(); renderReplayBar();
+}
+function renderReplayBar() {
+  const r = replay; if (!r) return;
+  const n = r.states.length - 1;
+  $('#rpCount').textContent = `${r.k} / ${n}`;
+  $('#rpFirst').disabled = $('#rpPrev').disabled = r.k === 0;
+  $('#rpNext').disabled = $('#rpLast').disabled = r.k === n;
+  $('#rpPlay').innerHTML = r.timer ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>' : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z"/></svg>';
+  $('#rpPlay').setAttribute('aria-label', r.timer ? '一時停止' : '再生');
+}
+function replayStop() { if (replay && replay.timer) { clearInterval(replay.timer); replay.timer = 0; renderReplayBar(); } }
+function replayPlay() {
+  const r = replay; if (!r) return;
+  if (r.timer) return replayStop();
+  if (r.k >= r.states.length - 1) replayGo(0, false);
+  r.timer = setInterval(() => {
+    if (!replay) return;
+    if (busy) return;
+    if (replay.k >= replay.states.length - 1) return replayStop();
+    replayGo(replay.k + 1, true);
+  }, 250);
+  renderReplayBar();
+}
+function endReplay(silent) {
+  const r = replay; if (!r) return;
+  replayStop();
+  G = E.fromData(r.states[r.states.length - 1]);
+  replay = null;
+  syncStones(); placeMarker(r.moves.length ? r.moves[r.moves.length - 1].i : -1);
+  $('#rbar').hidden = true; $('#bar').hidden = false;
+  fitCamera(false); renderHUD();
+  if (!silent && G.over) showResult();
+}
+function kifuText() {
+  const d = kifu.start, w = d.w;
+  const at = (i) => String.fromCharCode(97 + (i % w)) + (Math.floor(i / w) + 1);
+  const line = kifu.moves.map((m) => (d.n > 2 ? PNAME[m.p] : '') + at(m.i)).join(' ');
+  return `UltraOSERO ${d.w}×${d.h} ${d.n}人\n${line}`;
+}
+$('#rpFirst').addEventListener('click', () => { replayStop(); replayGo(0, false); });
+$('#rpPrev').addEventListener('click', () => { replayStop(); replayGo(replay.k - 1, false); });
+$('#rpNext').addEventListener('click', () => { replayStop(); replayGo(replay.k + 1, true); });
+$('#rpLast').addEventListener('click', () => { replayStop(); replayGo(replay.states.length - 1, false); });
+$('#rpPlay').addEventListener('click', replayPlay);
+$('#rpClose').addEventListener('click', () => endReplay(false));
+$('#rpCopy').addEventListener('click', () => {
+  const t = kifuText();
+  const done = () => toast('棋譜をコピーしました');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, () => window.prompt('棋譜', t));
+  else window.prompt('棋譜', t);
+});
 renderFx();
 
 /* ---------- input ---------- */
@@ -1012,7 +1203,7 @@ function cellAt(cx, cy) {
   if (x < 0 || y < 0 || x >= W || y >= H) return -1;
   return y * W + x;
 }
-canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; audio(); });
+canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; audio(); $('#stampPick').hidden = true; });
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt) return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]); downAt = null;
@@ -1036,10 +1227,12 @@ canvas.addEventListener('pointermove', (e) => {
   } else { hover.visible = false; canvas.style.cursor = ''; }
 });
 canvas.addEventListener('pointerleave', () => { hover.visible = false; });
-addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheets(); if ((e.key === ' ' || e.key === 'Enter') && busy) skipping = true; });
+addEventListener('keydown', (e) => {
+  if (replay && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { replayStop(); replayGo(replay.k + (e.key === 'ArrowRight' ? 1 : -1), e.key === 'ArrowRight'); return; }
+  if (e.key === 'Escape') closeSheets(); if ((e.key === ' ' || e.key === 'Enter') && busy) skipping = true; });
 
 /* ---------- online ---------- */
-let ws = null, room = null, mySeat = -1, myToken = store.get('uo_token', null), pumping = false, lobbyOn = false;
+let ws = null, room = null, mySeat = -1, myToken = store.get('uo_token', null), pumping = false, lobbyOn = false, welcomed = false;
 const netQueue = [];
 $('#nName').value = store.get('uo_name', '');
 const myName = () => ($('#nName').value.trim() || 'プレイヤー').slice(0, 12);
@@ -1061,7 +1254,7 @@ function connect() {
     s.onopen = () => { opened = true; send({ t: 'hello', token: myToken, name: myName() }); res(); };
     s.onerror = () => { if (!opened) rej(new Error('ws')); };
     s.onclose = () => {
-      ws = null; lobbyOn = false;
+      ws = null; lobbyOn = false; welcomed = false;
       if (!opened) { rej(new Error('ws')); return; }
       if (room) { toast('接続が切れました。再接続しています…'); setTimeout(() => connect().catch(() => {}), 2000); }
     };
@@ -1085,19 +1278,19 @@ $('#nCreate').addEventListener('click', () => {
     if (k > 0) r.seats[k] = { type: 'human' };
   }
   send({ t: 'hello', token: myToken, name: myName() });
-  send({ t: 'create', cfg: r.cfg, seats: r.seats, public: false });
+  send({ t: 'create', cfg: r.cfg, seats: r.seats, public: false, time: r.time });
 });
 $('#nCreatePub').addEventListener('click', () => {
   if (!needWs()) return;
   const r = readSetup();
   send({ t: 'hello', token: myToken, name: myName() });
-  send({ t: 'create', cfg: r.cfg, seats: r.seats, public: true });
+  send({ t: 'create', cfg: r.cfg, seats: r.seats, public: true, time: r.time });
 });
 $('#nQuick').addEventListener('click', () => {
   if (!needWs()) return;
   const r = readSetup();
   send({ t: 'hello', token: myToken, name: myName() });
-  send({ t: 'quick', cfg: r.cfg, seats: r.seats });
+  send({ t: 'quick', cfg: r.cfg, seats: r.seats, time: r.time });
 });
 // 一覧から参加 / 観戦
 $('#nRooms').addEventListener('click', (e) => {
@@ -1126,6 +1319,45 @@ $('#nJoin').addEventListener('click', () => { if (!needWs()) return; send({ t: '
 $('#nStart').addEventListener('click', () => send({ t: 'start' }));
 function netLeave() { send({ t: 'leave' }); room = null; mySeat = -1; renderLobby(); }
 $('#nLeave').addEventListener('click', netLeave);
+// ランキング
+async function openRank() {
+  openSheet('rankSheet');
+  $('#rkMe').textContent = '読み込み中…'; $('#rkList').innerHTML = '';
+  try {
+    await connect();
+    if (!welcomed) send({ t: 'hello', token: myToken, name: myName() });
+    send({ t: 'stats' });
+  } catch (e) { $('#rkMe').textContent = 'サーバーに接続できません。'; }
+}
+function renderRank(m) {
+  const me = m.me;
+  $('#rkMe').innerHTML = me
+    ? `あなた（${esc(me.name)}）　<b>${me.rating}</b>　${me.rank}位 / ${m.total}人<br>${me.games}戦 ${me.wins}勝 ${me.losses}敗${me.draws ? ' ' + me.draws + '分' : ''}`
+    : 'まだ記録がありません。人間どうしのオンライン対局で記録されます。';
+  $('#rkList').innerHTML = m.top.length
+    ? m.top.map((x) => `<li><em>${x.rank}</em>${esc(x.name)}<small>${x.wins}勝${x.losses}敗${x.draws ? x.draws + '分' : ''}</small><b>${x.rating}</b></li>`).join('')
+    : '<li>まだだれも記録がありません</li>';
+}
+$('#nRank').addEventListener('click', openRank);
+$('#rkBack').addEventListener('click', openNet);
+// スタンプ
+$('#stampPick').innerHTML = STAMP_TEXT.map((t, k) => `<button data-k="${k}">${esc(t)}</button>`).join('');
+$('#bStamp').addEventListener('click', () => { $('#stampPick').hidden = !$('#stampPick').hidden; });
+$('#stampPick').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-k]'); if (!b) return;
+  send({ t: 'stamp', k: +b.dataset.k });
+  $('#stampPick').hidden = true;
+  $('#bStamp').disabled = true; setTimeout(() => { $('#bStamp').disabled = false; }, 1500); // 連打しない
+});
+function showStamp(m) {
+  if (!stampsOn) return;
+  const box = $('#stamps');
+  while (box.children.length >= 3) box.firstChild.remove();
+  const el = document.createElement('div'); el.className = 'stamp';
+  el.innerHTML = `<i class="dot" style="--c:${m.p ? PCOL[m.p] : '#666'}"></i><span>${esc(m.name || '')}</span><b>${esc(STAMP_TEXT[m.k] || '')}</b>`;
+  box.appendChild(el); setTimeout(() => el.remove(), 2900);
+  if (!skipping && audio()) { const t = ac.currentTime; tone(t, 'sine', 880, 1320, 0.09, 0.12); }
+}
 function renderLobby() {
   $('#nForm').hidden = !!room; $('#nLobby').hidden = !room;
   if (!room) { if (!$('#net').hidden) lobby(true); return; }
@@ -1144,21 +1376,29 @@ function renderLobby() {
 }
 function onNet(m) {
   switch (m.t) {
-    case 'welcome': myToken = m.token; store.set('uo_token', m.token); break;
+    case 'welcome': myToken = m.token; welcomed = true; store.set('uo_token', m.token); break;
     case 'room':
       room = m.room; mySeat = m.you;
       seats = room.seats.map((s) => ({ type: s.type, level: s.level, name: s.name }));
       renderLobby(); if (mode === 'online') renderHUD();
       break;
     case 'state':
+      if (replay) endReplay(true);
       mode = 'online'; gameToken++; thinking = 0; netQueue.length = 0; pendingMove = false; history = []; idle = false;
       G = E.fromData(m.data);
+      kifu = { start: E.toData(G), moves: [] }; clock = null; if (!G.over) rated = null;
       closeSheets(); renderHUD(); buildBoard(); placeMarker(-1); renderHUD();
       if (G.over) showResult(); else showHints();
       break;
     case 'move': netQueue.push(m); pump(); break;
     case 'left': room = null; mySeat = -1; renderLobby(); break;
     case 'rooms': renderRooms(m.rooms || []); break;
+    case 'clock': clock = m.ms ? { p: m.p, until: performance.now() + m.ms, limit: m.limit || m.ms, offline: !!m.offline } : null; clkLast = 0; break;
+    case 'auto': toast(seatName(m.p) + ' の時間切れ。CPUが代わりに打ちました'); break;
+    case 'afk': toast(seatName(m.p) + ' は応答がないため、CPUに交代しました'); break;
+    case 'stamp': showStamp(m); break;
+    case 'stats': renderRank(m); break;
+    case 'rated': rated = m; if (!$('#result').hidden) renderRated(); break;
     case 'error': pendingMove = false; toast(m.msg); if (G && mode === 'online') showHints(); break;
   }
 }
@@ -1171,6 +1411,8 @@ async function pump() {
     if (netQueue.length > 1) skipping = true; // falling behind: fast-forward
     const before = E.counts(G);
     const rec = E.play(G, m.i);
+    if (kifu) kifu.moves.push({ i: m.i, p: m.p });
+    if (clock && clock.p === m.p) clock = null;
     if (m.p - 1 === mySeat) pendingMove = false;
     await showMove(rec, before);
     renderHUD(); passNote(rec);
@@ -1180,9 +1422,25 @@ async function pump() {
 }
 
 /* ---------- loop ---------- */
-let last = performance.now();
+let last = performance.now(), clkLast = 0, fpsAcc = 0, fpsN = 0, fpsWarned = false;
+function updateClock(now) {
+  if (now - clkLast < 200) return;
+  clkLast = now;
+  const el = document.getElementById('tclk'); if (!el) return;
+  if (!clock || !G || G.over || clock.p !== G.turn || busy) { el.textContent = ''; return; }
+  const rem = Math.max(0, clock.until - now), sec = Math.ceil(Math.min(rem, clock.limit) / 1000);
+  el.textContent = (clock.offline ? '切断中 ' : '残り ') + sec + '秒';
+  el.className = 'clk' + (sec <= 10 ? ' warn' : '');
+}
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const raw = (now - last) / 1000;
+  const dt = Math.min(0.05, raw); last = now;
+  updateClock(now);
+  // 重い端末には一度だけ軽量モードをすすめる
+  if (!fpsWarned && gfx !== 'low' && !idle && !busy && document.visibilityState === 'visible' && raw < 1) {
+    fpsAcc += raw; fpsN++;
+    if (fpsN >= 120) { if (fpsAcc / fpsN > 0.045) { fpsWarned = true; toast('動きが重いときは 設定 → 画質 → 軽量 がおすすめです'); } fpsAcc = 0; fpsN = 0; }
+  }
   stepTasks(dt);
   updateParticles(dt * timeScale);
   if (burstLight.intensity > 0) burstLight.intensity = Math.max(0, burstLight.intensity - dt * 30);
@@ -1198,6 +1456,7 @@ addEventListener('resize', () => fitCamera(false));
 // 起動: 前回の設定（無ければ 標準8×8・あなた vs CPU つよい）の盤を見本に出して、タイトルを表示
 function readSetupDefaults() { loadSetup(); return readSetup(); }
 const first = readSetupDefaults();
+applyGfx();
 previewBoard(first.cfg, first.seats);
 showTitle();
 requestAnimationFrame(frame);
