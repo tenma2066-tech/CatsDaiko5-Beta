@@ -346,14 +346,37 @@ def _cached_gacha_ids(f, ttl=600):
     return ids
 
 
+_PAYTYPE_FILE = os.path.join(PROJECT_ROOT, "premium_plus_paytype.json")
+# 試す順番（コイン払いの 1 は除く）。どれがメダル払いかは試して確かめる
+PAYTYPE_CANDIDATES = (2, 3, 4, 5, 0, 6, 7)
+
+
 def premium_plus_paytype():
-    """プレミアムBOX+（メダルで引く）の支払い方法の番号。設定が無ければ None（＝実行しない）。
-    値はゲームの通信で確かめたものだけを入れる（推測で入れるとコインやルビーで引かれるおそれがある）。"""
+    """プレミアムBOX+（メダルで引く）の支払い方法の番号。
+    1) 環境変数 TSUM_PREMIUM_PLUS_PAYTYPE / 設定 premium_box_plus_paytype
+    2) 以前の実行で確かめて保存した番号
+    どちらも無ければ None（＝実行時に試して確かめる）。"""
     raw = os.environ.get("TSUM_PREMIUM_PLUS_PAYTYPE") or CONFIG.get("premium_box_plus_paytype")
+    if raw in (None, ""):
+        try:
+            with open(_PAYTYPE_FILE, encoding="utf-8") as fh:
+                raw = json.load(fh).get("paytype")
+        except (OSError, ValueError):
+            raw = None
     try:
         return int(raw) if raw not in (None, "") else None
     except (TypeError, ValueError):
         return None
+
+
+def _save_premium_plus_paytype(pt, gachaid):
+    try:
+        tmp = _PAYTYPE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"paytype": int(pt), "gachaid": int(gachaid), "found_at": time.strftime("%Y-%m-%d %H:%M:%S")}, fh)
+        os.replace(tmp, _PAYTYPE_FILE)
+    except OSError as e:
+        _dbg(f"[premium_plus] paytype 保存失敗: {e}")
 
 
 def _is_box_plus_name(text):
@@ -743,10 +766,37 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
         if not gacha_plus:
             return None, "プレミアムBOX+の情報をゲームから取得できませんでした。少し待ってからもう一度お試しください。"
         paytype = premium_plus_paytype()
+        probed = 0
+        if paytype is None and f.gacha_compflg(int(gacha_plus)) == 1:
+            return {"status": "already_complete", "draws": 0}, ("プレミアムBOX+はすでに最後まで引き終わっています。"
+                                                               "\n完了しました。\nまたのご利用をお待ちしております。")
         if paytype is None:
-            _dbg(f"[premium_plus] メダル払いの paytype が未設定のため中止 gachaid={gacha_plus} "
+            _dbg(f"[premium_plus] paytype 未確定 → 単発で試して確かめる gachaid={gacha_plus} "
                  f"row={(_GACHA_CACHE.get('ids') or {}).get('premium_plus_row')}")
-            return None, "プレミアムBOX+はまだ準備中です（支払い方法の設定がありません）。"
+            if progress:
+                progress.update(act_stage, "プレミアムBOX+の支払い方法（メダル）を確かめています...", force=True)
+            pr = f.probe_medal_paytype(int(gacha_plus), PAYTYPE_CANDIDATES, log=_dbg)
+            _dbg(f"[premium_plus] probe → {pr}")
+            pst = pr.get("status")
+            if pst == "found":
+                paytype = int(pr["paytype"])
+                probed = 1
+                _save_premium_plus_paytype(paytype, gacha_plus)
+                _dbg(f"[premium_plus] メダル払いの paytype={paytype} を確認・保存しました")
+            elif pst == "has_ruby":
+                return None, ("プレミアムBOX+の支払い方法をまだ確かめられていません。"
+                              "最初の1回は、ルビーを1個も持っていないアカウントで実行してください"
+                              "（ルビーで引かれないようにするため）。")
+            elif pst == "spent_ruby":
+                return None, ("確認中にルビーで1回引かれた可能性があるため止めました。"
+                              "お手数ですがお問い合わせください。")
+            elif pst == "network_error":
+                return None, "接続が不安定なため実行できませんでした。少し待ってからもう一度お試しください。"
+            elif pst == "api_error":
+                return None, describe_tsum_api_failure("プレミアムBOX+", pr.get("resp"), f, missing_data=True)
+            else:
+                return None, ("プレミアムBOX+をメダルで引く方法が見つかりませんでした"
+                              "（メダルが足りないか、まだ対応していない支払い方法です）。")
         if progress:
             progress.update(act_stage, "プレミアムBOX+をメダルで引いています...", force=True)
 
@@ -757,7 +807,9 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
 
         res = f.draw_with_medals(int(gacha_plus), paytype, log=_dbg, on_progress=_on_plus_p)
         st = res.get("status") if isinstance(res, dict) else ""
-        total = int(res.get("draws") or 0) if isinstance(res, dict) else 0
+        total = (int(res.get("draws") or 0) if isinstance(res, dict) else 0) + probed
+        if isinstance(res, dict):
+            res["draws"] = total
         _dbg(f"[premium_plus] gachaid={gacha_plus} paytype={paytype} status={st} detail={res}")
         left = res.get("medal") if isinstance(res, dict) else None
         left_s = f"\n残りメダル: {left:,}枚" if isinstance(left, int) else ""

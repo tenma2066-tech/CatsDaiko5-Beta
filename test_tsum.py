@@ -955,12 +955,18 @@ class PremiumBoxPlus(unittest.TestCase):
     def _core(self):
         return NewMenus._core()
 
-    def _forge(self, c, rows, result):
+    def _forge(self, c, rows, result, probe=None):
         seen = {"ids": [], "paytype": None}
+        probe = probe or {"status": "not_found", "tried": []}
 
         class FakeForge:
             def get_mast(self_):
                 return {"retcode": 0, "gachamst": rows}
+            def gacha_compflg(self_, gid, info=None):
+                return 0
+            def probe_medal_paytype(self_, gid, cands, **kw):
+                seen["probe"] = list(cands)
+                return dict(probe)
             def draw_with_medals(self_, gid, paytype, **kw):
                 seen["ids"].append(gid); seen["paytype"] = paytype
                 return dict(result)
@@ -971,20 +977,11 @@ class PremiumBoxPlus(unittest.TestCase):
         with patch.dict(os.environ, {"TSUM_PREMIUM_PLUS_PAYTYPE": paytype}):
             return c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
 
-    def test_menu_only_when_paytype_is_set(self):
-        import importlib
-        try:
-            with patch.dict(os.environ, {"TSUM_PREMIUM_PLUS_PAYTYPE": ""}):
-                importlib.reload(T)
-                self.assertNotIn("tsum_premium_plus", T.MENUS)
-            with patch.dict(os.environ, {"TSUM_PREMIUM_PLUS_PAYTYPE": "3"}):
-                importlib.reload(T)
-                self.assertIn("tsum_premium_plus", T.MENUS)
-                self.assertIn("tsum_premium_plus", pricing.PRICES)
-                with patch.object(T, "_core", fake_core()):
-                    self.assertEqual(T._forge_kwargs("tsum_premium_plus", {}), {"gacha_plus": 0})
-        finally:
-            importlib.reload(T)
+    def test_menu_price_and_kwargs(self):
+        self.assertIn("tsum_premium_plus", T.MENUS)
+        self.assertIn("tsum_premium_plus", pricing.PRICES)
+        with patch.object(T, "_core", fake_core()):
+            self.assertEqual(T._forge_kwargs("tsum_premium_plus", {}), {"gacha_plus": 0})
 
     def test_name_match(self):
         c = self._core()
@@ -1003,13 +1000,31 @@ class PremiumBoxPlus(unittest.TestCase):
         self.assertIn("最後まで引きました（120連）", msg)
         self.assertIn("残りメダル: 5枚", msg)
 
-    def test_no_paytype_does_not_draw(self):
+    def _no_saved(self, c, tmp):
+        return patch.object(c, "_PAYTYPE_FILE", os.path.join(tmp, "pt.json"))
+
+    def test_probe_finds_paytype_saves_it_and_counts_the_draw(self):
+        import tempfile
         c = self._core()
-        f, seen = self._forge(c, [{"gachaid": 64, "type": 64}], {"status": "complete", "draws": 1})
-        res, msg = self._run(c, f, paytype="")
-        self.assertIsNone(res)
-        self.assertEqual(seen["ids"], [])
-        self.assertIn("準備中", msg)
+        with tempfile.TemporaryDirectory() as tmp, self._no_saved(c, tmp):
+            f, seen = self._forge(c, [{"gachaid": 64, "type": 64}], {"status": "stopped", "draws": 20, "medal": 0},
+                                  probe={"status": "found", "paytype": 4, "medal": 90, "tried": []})
+            res, msg = self._run(c, f, paytype="")
+            self.assertEqual(seen["paytype"], 4)
+            self.assertNotIn(1, seen["probe"])          # コイン払いの 1 は試さない
+            self.assertIn("引けるところまで引きました（21連）", msg)
+            self.assertEqual(c.premium_plus_paytype(), 4)   # 次からは保存した番号を使う
+
+    def test_probe_refuses_on_accounts_with_rubies(self):
+        import tempfile
+        c = self._core()
+        with tempfile.TemporaryDirectory() as tmp, self._no_saved(c, tmp):
+            f, seen = self._forge(c, [{"gachaid": 64, "type": 64}], {"status": "complete", "draws": 1},
+                                  probe={"status": "has_ruby", "tried": []})
+            res, msg = self._run(c, f, paytype="")
+            self.assertIsNone(res)
+            self.assertEqual(seen["ids"], [])
+            self.assertIn("ルビーを1個も持っていない", msg)
 
     def test_type_fallback_and_not_running(self):
         c = self._core()
@@ -1083,6 +1098,26 @@ class DrawWithMedals(unittest.TestCase):
         r = f.draw_with_medals(9, 1, log=None)
         self.assertEqual(r["status"], "wrong_currency")
         self.assertEqual(st["calls"], 1)
+
+    def test_probe(self):
+        f, st = self._forge(medal=1000, cost=100, stock=100)
+        st["ruby"] = 0
+        # 2 はコインで払われる番号、3 はメダル、という偽のサーバー
+        orig = f._draw
+        def single(gid, pt):
+            if pt == 2:
+                st["coin"] -= 30
+                return dict(retcode=0, **f._ui())
+            if pt == 3:
+                return orig(1)
+            return {"retcode": 99}
+        f.gacha_single = single
+        f.probe_medal_paytype = NewMenus._core().Forge.probe_medal_paytype.__get__(f)
+        r = f.probe_medal_paytype(9, (5, 2, 3), log=None)
+        self.assertEqual((r["status"], r["paytype"], r["medal"]), ("found", 3, 900))
+        self.assertEqual([t["result"] for t in r["tried"]], ["rejected", "drawn", "drawn"])
+        st["ruby"] = 1
+        self.assertEqual(f.probe_medal_paytype(9, (3,), log=None)["status"], "has_ruby")
 
     def test_stops_after_one_draw_if_rubies_were_spent(self):
         f, st = self._forge(medal=10**6, cost=100, stock=100, ruby_cost=1)

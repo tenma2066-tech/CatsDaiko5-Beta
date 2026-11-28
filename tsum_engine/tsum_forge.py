@@ -898,6 +898,44 @@ class Forge:
         ui = (resp.get("userinfo") if isinstance(resp, dict) else None) or {}
         return {k: ui.get(k) for k in cls._WALLET_KEYS}
 
+    def probe_medal_paytype(self, gachaid, candidates, log=print):
+        """メダル払いの支払い方法の番号を、単発を1回ずつ引いて確かめる。
+        ルビー（無償・有償とも）が0枚のアカウントでだけ行う（ルビー払いの番号に当たっても、
+        引けずに断られるだけにするため）。戻り値は {"status": ..., "paytype": ..., "tried": [...]}。
+          found       … メダルだけが減った番号が見つかった（その1回は引けている）
+          has_ruby    … ルビーを持っているので試さなかった
+          not_found   … どの番号でもメダル払いにならなかった"""
+        info = self.get_info()
+        if not isinstance(info, dict):
+            return {"status": "network_error", "tried": []}
+        w = self._wallet(info)
+        if w["bmedal"] is None:
+            return {"status": "api_error", "resp": info, "tried": []}
+        if (w["bruby"] or 0) > 0 or (w["pruby"] or 0) > 0:
+            return {"status": "has_ruby", "tried": [], "wallet": w}
+        tried = []
+        for pt in candidates:
+            before = w
+            r = self.gacha_single(gachaid, pt)
+            if r is None:
+                return {"status": "network_error", "tried": tried}
+            if not (isinstance(r, dict) and r.get("retcode") == 0):
+                tried.append({"paytype": pt, "result": "rejected", "retcode": r.get("retcode") if isinstance(r, dict) else None})
+                continue
+            after = self._wallet(r)
+            if after["bmedal"] is None:
+                after = self._wallet(self.get_info())
+            spent = {k: (before[k] or 0) - (after[k] or 0) for k in self._WALLET_KEYS}
+            tried.append({"paytype": pt, "result": "drawn", "spent": spent})
+            if log:
+                log(f"  paytype={pt} で単発が引けた spent={spent}")
+            if spent["bmedal"] > 0 and spent["bcoin"] <= 0 and spent["bruby"] <= 0 and spent["pruby"] <= 0:
+                return {"status": "found", "paytype": pt, "tried": tried, "medal": after["bmedal"]}
+            if spent["bruby"] > 0 or spent["pruby"] > 0:
+                return {"status": "spent_ruby", "tried": tried}
+            w = after
+        return {"status": "not_found", "tried": tried}
+
     def draw_with_medals(self, gachaid, paytype, max_draws=5000, sleep_s=0, log=print, on_progress=None):
         """メダルで引くガチャを、引けなくなるまで引く（10連 → 断られたら単発 → 断られたら終わり）。
         最初に引けた回で、減ったのがメダルだけかを確かめる。コインやルビーが減った・メダルが減らない

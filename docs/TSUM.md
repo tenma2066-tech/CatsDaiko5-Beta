@@ -32,7 +32,7 @@
 | `tsum_tsum_lv` | ツムレベルMAX（セット中のマイツム） | — | 50円 |
 | `tsum_box` | セレクトBOX完売 | — | 100円 |
 | `tsum_premium` | プレミアム完売 | — | 100円 |
-| `tsum_premium_plus` | プレミアムBOX+（メダルで引けるところまで。`.env` に `TSUM_PREMIUM_PLUS_PAYTYPE` があるときだけ出る） | — | 100円 |
+| `tsum_premium_plus` | プレミアムBOX+（メダルで引けるところまで。支払い方法の番号は最初の実行で、ルビー0個のアカウントで単発を引いて確かめ、保存する） | — | 100円 |
 | `tsum_score` | スコア指定 | 0〜2,147,483,647 | 50円 |
 | `tsum_score_max` | スコアMAX | — | 50円 |
 | `tsum_medal` | メダル指定 | 1〜100,000,000（上限1億） | 50円 |

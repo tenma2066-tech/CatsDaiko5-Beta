@@ -28,8 +28,8 @@ services:
       REVIEWS_ENABLED: ${REVIEWS_ENABLED:-}
       # ぷにぷにの長時間周回（回し放題・50周以上）専用の実行枠の数。既定 3。0 で、ふつうの枠を使う。
       LONG_JOB_SLOTS: ${LONG_JOB_SLOTS:-3}
-      # ツムツムの「プレミアムBOX+」（メダルで引く）。ゲームの通信で確かめた支払い方法の番号を .env に
-      # TSUM_PREMIUM_PLUS_PAYTYPE=<番号> と書いたときだけメニューに出る（空なら出ない）。
+      # ツムツムの「プレミアムBOX+」（メダルで引く）の支払い方法の番号。空なら最初の実行で確かめて保存する。
+      # 分かっているなら .env に TSUM_PREMIUM_PLUS_PAYTYPE=<番号> と書く（こちらが優先）。
       TSUM_PREMIUM_PLUS_PAYTYPE: ${TSUM_PREMIUM_PLUS_PAYTYPE:-}
       TSUM_PREMIUM_PLUS_GACHA_ID: ${TSUM_PREMIUM_PLUS_GACHA_ID:-0}
       GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}

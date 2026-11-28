@@ -104,11 +104,10 @@ MENUS = {
                           "desc": "新しいゲストアカウントを作り、引き継ぎ情報を発行します", "order": 70},
 }
 
-# プレミアムBOX+（メダルで引く）。支払い方法の番号（TSUM_PREMIUM_PLUS_PAYTYPE）が設定されたときだけメニューに出す
-if os.environ.get("TSUM_PREMIUM_PLUS_PAYTYPE", "").strip():
-    MENUS["tsum_premium_plus"] = {"label": "プレミアムBOX+", "price": "tsum_premium_plus",
-                                  "desc": "開催中のプレミアムBOX+を、メダルで引けるところまで引きます",
-                                  "order": 32}
+# プレミアムBOX+（メダルで引く）。支払い方法の番号が分かっていなければ、最初の実行で単発を引いて確かめる
+MENUS["tsum_premium_plus"] = {"label": "プレミアムBOX+", "price": "tsum_premium_plus",
+                              "desc": "開催中のプレミアムBOX+を、メダルで引けるところまで引きます",
+                              "order": 32}
 
 # 1つの注文で選べないもの（ゲスト生成は新規アカウントを作るメニューなので単独）
 SOLO_MENUS = ("tsum_guest_create",)
