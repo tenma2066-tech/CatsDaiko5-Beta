@@ -546,6 +546,21 @@ def reissue_orphan(idx: int):
     return new_id, info, ""
 
 
+_DEBUG_PATH = None
+
+
+def _server_debug(text: str) -> None:
+    """内部ログをサーバーの tsum_debug.log に追記する（お客さんには見せない）。"""
+    global _DEBUG_PATH
+    try:
+        if _DEBUG_PATH is None:
+            _DEBUG_PATH = os.path.join(engine_dir(), "tsum_debug.log")
+        with open(_DEBUG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + str(text) + "\n")
+    except Exception:  # noqa: BLE001  ログが書けなくても本処理は止めない
+        pass
+
+
 def run_order(mode: str, login_id: str, password: str, menus, qty: dict,
               progress=None, log=None, captcha=None) -> dict:
     """ツムツム代行1件を実行する。例外は投げず、必ず結果を dict で返す。
@@ -559,7 +574,9 @@ def run_order(mode: str, login_id: str, password: str, menus, qty: dict,
     out = {"ok": False, "error": "", "lines": [], "done": 0,
            "transfer": None, "confirm": None, "moved": False}
     c = core()
-    c.DEBUG_HOOK = log
+    # 内部の細かいログ（[premium_plus] / [gs v7] など）はサーバーの控えだけに出す。
+    # お客さんの状況欄には出さない（出していたのは不具合）。進み具合は progress / log で別に出している。
+    c.DEBUG_HOOK = _server_debug
     menus = sort_menus(menus)
     create_only = menus == ["tsum_guest_create"]
     if mode == "new" or create_only:

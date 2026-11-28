@@ -891,7 +891,9 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
         tsum_candidates = [tsumid]
 
     bheart, pheart, total_heart = heart_state_from_info(_info)
-    if heart_info_is_reliable(_info) and total_heart < 1:
+    # メダル付与は、ハート0でも実際に通ることがある（お客さんの環境で確認）。
+    # 先回りで断らず、実際に gameStart を試して、本当に拒否されたときだけハート不足として扱う。
+    if heart_info_is_reliable(_info) and total_heart < 1 and medal is None:
         return None, "ハートが足りないため開始できませんでした。ハートが回復してから、もう一度お試しください。"
     ht_candidates = hearttype_candidates_from_info(_info) or [0, 1]
     _set_tsum = next((t.get("tsumid") for t in (_info.get("tsuminfo") or [])

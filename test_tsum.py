@@ -1035,6 +1035,78 @@ class PremiumBoxPlus(unittest.TestCase):
 
 
 
+
+
+class ServerDebugStaysOffCustomerStatus(unittest.TestCase):
+    """内部ログ（[premium_plus] など）はサーバーの控えに出し、お客さんの状況欄には出さない"""
+
+    def test_server_debug_writes_file_not_customer(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(T, "engine_dir", lambda: tmp), patch.object(T, "_DEBUG_PATH", None):
+                T._server_debug("[premium_plus] gachaid=12011010 naisho")
+            body = open(os.path.join(tmp, "tsum_debug.log"), encoding="utf-8").read()
+            self.assertIn("[premium_plus] gachaid=12011010 naisho", body)
+
+    def test_debug_hook_is_not_the_customer_log(self):
+        # run_order は内部ログを _server_debug に向ける（お客さん向けの log には向けない）
+        import inspect
+        src = inspect.getsource(T.run_order)
+        self.assertIn("DEBUG_HOOK = _server_debug", src)
+        self.assertNotIn("DEBUG_HOOK = log", src)
+
+
+class MedalCreditNeedsNoHeartPrecheck(unittest.TestCase):
+    """メダル付与は、ハート0でも先回りで断らず、実際にゲーム開始を試す（お客さんの環境で通ったため）"""
+
+    def _core(self):
+        return NewMenus._core()
+
+    def _fake(self, start_ok=True, bmedal_after=50000):
+        rec = {"game_start": 0, "game_end": 0}
+
+        class FakeForge:
+            def get_info(self_):
+                return {"retcode": 0, "userinfo": {"bheart": 0, "pheart": 0, "bmedal": 0, "bcoin": 100},
+                        "tsuminfo": [{"tsumid": 1, "lv": 10, "tsumcnt": 5, "setflg": 1}]}
+            def set_profile(self_, **kw):
+                return {"retcode": 0}
+            def unblock_event_state(self_, *a, **k):
+                return False
+            def detect_active_event(self_, *a, **k):
+                return "0"
+            def event_candidates(self_, *a, **k):
+                return ["0"]
+            def game_retire(self_):
+                return {"retcode": 0}
+            def game_start(self_, tsumid=1, hearttype=0, probmstver="2", eventid=None):
+                rec["game_start"] += 1
+                if not start_ok:
+                    return {"retcode": 8, "retmsg": "だめ"}
+                return {"retcode": 0, "userinfo": {"playcode": "pc", "bmedal": 0, "bcoin": 100}}
+            def game_end(self_, pc, **kw):
+                rec["game_end"] += 1
+                return {"retcode": 0, "userinfo": {"bmedal": bmedal_after, "bcoin": 100}}
+        return FakeForge(), rec
+
+    def test_zero_hearts_still_tries_and_credits_medal(self):
+        c = self._core()
+        f, rec = self._fake(start_ok=True)
+        res, msg = c.forge_sync(medal=50000, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        self.assertGreaterEqual(rec["game_start"], 1)       # 先回りで断らず、ゲーム開始を試した
+        self.assertGreaterEqual(rec["game_end"], 1)
+        self.assertIsNotNone(res)
+        self.assertIn("メダル", msg)
+
+    def test_zero_hearts_and_start_rejected_reports_heart(self):
+        c = self._core()
+        f, rec = self._fake(start_ok=False)
+        res, msg = c.forge_sync(medal=50000, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        self.assertGreaterEqual(rec["game_start"], 1)       # 実際に試してから
+        self.assertIsNone(res)
+        self.assertIn("ハート", msg)                         # 本当に開始できなければハート不足として返す
+
+
 class PremiumBoxPlusCount(unittest.TestCase):
     """回数を指定して引く：足りないメダルをその都度出してから引く"""
 
