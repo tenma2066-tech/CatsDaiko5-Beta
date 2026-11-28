@@ -898,125 +898,124 @@ class Forge:
         ui = (resp.get("userinfo") if isinstance(resp, dict) else None) or {}
         return {k: ui.get(k) for k in cls._WALLET_KEYS}
 
-    def probe_medal_paytype(self, gachaid, candidates, log=print):
-        """メダル払いの支払い方法の番号を、単発を1回ずつ引いて確かめる。
-        ルビー（無償・有償とも）が0枚のアカウントでだけ行う（ルビー払いの番号に当たっても、
-        引けずに断られるだけにするため）。戻り値は {"status": ..., "paytype": ..., "tried": [...]}。
-          found       … メダルだけが減った番号が見つかった（その1回は引けている）
-          has_ruby    … ルビーを持っているので試さなかった
-          not_found   … どの番号でもメダル払いにならなかった"""
-        info = self.get_info()
-        if not isinstance(info, dict):
-            return {"status": "network_error", "tried": []}
-        w = self._wallet(info)
-        if w["bmedal"] is None:
-            return {"status": "api_error", "resp": info, "tried": []}
-        if (w["bruby"] or 0) > 0 or (w["pruby"] or 0) > 0:
-            return {"status": "has_ruby", "tried": [], "wallet": w}
-        ui0 = (info.get("userinfo") or {})
-        medal_fields = {k: v for k, v in ui0.items() if "medal" in str(k).lower()}
-        if log:
-            log(f"  probe開始 wallet={w} medal関係={medal_fields}")
-        tried = []
-        for pt in candidates:
-            before = w
-            r = self.gacha_single(gachaid, pt)
-            if r is None:
-                return {"status": "network_error", "tried": tried}
-            if not (isinstance(r, dict) and r.get("retcode") == 0):
-                rc = r.get("retcode") if isinstance(r, dict) else None
-                msg = " ".join(str(r.get(k)) for k in ("retmsg", "message", "errmsg", "error", "msg")
-                               if isinstance(r, dict) and r.get(k))
-                tried.append({"paytype": pt, "result": "rejected", "retcode": rc, "msg": msg[:120],
-                              "link": str(r.get("link"))[:80] if isinstance(r, dict) else None,
-                              "retsubcode": r.get("retsubcode") if isinstance(r, dict) else None})
-                if rc == 37 or "プレゼント" in msg:
-                    # 「ツムのプレゼントがあります。一度ホームに戻ります。」番号の問題ではないので、ここで止める
-                    return {"status": "present_pending", "tried": tried}
-                if rc in (6, 8):
-                    # 入力エラー・タイトルに戻された。続けるとセッションが壊れるので入り直してから次へ
-                    if not self.refresh_session():
-                        return {"status": "not_found", "tried": tried}
-                    w = self._wallet(self.get_info())
-                continue
-            after = self._wallet(r)
-            if after["bmedal"] is None:
-                after = self._wallet(self.get_info())
-            spent = {k: (before[k] or 0) - (after[k] or 0) for k in self._WALLET_KEYS}
-            tried.append({"paytype": pt, "result": "drawn", "spent": spent})
-            if log:
-                log(f"  paytype={pt} で単発が引けた spent={spent}")
-            if spent["bmedal"] > 0 and spent["bcoin"] <= 0 and spent["bruby"] <= 0 and spent["pruby"] <= 0:
-                return {"status": "found", "paytype": pt, "tried": tried, "medal": after["bmedal"]}
-            if spent["bruby"] > 0 or spent["pruby"] > 0:
-                return {"status": "spent_ruby", "tried": tried}
-            w = after
-        return {"status": "not_found", "tried": tried}
+    @staticmethod
+    def _retmsg(r):
+        if not isinstance(r, dict):
+            return ""
+        return " ".join(str(r.get(k)) for k in ("retmsg", "message", "errmsg", "error", "msg") if r.get(k))[:160]
 
-    def draw_with_medals(self, gachaid, paytype, max_draws=5000, sleep_s=0, log=print, on_progress=None):
-        """メダルで引くガチャを、引けなくなるまで引く（10連 → 断られたら単発 → 断られたら終わり）。
-        最初に引けた回で、減ったのがメダルだけかを確かめる。コインやルビーが減った・メダルが減らない
-        なら、その場で止める（支払い方法の指定違いを1回分の被害で止めるため）。"""
+    def draw_with_medals(self, gachaid, price=None, paytype=1, max_draws=10_000, sleep_s=0, log=print, on_progress=None):
+        """メダルで引くガチャ（プレミアムBOX+）を、メダルが尽きるまで引く。
+
+        実機で確かめたこと（2026-11-28）:
+          - paytype=1 でメダル払いになる（サーバーがガチャの種類で通貨を決める）。2・3 以降は入力エラー。
+          - メダル不足で引くと retcode 602「メダルの使用に失敗しました。一度タイトルに戻ります。」
+          - 未受け取りのツムがあると retcode 37「ツムのプレゼントがあります。一度ホームに戻ります。」
+
+        設計:
+          1. 引く前に所持メダルと1回の値段（price）から引ける回数を計算し、足りない回は送らない
+             （602 を出すとタイトルに戻され、あとの処理や引き継ぎ発行が失敗するため）。
+          2. 10回分以上あれば10連、足りなければ単発。10連が断られたら入り直して単発だけにする。
+          3. 引くたびに所持品を見比べる。メダルが減っていない・コインやルビーが減ったら、その場で止める。
+          4. 「タイトルに戻ります」系のエラー（6/8/602）のあとは必ず入り直してから戻る。
+        戻り値の status:
+          done … 引ける分を引き切った ／ no_medal … 1回分に足りない（1回も送っていない）
+          present_pending … プレゼント未受け取りで止まった ／ wrong_currency … メダル以外が減った
+          stopped … サーバーに断られた ／ max_reached ／ network_error ／ api_error"""
         info = self.get_info()
         if not isinstance(info, dict):
             return {"status": "network_error", "draws": 0}
-        before = self._wallet(info)
-        if before["bmedal"] is None:
+        w = self._wallet(info)
+        if w["bmedal"] is None:
             return {"status": "api_error", "draws": 0, "resp": info}
-        if self.gacha_compflg(gachaid, info) == 1:
-            return {"status": "already_complete", "draws": 0, "medal": before["bmedal"]}
+        start = dict(w)
+        medal = int(w["bmedal"] or 0)
+        price = int(price) if price else None
+        if log:
+            log(f"  [BOX+] 開始 gachaid={gachaid} paytype={paytype} 値段={price} wallet={w}")
+        if price and medal < price:
+            return {"status": "no_medal", "draws": 0, "medal": medal, "price": price}
         drawn = 0
-        multi = True
-        checked = False
-        medal = before["bmedal"]
+        multi_ok = True
         self.quiet = True
-        if on_progress:
-            try:
-                on_progress(0, medal, False)
-            except Exception:
-                pass
+
+        def _done(status, **extra):
+            out = {"status": status, "draws": drawn, "medal": medal, "price": price,
+                   "spent_medal": int(start["bmedal"] or 0) - medal}
+            out.update(extra)
+            return out
+
+        def _report(single):
+            if on_progress:
+                try:
+                    on_progress(drawn, medal, single)
+                except Exception:
+                    pass
+
+        _report(False)
         while drawn < max_draws:
-            r = self.gacha_multi(gachaid, paytype) if multi else self.gacha_single(gachaid, paytype)
-            if isinstance(r, dict) and r.get("retcode") in (6, 8) and self.refresh_session():
-                r = self.gacha_multi(gachaid, paytype) if multi else self.gacha_single(gachaid, paytype)
+            if price and medal < price:
+                return _done("done")
+            use_multi = multi_ok and (medal >= price * 10 if price else False) and (max_draws - drawn) >= 10
+            n = 10 if use_multi else 1
+            before = dict(w)
+            r = self.gacha_multi(gachaid, paytype) if use_multi else self.gacha_single(gachaid, paytype)
+            if isinstance(r, dict) and r.get("retcode") in (6, 8) and not use_multi:
+                # セッション切れかもしれない。入り直して同じ単発を1回だけやり直す
+                if self.refresh_session():
+                    r = self.gacha_single(gachaid, paytype)
             if r is None:
-                return {"status": "network_error", "draws": drawn, "medal": medal}
-            if isinstance(r, dict) and r.get("retcode") == 0:
-                n = 10 if multi else 1
-                after = self._wallet(r)
-                if after["bmedal"] is None:
-                    after = self._wallet(self.get_info())
-                if not checked:
-                    checked = True
-                    spent_other = any(before[k] is not None and after[k] is not None and after[k] < before[k]
-                                      for k in ("bcoin", "bruby", "pruby"))
-                    medal_down = after["bmedal"] is not None and after["bmedal"] < before["bmedal"]
-                    if spent_other or not medal_down:
-                        if log:
-                            log(f"  メダル以外で支払われた可能性 before={before} after={after} paytype={paytype}")
-                        return {"status": "wrong_currency", "draws": drawn + n, "before": before, "after": after}
+                return _done("network_error")
+            rc = r.get("retcode") if isinstance(r, dict) else None
+            if rc != 0:
+                msg = self._retmsg(r)
+                if log:
+                    log(f"  [BOX+] {'10連' if use_multi else '単発'}が断られた retcode={rc} msg={msg!r} （{drawn}連時点）")
+                if is_version_reject(r):
+                    return _done("api_error", resp=r)
+                if rc == 37 or "プレゼント" in msg:
+                    return _done("present_pending", retcode=rc, msg=msg)
+                relogged = self.refresh_session() if rc in (6, 8, 602) or "タイトル" in msg else True
+                if use_multi and relogged:
+                    # 10連が使えない（または値段が違う）ガチャ。単発だけで続ける
+                    multi_ok = False
+                    fresh = self._wallet(self.get_info())
+                    if fresh["bmedal"] is not None:
+                        w = fresh
+                        medal = int(w["bmedal"] or 0)
+                    continue
+                if rc == 602 and drawn > 0:
+                    return _done("done")          # メダルが尽きた（値段が分からないときの終わり方）
+                if rc == 602:
+                    return _done("no_medal")
+                return _done("stopped", retcode=rc, msg=msg)
+            after = self._wallet(r)
+            if after["bmedal"] is None:
+                after = self._wallet(self.get_info())
+            spent = {k: (before[k] or 0) - (after[k] or 0) for k in self._WALLET_KEYS
+                     if before[k] is not None and after[k] is not None}
+            if spent.get("bcoin", 0) > 0 or spent.get("bruby", 0) > 0 or spent.get("pruby", 0) > 0 \
+                    or spent.get("bmedal", 0) <= 0:
                 drawn += n
                 if after["bmedal"] is not None:
-                    medal = after["bmedal"]
-                if on_progress and (drawn % 100 == 0 or drawn <= 10 or not multi):
-                    try:
-                        on_progress(drawn, medal, not multi)
-                    except Exception:
-                        pass
-                if sleep_s:
-                    time.sleep(sleep_s)
-                continue
-            if is_version_reject(r):
-                return {"status": "api_error", "draws": drawn, "resp": r}
-            if self.gacha_compflg(gachaid) == 1:
-                return {"status": "complete", "draws": drawn, "medal": medal}
-            if multi:
-                multi = False
+                    medal = int(after["bmedal"])
                 if log:
-                    log(f"  10連が終了 → 単発に切替（{drawn}連時点） resp={str(r)[:150]}")
-                continue
-            return {"status": "stopped", "draws": drawn, "medal": medal, "resp": str(r)[:200]}
-        return {"status": "max_reached", "draws": drawn, "medal": medal}
+                    log(f"  [BOX+] メダル以外が減った／メダルが減っていない spent={spent} → 中止")
+                return _done("wrong_currency", spent=spent)
+            if drawn == 0 and log:
+                log(f"  [BOX+] 最初の{'10連' if use_multi else '単発'}で減ったメダル={spent.get('bmedal')}（想定 {price * n if price else '不明'}）")
+            if not price:
+                price = max(1, int(spent["bmedal"]) // n)   # 値段が取れていなければ、実際に減った量から決める
+            drawn += n
+            w = after
+            medal = int(after["bmedal"])
+            if log and (drawn % 100 == 0):
+                log(f"  [BOX+] ...{drawn}連 (メダル残={medal:,})")
+            if drawn % 50 == 0 or drawn <= 10 or not use_multi:
+                _report(not use_multi)
+            if sleep_s:
+                time.sleep(sleep_s)
+        return _done("max_reached")
 
     def fill_coins(self, cap=200_000_000):
         info = self.get_info()
