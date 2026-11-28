@@ -413,7 +413,7 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                login_id=None, password=None, captcha_solver=None, proxy=None, sess=None, f=None,
                pin_notice=None, gacha_full=None, on_login=None, stage_box=None, progress=None,
                is_guest=False, auto_fill_coins=None, all_tsum_lv=False, nickname=None, gacha_plus=None,
-               gacha_plus_count=None):
+               gacha_plus_count=None, medal_chunk_start=None):
     if auto_fill_coins is None:
         auto_fill_coins = is_coin_free()
     # stage_box: 失敗がログイン段階か実行段階かを呼び出し元に伝えるための箱
@@ -798,7 +798,9 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                     if progress:
                         progress.update(act_stage, f"メダルを {short:,}枚 用意しています（{done_n:,} / {want:,}連）...", force=True)
                     _dbg(f"[premium_plus] メダル補充 所持={have:,} 必要={n * price:,} 不足={short:,}")
-                    mres, mtext = forge_sync(medal=short, tsumid=tsumid, sess=sess, f=f, is_guest=is_guest,
+                    # 1プレイ（ハート1つ）でこの周ぶんのメダルをまとめて付与する（ハートを無駄にしない）。
+                    mres, mtext = forge_sync(medal=short, medal_chunk_start=n * price,
+                                             tsumid=tsumid, sess=sess, f=f, is_guest=is_guest,
                                              auto_fill_coins=auto_fill_coins, stage_box=stage_box)
                     have2 = int(f._wallet(f.get_info()).get("bmedal") or 0)
                     added_all += max(0, have2 - have)
@@ -1073,6 +1075,10 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
     if chunk_field:
         default_chunk = 40_000_000 if chunk_field == "exp" else 50_000
         chunk = int(CONFIG.get(f"{chunk_field}_per_game", default_chunk))
+        # 1プレイ（＝ハート1つ）でまとめて付与したい量を指定できる（プレミアムBOX+の補充で使う）。
+        # こうしないと1プレイ目が 50,000 だけで終わり、ハートを使い切ってしまう。
+        if chunk_field == "medal" and medal_chunk_start:
+            chunk = max(int(medal_chunk_start), 1)
         min_chunk = 1_000_000 if chunk_field == "exp" else 10_000
         # メダルは上限が大きいので、通った量を倍々に増やす（拒否されたら半分に戻し、その量は二度と超えない）。
         # 経験値は従来どおり固定量。

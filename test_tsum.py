@@ -1098,6 +1098,35 @@ class MedalCreditNeedsNoHeartPrecheck(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertIn("メダル", msg)
 
+    def test_medal_chunk_start_credits_whole_round_in_one_game(self):
+        # ハート1つ（game_start は1回だけ成功）で、450,000 を1プレイでまとめて付与する
+        c = self._core()
+        rec = {"starts": 0, "ends": [], "held": 0}
+
+        class FakeForge:
+            def get_info(self_):
+                return {"retcode": 0, "userinfo": {"bheart": 1, "pheart": 0, "bmedal": rec["held"], "bcoin": 100},
+                        "tsuminfo": [{"tsumid": 1, "lv": 10, "tsumcnt": 5, "setflg": 1}]}
+            def set_profile(self_, **kw): return {"retcode": 0}
+            def unblock_event_state(self_, *a, **k): return False
+            def detect_active_event(self_, *a, **k): return "0"
+            def event_candidates(self_, *a, **k): return ["0"]
+            def game_retire(self_): return {"retcode": 0}
+            def game_start(self_, tsumid=1, hearttype=0, probmstver="2", eventid=None):
+                rec["starts"] += 1
+                if rec["starts"] > 1:
+                    return {"retcode": 8}           # ハートは1つだけ
+                return {"retcode": 0, "userinfo": {"playcode": "pc", "bmedal": rec["held"], "bcoin": 100}}
+            def game_end(self_, pc, **kw):
+                rec["ends"].append(int(kw["medal"])); rec["held"] += int(kw["medal"])
+                return {"retcode": 0, "userinfo": {"bmedal": rec["held"], "bcoin": 100}}
+
+        res, msg = c.forge_sync(medal=450000, medal_chunk_start=450000, sess={"userid": "1"},
+                                f=FakeForge(), auto_fill_coins=False)
+        self.assertEqual(rec["starts"], 1)          # ハート1つ＝1プレイ
+        self.assertEqual(rec["ends"], [450000])     # その1プレイで全額
+        self.assertEqual(rec["held"], 450000)
+
     def test_zero_hearts_and_start_rejected_reports_heart(self):
         c = self._core()
         f, rec = self._fake(start_ok=False)
