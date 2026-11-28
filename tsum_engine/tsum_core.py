@@ -65,6 +65,9 @@ def _load_config() -> dict:
 
 
 CONFIG = _load_config()
+
+# メダルの上限（メダル指定・メダルMAX）。1回のゲームで送れる量はサーバーが受け付けた量に合わせて増減する。
+MEDAL_CAP = 100_000_000
 BOT_DATA: dict = {}          # Discord 版のサーバーごとの設定。Web 版では使わない
 
 # 進捗・デバッグの行をどこへ出すか。app.py 側が差し替える（既定は捨てる）。
@@ -890,7 +893,7 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
     chunk_field = "exp" if exp is not None else ("medal" if medal is not None else None)
     target = int(exp) if exp is not None else (int(medal) if medal is not None else 0)
     if chunk_field == "medal":
-        max_medal_cap = 450_000
+        max_medal_cap = MEDAL_CAP
         curr_m = int(before_medal or 0)
         if curr_m >= max_medal_cap:
             return None, f"現在のメダル所持数（{curr_m:,}枚）が安全上限（{max_medal_cap:,}枚）に達しているため、これ以上増やせません。"
@@ -899,11 +902,16 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
         default_chunk = 40_000_000 if chunk_field == "exp" else 50_000
         chunk = int(CONFIG.get(f"{chunk_field}_per_game", default_chunk))
         min_chunk = 1_000_000 if chunk_field == "exp" else 10_000
+        # メダルは上限が大きいので、通った量を倍々に増やす（拒否されたら半分に戻し、その量は二度と超えない）。
+        # 経験値は従来どおり固定量。
+        grow = chunk_field == "medal"
+        ceiling = int(CONFIG.get("medal_chunk_max", 10_000_000)) if grow else chunk
+        max_games = int(CONFIG.get("medal_max_games", 120)) if grow else 30
         credited = 0
         games = 0
         r2 = None
         pc = playcode
-        while credited < target and games < 30:
+        while credited < target and games < max_games:
             send = min(chunk, target - credited)
             if pc is None:
                 rs = f.game_start(tsumid=won_tid, hearttype=won_ht, probmstver="2", eventid=won_ev)
@@ -921,6 +929,8 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
             pc = None
             if isinstance(rr, dict) and rr.get("retcode") == 0:
                 r2 = rr; credited += send; games += 1
+                if grow and send == chunk:
+                    chunk = min(chunk * 2, ceiling)
                 if progress and chunk_field:
                     pct = int(credited / target * 100) if target > 0 else 0
                     field_label = "経験値" if chunk_field == "exp" else "メダル"
@@ -931,6 +941,8 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                     f.game_retire()
                 except Exception:
                     pass
+                if grow:
+                    ceiling = max(min_chunk, send // 2)
                 if chunk > min_chunk:
                     # 送信量が実際に減るまで一気に縮める。
                     new_chunk = chunk // 2
@@ -975,6 +987,9 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
             lines.append(f"メダル: {before_medal:,} → {after_medal:,} ( +{after_medal - before_medal:,} )")
         else:
             lines.append(f"メダル: +{credited if chunk_field == 'medal' else int(medal):,}")
+        if chunk_field == "medal" and credited < target:
+            lines.append(f"※1回の注文で送れる量の上限に達したため、{credited:,}枚まで付与しました"
+                         f"（残り{target - credited:,}枚）。もう一度ご注文いただくと続きを付与できます。")
     if score is not None:
         lines.append(f"スコア: {score:,}")
     if exp is not None:
@@ -1142,7 +1157,7 @@ MAX_PRESETS = {
     "score_max": ("score", 2_147_483_647),
     "level_max": ("exp", 100_000_000),
     "coin_max":  ("coin", 200_000_000),
-    "medal_max": ("medal", 450_000),   # メダルを安全上限（45万枚）まで
+    "medal_max": ("medal", MEDAL_CAP),   # メダルを上限（1億枚）まで
 }
 
 

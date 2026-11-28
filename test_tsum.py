@@ -49,7 +49,7 @@ def fake_core(**overrides):
         calls=calls,
         requests=requests,
         MAX_PRESETS={"score_max": ("score", 2_147_483_647), "level_max": ("exp", 100_000_000),
-                     "coin_max": ("coin", 200_000_000), "medal_max": ("medal", 450_000)},
+                     "coin_max": ("coin", 200_000_000), "medal_max": ("medal", 100_000_000)},
         DEBUG_HOOK=None,
         forge_sync=forge_sync,
         Forge=lambda **kw: types.SimpleNamespace(get_public_key=lambda: "pub"),
@@ -90,7 +90,7 @@ class Menus(unittest.TestCase):
 
     def test_value_limits(self):
         self.assertIn("範囲", T.validate_order(["tsum_coin"], {"tsum_coin": "200000001"})[2])
-        self.assertIn("範囲", T.validate_order(["tsum_medal"], {"tsum_medal": "450001"})[2])
+        self.assertIn("範囲", T.validate_order(["tsum_medal"], {"tsum_medal": "100000001"})[2])
         self.assertIn("範囲", T.validate_order(["tsum_medal"], {"tsum_medal": "0"})[2])
         menus, qty, err = T.validate_order(["tsum_coin"], {"tsum_coin": "200000000"})
         self.assertEqual((menus, qty, err), (["tsum_coin"], {"tsum_coin": 200_000_000}, ""))
@@ -439,7 +439,7 @@ class NewMenus(unittest.TestCase):
 
     def test_forge_kwargs_mapping(self):
         with patch.object(T, "_core", fake_core()):
-            self.assertEqual(T._forge_kwargs("tsum_medal_max", {}), {"medal": 450_000})
+            self.assertEqual(T._forge_kwargs("tsum_medal_max", {}), {"medal": 100_000_000})
             self.assertEqual(T._forge_kwargs("tsum_tsum_lv_pick", {"tsum_tsum_lv_pick": "1024"}), {"tsum_lv": 1024})
             self.assertEqual(T._forge_kwargs("tsum_all_lv", {}), {"all_tsum_lv": True})
 
