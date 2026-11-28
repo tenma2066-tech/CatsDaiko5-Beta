@@ -1011,7 +1011,7 @@ class PremiumBoxPlus(unittest.TestCase):
                                   probe={"status": "found", "paytype": 4, "medal": 90, "tried": []})
             res, msg = self._run(c, f, paytype="")
             self.assertEqual(seen["paytype"], 4)
-            self.assertNotIn(1, seen["probe"])          # コイン払いの 1 は試さない
+            self.assertEqual(seen["probe"][0], 1)
             self.assertIn("引けるところまで引きました（21連）", msg)
             self.assertEqual(c.premium_plus_paytype(), 4)   # 次からは保存した番号を使う
 
@@ -1118,6 +1118,23 @@ class DrawWithMedals(unittest.TestCase):
         self.assertEqual([t["result"] for t in r["tried"]], ["rejected", "drawn", "drawn"])
         st["ruby"] = 1
         self.assertEqual(f.probe_medal_paytype(9, (3,), log=None)["status"], "has_ruby")
+
+    def test_probe_retries_after_session_drop(self):
+        f, st = self._forge(medal=1000, cost=100, stock=100)
+        st["ruby"] = 0
+        calls = []
+        orig = f._draw
+        def single(gid, pt):
+            calls.append(pt)
+            if len(calls) == 1:
+                return {"retcode": 8}
+            return orig(1) if pt == 4 else {"retcode": 37, "retmsg": "x"}
+        f.gacha_single = single
+        f.refresh_session = lambda: True
+        f.probe_medal_paytype = NewMenus._core().Forge.probe_medal_paytype.__get__(f)
+        r = f.probe_medal_paytype(9, (4,), log=None)
+        self.assertEqual((r["status"], r["paytype"]), ("found", 4))
+        self.assertEqual(calls, [4, 4])
 
     def test_stops_after_one_draw_if_rubies_were_spent(self):
         f, st = self._forge(medal=10**6, cost=100, stock=100, ruby_cost=1)

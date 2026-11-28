@@ -347,8 +347,10 @@ def _cached_gacha_ids(f, ttl=600):
 
 
 _PAYTYPE_FILE = os.path.join(PROJECT_ROOT, "premium_plus_paytype.json")
-# 試す順番（コイン払いの 1 は除く）。どれがメダル払いかは試して確かめる
-PAYTYPE_CANDIDATES = (2, 3, 4, 5, 0, 6, 7)
+# 試す順番。どれがメダル払いかは試して確かめる
+# 1 はコインのガチャで使う番号だが、サーバーがガチャの種類で通貨を決めている可能性があるので最初に試す
+# （コインで払われた場合も、単発1回分のコインで止まる）
+PAYTYPE_CANDIDATES = (1, 2, 3, 4, 5, 0, 6, 7)
 
 
 def premium_plus_paytype():

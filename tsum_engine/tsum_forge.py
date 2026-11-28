@@ -913,14 +913,28 @@ class Forge:
             return {"status": "api_error", "resp": info, "tried": []}
         if (w["bruby"] or 0) > 0 or (w["pruby"] or 0) > 0:
             return {"status": "has_ruby", "tried": [], "wallet": w}
+        ui0 = (info.get("userinfo") or {})
+        medal_fields = {k: v for k, v in ui0.items() if "medal" in str(k).lower()}
+        if log:
+            log(f"  probe開始 wallet={w} medal関係={medal_fields}")
         tried = []
         for pt in candidates:
             before = w
             r = self.gacha_single(gachaid, pt)
+            if isinstance(r, dict) and r.get("retcode") in (6, 8):
+                # セッションが切れた（タイトルに戻された）。入り直して同じ番号をもう一度試す
+                ok = self.refresh_session()
+                if not ok:
+                    self.get_info()
+                r = self.gacha_single(gachaid, pt)
             if r is None:
                 return {"status": "network_error", "tried": tried}
             if not (isinstance(r, dict) and r.get("retcode") == 0):
-                tried.append({"paytype": pt, "result": "rejected", "retcode": r.get("retcode") if isinstance(r, dict) else None})
+                rc = r.get("retcode") if isinstance(r, dict) else None
+                msg = " ".join(str(r.get(k)) for k in ("retmsg", "message", "errmsg", "error", "msg")
+                               if isinstance(r, dict) and r.get(k))
+                tried.append({"paytype": pt, "result": "rejected", "retcode": rc, "msg": msg[:120],
+                              "keys": sorted(r.keys())[:20] if isinstance(r, dict) else None})
                 continue
             after = self._wallet(r)
             if after["bmedal"] is None:
