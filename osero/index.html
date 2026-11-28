@@ -11,37 +11,72 @@
    IDEA: 高級ゲームテーブルに置かれた本物のオセロ盤
    PICTURE: 画面いっぱいの盤（Three.js）。大技の瞬間だけカメラが寄って回り込む
    COLOUR and TYPE: 深緑フェルト・ウォルナット・真鍮。アクセントは石の色。Dela Gothic One + Zen Kaku Gothic New
-   LAYOUT: 盤が主役。上に対局者チップ、下に操作バー、設定はシートで重ねる */
-:root{color-scheme:dark;--bg:#07100c;--ink:#f1ede3;--mut:#a7b2ab;--glass:rgba(10,18,15,.74);--line:rgba(255,255,255,.13);--gold:#d8b264}
+   LAYOUT: 盤が主役。上に手番と対局者、下に操作バー、設定やメニューはシートで重ねる */
+:root{color-scheme:dark;--bg:#07100c;--ink:#f1ede3;--mut:#a7b2ab;--glass:rgba(10,18,15,.8);--line:rgba(255,255,255,.12);--gold:#d8b264;--gold2:#f0d79a;--hudh:110px}
 *{box-sizing:border-box;min-width:0}
 html,body{height:100%}
-body{margin:0;background:radial-gradient(120% 90% at 50% 42%,#1d3328 0%,#0b1712 55%,#030605 100%);color:var(--ink);font:16px/1.5 "Zen Kaku Gothic New",system-ui,sans-serif;overflow:hidden;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+body{margin:0;background:radial-gradient(120% 90% at 50% 45%,#1a2e24 0%,#0a1510 55%,#030605 100%);color:var(--ink);font:16px/1.5 "Zen Kaku Gothic New",system-ui,sans-serif;overflow:hidden;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 #view{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
-#hud{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 10px) 12px 8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;pointer-events:none;z-index:2}
-.brand{font-family:"Dela Gothic One",sans-serif;font-size:18px;color:var(--gold);margin-right:auto;white-space:nowrap}
+
+/* ---------- HUD ---------- */
+#hud{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;z-index:2;background:linear-gradient(rgba(3,7,5,.78),rgba(3,7,5,.45) 70%,rgba(3,7,5,0))}
+.top{width:100%;display:flex;align-items:center;gap:10px}
+.brand{font-family:"Dela Gothic One",sans-serif;font-size:18px;color:var(--gold);margin-right:auto;white-space:nowrap;letter-spacing:.02em}
 .brand b{color:var(--ink);font-weight:400}
 #chips{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-.chip{display:flex;align-items:center;gap:7px;padding:5px 11px 5px 6px;border-radius:999px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:14px;transition:box-shadow .25s,border-color .25s,opacity .25s}
-.chip i{width:20px;height:20px;border-radius:50%;background:var(--c);box-shadow:inset 0 -3px 4px rgba(0,0,0,.45),inset 0 2px 2px rgba(255,255,255,.35),0 0 0 1px rgba(255,255,255,.22)}
+.chip{display:flex;align-items:center;gap:7px;padding:4px 11px 4px 5px;border-radius:999px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:14px;transition:box-shadow .25s,border-color .25s,opacity .25s}
+.chip i,.dot{width:20px;height:20px;border-radius:50%;background:var(--c);flex:none;box-shadow:inset 0 -3px 4px rgba(0,0,0,.45),inset 0 2px 2px rgba(255,255,255,.35),0 0 0 1px rgba(255,255,255,.28)}
+.chip .nm{max-width:8.5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip b{font-variant-numeric:tabular-nums;font-size:17px;min-width:2ch;text-align:right}
-.chip.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold),0 0 20px rgba(216,178,100,.4)}
+.chip.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold),0 0 18px rgba(216,178,100,.35)}
 .chip.out{opacity:.38}
-.chip em{font-style:normal;font-size:12px;color:var(--gold);animation:blink 1s infinite}
-@keyframes blink{50%{opacity:.3}}
-@media(max-width:600px){.chip .nm{display:none}.brand{font-size:15px;width:100%}#hud{gap:6px}}
-#bar{position:fixed;left:0;right:0;bottom:0;padding:8px 10px calc(env(safe-area-inset-bottom) + 10px);display:flex;gap:6px;justify-content:center;flex-wrap:wrap;z-index:2}
+#turn{display:flex;align-items:center;gap:10px;padding:6px 16px 6px 8px;border-radius:999px;background:var(--glass);border:1px solid var(--line);font-size:15px;font-weight:700;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);min-height:38px;max-width:100%;transition:border-color .25s,box-shadow .25s}
+#turn .dot{width:24px;height:24px}
+#turn small{font-weight:500;color:var(--mut);font-size:13px;white-space:nowrap}
+#turn .tx{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#turn.mine{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold),0 0 22px rgba(216,178,100,.32)}
+#turn.mine .tx{color:var(--gold2)}
+#turn.idle{padding-left:16px;font-weight:500;color:var(--mut)}
+.spin{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.22);border-top-color:var(--gold);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+#scorebar{width:min(520px,100%);height:10px;border-radius:99px;overflow:hidden;display:flex;background:rgba(255,255,255,.06);box-shadow:0 0 0 1px rgba(255,255,255,.16)}
+#scorebar span{height:100%;background:var(--c);box-shadow:inset 0 1px 0 rgba(255,255,255,.28),inset 0 -2px 3px rgba(0,0,0,.35);transition:width .5s cubic-bezier(.2,.8,.2,1)}
+#scorebar span+span{box-shadow:-1px 0 0 rgba(0,0,0,.65)}
+@media(max-width:640px){
+  .top{flex-wrap:wrap;justify-content:center;gap:8px}
+  .brand{width:100%;text-align:center;margin:0;font-size:16px}
+  #chips{justify-content:center;width:100%}
+  .chip{font-size:13px;padding-right:10px}
+  .chip b{font-size:16px}
+  #turn{font-size:14px}
+}
+
+/* ---------- 操作バー ---------- */
+#bar{position:fixed;left:0;right:0;bottom:0;padding:12px 12px calc(env(safe-area-inset-bottom) + 12px);display:flex;gap:8px;justify-content:center;z-index:2;background:linear-gradient(rgba(3,7,5,0),rgba(3,7,5,.5) 30%,rgba(3,7,5,.82))}
 button,select,input{font:inherit;color:inherit}
-button{min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--glass);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);cursor:pointer;font-size:14px;white-space:nowrap}
+button{min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--glass);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);cursor:pointer;font-size:14px;white-space:nowrap;transition:background .15s,border-color .15s,transform .1s}
 button:hover{border-color:rgba(255,255,255,.3)}
+button:active{transform:scale(.97)}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-button.primary{background:linear-gradient(#e6c77c,#b8893b);color:#1a1205;border-color:transparent;font-weight:700}
+button.primary{background:linear-gradient(#ecd08a,#b8893b);color:#1a1205;border-color:transparent;font-weight:700}
+button.primary:hover{background:linear-gradient(#f3da9c,#c49545)}
 button.ghost{background:transparent;backdrop-filter:none}
-button:disabled{opacity:.38;cursor:default}
-@media(max-width:420px){#bar button{padding:0 10px;font-size:13px}}
-.sheet{position:fixed;inset:0;display:grid;place-items:center;padding:16px;background:rgba(2,6,4,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:10;user-select:auto;-webkit-user-select:auto}
+button:disabled{opacity:.36;cursor:default;transform:none}
+#bar button{display:flex;align-items:center;gap:8px;padding:0 16px}
+#bar svg,.big svg{width:20px;height:20px;flex:none}
+@media(max-width:640px){
+  #bar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;padding-inline:8px}
+  #bar button{flex-direction:column;justify-content:center;gap:3px;padding:6px 2px;font-size:11px;min-height:58px;border-radius:14px}
+  #bar svg{width:22px;height:22px}
+}
+
+/* ---------- シート ---------- */
+.sheet{position:fixed;inset:0;display:grid;place-items:center;padding:16px;background:rgba(2,6,4,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:10;user-select:auto;-webkit-user-select:auto}
 .sheet[hidden]{display:none}
-.card{width:min(520px,100%);max-height:calc(100dvh - 32px);overflow:auto;background:linear-gradient(#13201a,#0d1612);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-h2{font-family:"Dela Gothic One",sans-serif;font-weight:400;font-size:26px;line-height:1.1;margin:0 0 16px;color:var(--gold)}
+.card{width:min(520px,100%);max-height:calc(100dvh - 32px);overflow:auto;background:linear-gradient(#13201a,#0d1612);border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:0 30px 80px rgba(0,0,0,.6);animation:pop .22s cubic-bezier(.2,.9,.3,1.2)}
+@keyframes pop{from{opacity:0;transform:translateY(10px) scale(.97)}}
+h2{font-family:"Dela Gothic One",sans-serif;font-weight:400;font-size:26px;line-height:1.15;margin:0 0 16px;color:var(--gold);display:flex;align-items:center;gap:12px}
+h2 .dot{width:30px;height:30px}
 h3{font-size:14px;color:var(--mut);margin:18px 0 8px;font-weight:700}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 label{display:grid;gap:4px;font-size:13px;color:var(--mut)}
@@ -50,9 +85,9 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
 .check input{width:22px;min-height:22px;height:22px;margin:2px 0 0;accent-color:var(--gold);flex:none}
 .check span{display:block;font-size:13px;color:var(--mut)}
 .seat{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-.seat i,.lob i{width:22px;height:22px;border-radius:50%;background:var(--c);flex:none;box-shadow:inset 0 -3px 4px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.22)}
+.seat i,.lob i{width:22px;height:22px;border-radius:50%;background:var(--c);flex:none;box-shadow:inset 0 -3px 4px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.25)}
 .seat span{width:2.5em;color:var(--mut);font-size:14px}
-.row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
 .row.join input{flex:1;text-transform:uppercase;letter-spacing:.15em}
 .note{font-size:13px;color:var(--mut);margin:10px 0 0}
 .code{font-size:14px;color:var(--mut)}
@@ -63,10 +98,44 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
 .rank{list-style:none;padding:0;margin:0;display:grid;gap:6px}
 .rank li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);font-size:16px}
 .rank li:first-child{background:rgba(216,178,100,.14);border:1px solid rgba(216,178,100,.4)}
-.rank li i{width:24px;height:24px;border-radius:50%;background:var(--c);flex:none}
+.rank li i{width:24px;height:24px;border-radius:50%;background:var(--c);flex:none;box-shadow:inset 0 -3px 4px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.25)}
 .rank li b{margin-left:auto;font-variant-numeric:tabular-nums;font-size:20px}
 .rank li em{font-style:normal;color:var(--mut);width:1.6em}
-#toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 72px);transform:translate(-50%,-10px);padding:8px 16px;border-radius:999px;background:var(--glass);border:1px solid var(--line);opacity:0;transition:.25s;pointer-events:none;z-index:5;font-size:14px;white-space:nowrap}
+
+/* タイトル */
+#title{background:radial-gradient(80% 60% at 50% 40%,rgba(10,22,16,.35),rgba(2,6,4,.82))}
+.tcard{width:min(400px,100%);text-align:center;padding:30px 22px 22px;border-radius:24px;background:linear-gradient(rgba(19,32,26,.9),rgba(9,16,13,.94));border:1px solid var(--line);box-shadow:0 30px 90px rgba(0,0,0,.65);animation:pop .3s cubic-bezier(.2,.9,.3,1.2)}
+.logo{font-family:"Dela Gothic One",sans-serif;font-size:clamp(40px,12vw,58px);color:var(--gold);line-height:.95;letter-spacing:.02em}
+.logo b{display:block;color:var(--ink);font-weight:400}
+.tstones{display:flex;justify-content:center;gap:7px;margin:16px 0 4px}
+.tstones .dot{width:16px;height:16px}
+.tag{color:var(--mut);margin:6px 0 20px;font-size:14px}
+.big{width:100%;min-height:58px;font-size:17px;font-weight:700;margin-top:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:16px;line-height:1.25;white-space:normal}
+.big small{font-weight:500;font-size:12px;opacity:.78}
+.tcard .ghost{margin-top:12px;width:100%}
+
+/* 設定 */
+.set{display:grid;gap:2px}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.set-row:last-child{border-bottom:0}
+@media(max-width:440px){.set-row.wrap{flex-wrap:wrap}.set-row.wrap .seg{width:100%}}
+.set-row div span{display:block;font-size:12px;color:var(--mut)}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:4px;border-radius:12px;background:#09110d;border:1px solid var(--line);flex:none;width:200px}
+.seg button{min-height:36px;padding:0 6px;border:0;background:transparent;border-radius:9px;backdrop-filter:none;font-size:13px}
+.seg button[aria-pressed="true"]{background:linear-gradient(#ecd08a,#b8893b);color:#1a1205;font-weight:700}
+.tg{width:54px;min-height:32px;height:32px;border-radius:99px;padding:0;position:relative;background:#26302b;border:1px solid var(--line);flex:none;backdrop-filter:none}
+.tg::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#c9d0cb;transition:transform .2s,background .2s}
+.tg[aria-pressed="true"]{background:var(--gold);border-color:transparent}
+.tg[aria-pressed="true"]::after{transform:translateX(22px);background:#fff}
+
+/* 遊び方 */
+.help{display:grid;gap:14px;font-size:15px;user-select:text;-webkit-user-select:text}
+.help section{display:grid;gap:6px}
+.help h4{margin:0;font-size:15px;color:var(--gold2);display:flex;align-items:center;gap:8px}
+.help p{margin:0;color:#d6dcd7;font-size:14px;line-height:1.65}
+.help kbd{font:inherit;font-size:12px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);background:#0a120e}
+
+#toast{position:fixed;left:50%;top:calc(var(--hudh) + 10px);transform:translate(-50%,-10px);padding:9px 18px;border-radius:999px;background:var(--glass);border:1px solid var(--gold);box-shadow:0 8px 30px rgba(0,0,0,.45);opacity:0;transition:.25s;pointer-events:none;z-index:5;font-size:15px;font-weight:700;white-space:nowrap;color:var(--gold2)}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #cutin{position:fixed;left:0;right:0;top:36%;text-align:center;pointer-events:none;z-index:4;opacity:0}
 #cutin::before{content:"";position:absolute;left:-10%;right:-10%;top:50%;height:clamp(64px,16vw,140px);transform:translateY(-50%) skewY(-4deg);background:linear-gradient(90deg,transparent,rgba(0,0,0,.72) 18%,rgba(0,0,0,.72) 82%,transparent);border-block:2px solid var(--c,#fff)}
@@ -77,27 +146,43 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
 #cutin.show.l2 .main{font-size:clamp(48px,14vw,132px)}
 @keyframes cut{0%{opacity:0;transform:translateX(-40%) scale(1.25)}10%{opacity:1;transform:translateX(0) scale(1)}78%{opacity:1;transform:translateX(3%) scale(1)}100%{opacity:0;transform:translateX(40%) scale(1)}}
 #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:3;mix-blend-mode:screen}
-#hint{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 66px);transform:translateX(-50%);font-size:12px;color:var(--mut);pointer-events:none;z-index:2;opacity:0;transition:opacity .3s;white-space:nowrap}
+#hint{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 92px);transform:translateX(-50%);font-size:12px;color:var(--mut);pointer-events:none;z-index:2;opacity:0;transition:opacity .3s;white-space:nowrap;padding:4px 12px;border-radius:99px;background:rgba(0,0,0,.45)}
 #hint.show{opacity:1}
 #nogl{position:fixed;inset:0;display:none;place-items:center;padding:24px;text-align:center;z-index:20}
-@media(prefers-reduced-motion:reduce){#cutin.show{animation-duration:1.2s}}
+@media(prefers-reduced-motion:reduce){#cutin.show{animation-duration:1.2s}.card,.tcard{animation:none}}
 </style>
 </head>
 <body>
 <canvas id="view" aria-label="オセロ盤"></canvas>
-<header id="hud"><div class="brand">ULTRA<b>OSERO</b></div><div id="chips"></div></header>
+<header id="hud">
+  <div class="top"><div class="brand">ULTRA<b>OSERO</b></div><div id="chips"></div></div>
+  <div id="turn" role="status" aria-live="polite"></div>
+  <div id="scorebar" aria-hidden="true"></div>
+</header>
 <div id="toast" role="status"></div>
 <div id="cutin" aria-hidden="true"><div class="main"></div><div class="sub"></div></div>
 <div id="flash"></div>
 <div id="hint">タップで演出をスキップ</div>
 <div id="nogl"><p>このブラウザでは3D表示（WebGL）が使えません。</p></div>
 <nav id="bar">
-  <button id="bNew">新しいゲーム</button>
-  <button id="bUndo">戻す</button>
-  <button id="bFx">演出: フル</button>
-  <button id="bSnd">音: オン</button>
-  <button id="bNet">オンライン</button>
+  <button id="bNew"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>新しいゲーム</span></button>
+  <button id="bUndo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><span>戻す</span></button>
+  <button id="bNet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span>オンライン</span></button>
+  <button id="bHelp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1.9-1.1 1.7"/><path d="M12 17h.01"/></svg><span>遊び方</span></button>
+  <button id="bSet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span>設定</span></button>
 </nav>
+
+<div class="sheet" id="title" hidden>
+  <div class="tcard">
+    <div class="logo">ULTRA<b>OSERO</b></div>
+    <div class="tstones" aria-hidden="true"><i class="dot" style="--c:#141518"></i><i class="dot" style="--c:#f2efe6"></i><i class="dot" style="--c:#d6352e"></i><i class="dot" style="--c:#2a61da"></i><i class="dot" style="--c:#e2a41b"></i><i class="dot" style="--c:#2b9c5a"></i></div>
+    <p class="tag">自由な盤面・最大6人で遊べる3Dオセロ</p>
+    <button class="primary big" id="tCpu">CPUと対戦<small id="tCpuSub"></small></button>
+    <button class="big" id="tSetup">ルールを決めて対戦<small>盤の形・人数・CPUの強さを選ぶ</small></button>
+    <button class="big" id="tNet">オンライン対戦<small>部屋を作って友達と遊ぶ</small></button>
+    <button class="ghost" id="tHelp">遊び方</button>
+  </div>
+</div>
 
 <div class="sheet" id="setup" hidden>
   <div class="card">
@@ -126,7 +211,7 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
       <label>名前<input id="nName" maxlength="12" autocomplete="nickname"></label>
       <div class="row"><button class="primary" id="nCreate">部屋を作る</button></div>
       <div class="row join"><input id="nCode" placeholder="ルームコード" maxlength="4" aria-label="ルームコード"><button id="nJoin">参加する</button></div>
-      <p class="note">部屋のルールと席は「新しいゲーム」の設定を使います。「人間」の席が参加枠になり、空いた席は開始時にCPUが入ります。</p>
+      <p class="note">盤面のルールと席は「新しいゲーム」の設定を使います。あなた以外の「人間」の席が友達の参加枠です（参加枠がないときは2人目を自動で参加枠にします）。空いた席には開始時にCPUが入ります。</p>
     </div>
     <div id="nLobby" hidden>
       <div class="code">ルームコード<b id="nRoomCode"></b></div>
@@ -138,12 +223,49 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
   </div>
 </div>
 
+<div class="sheet" id="settings" hidden>
+  <div class="card">
+    <h2>設定</h2>
+    <div class="set">
+      <div class="set-row wrap"><div>大技の演出<span>カメラが寄る派手な演出の量</span></div>
+        <div class="seg" id="oFx"><button data-fx="full">フル</button><button data-fx="short">短め</button><button data-fx="off">オフ</button></div></div>
+      <div class="set-row"><div>効果音</div><button class="tg" id="oSnd" aria-label="効果音"></button></div>
+      <div class="set-row"><div>置ける場所を表示<span>盤に丸で示す</span></div><button class="tg" id="oHint" aria-label="置ける場所を表示"></button></div>
+    </div>
+    <div class="row"><button class="ghost" id="oTitle">タイトルに戻る</button><button class="primary" data-close>閉じる</button></div>
+  </div>
+</div>
+
+<div class="sheet" id="help" hidden>
+  <div class="card">
+    <h2>遊び方</h2>
+    <div class="help">
+      <section><h4>基本</h4><p>自分の石で相手の石をはさむと、はさんだ石が自分の色に返ります。たて・よこ・ななめ、どの方向でもOK。1枚以上返せるマスにだけ置けます。</p></section>
+      <section><h4>置ける場所</h4><p>盤に手番の色の丸で表示されます（設定で消せます）。置ける場所がないときは自動でパスになります。</p></section>
+      <section><h4>勝ち負け</h4><p>だれも置けなくなったら終局。石が一番多い人の勝ちです。</p></section>
+      <section><h4>3人以上のとき</h4><p>自分以外の石なら、だれの石でもはさんで返せます。</p></section>
+      <section><h4>特別ルール</h4><p><b>壁ブロック</b>は置けない・返せないマス。<b>連鎖返し</b>をオンにすると、返った石がさらに石をはさんで連鎖します。</p></section>
+      <section><h4>操作</h4><p>マスを<kbd>タップ</kbd>（<kbd>クリック</kbd>）して置きます。大技の演出中はタップ（<kbd>Space</kbd>）でスキップ。「戻す」で自分の手番まで戻れます（CPU戦のみ）。</p></section>
+      <section><h4>オンライン対戦</h4><p>「部屋を作る」で出る4文字のコードを友達に伝え、友達が参加したらホストが「対局開始」。空いた席にはCPUが入ります。</p></section>
+    </div>
+    <div class="row"><button class="primary" data-close>閉じる</button></div>
+  </div>
+</div>
+
+<div class="sheet" id="confirm" hidden>
+  <div class="card" style="width:min(380px,100%)">
+    <h2 style="font-size:22px">確認</h2>
+    <p id="cMsg" style="margin:0"></p>
+    <div class="row"><button class="ghost" id="cNo">やめる</button><button class="primary" id="cOk">OK</button></div>
+  </div>
+</div>
+
 <div class="sheet" id="result" hidden>
   <div class="card">
     <h2 id="rTitle"></h2>
     <ol class="rank" id="rList"></ol>
     <p class="note" id="rNote"></p>
-    <div class="row"><button class="ghost" id="rView">盤面を見る</button><button class="ghost" id="rSetup">設定を変える</button><button class="primary" id="rAgain">もう一度</button></div>
+    <div class="row"><button class="ghost" id="rHome">タイトル</button><button class="ghost" id="rView">盤面を見る</button><button class="ghost" id="rSetup">設定を変える</button><button class="primary" id="rAgain">もう一度</button></div>
   </div>
 </div>
 
@@ -165,6 +287,7 @@ const PCOL = ['#000', '#141518', '#f2efe6', '#d6352e', '#2a61da', '#e2a41b', '#2
 const ACCENT = ['#fff', '#ffd27a', '#bfe6ff', '#ff6a5c', '#6f9bff', '#ffd45a', '#5fe39a'];
 const PNAME = ['', '黒', '白', '赤', '青', '金', '緑'];
 const LEVELS = ['', 'よわい', 'ふつう', 'つよい', '超つよい'];
+const SHAPES = { square: '標準', cross: '十字', octagon: '八角形', diamond: 'ダイヤ', islands: '島' };
 
 if (!window.THREE || !E) { $('#nogl').style.display = 'grid'; $('#nogl').textContent = 'ゲームの読み込みに失敗しました。再読み込みしてください。'; throw new Error('load'); }
 
@@ -177,7 +300,7 @@ try {
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 0.92;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
@@ -197,7 +320,7 @@ const col = (h) => new THREE.Color(h).convertSRGBToLinear();
   pm.dispose();
 }
 scene.add(new THREE.HemisphereLight(0xfff4e0, 0x0a1410, 0.28));
-const sun = new THREE.DirectionalLight(0xfff1dc, 2.1);
+const sun = new THREE.DirectionalLight(0xfff1dc, 1.55);
 sun.position.set(-5, 14, 7); sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
 scene.add(sun, sun.target);
@@ -214,7 +337,7 @@ function canvasTex(size, draw, srgb) {
   return t;
 }
 const woodTex = canvasTex(512, (x, n) => {
-  x.fillStyle = '#5b3420'; x.fillRect(0, 0, n, n);
+  x.fillStyle = '#4a2814'; x.fillRect(0, 0, n, n);
   for (let i = 0; i < 280; i++) {
     const y = Math.random() * n;
     x.strokeStyle = Math.random() < 0.55 ? `rgba(28,12,5,${0.08 + Math.random() * 0.2})` : `rgba(140,84,48,${0.06 + Math.random() * 0.14})`;
@@ -235,10 +358,11 @@ const sparkTex = canvasTex(64, (x, n) => {
 }, false);
 
 const M = {
-  wood: new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.42, metalness: 0 }),
+  wood: new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.5, metalness: 0, envMapIntensity: 0.55 }),
   brass: new THREE.MeshStandardMaterial({ color: col('#c79c4c'), roughness: 0.26, metalness: 1 }),
   base: new THREE.MeshStandardMaterial({ color: col('#050807'), roughness: 0.85 }),
-  felt: new THREE.MeshStandardMaterial({ color: col('#1c6a43'), roughness: 0.93, bumpMap: feltTex, bumpScale: 0.004 }),
+  felt: new THREE.MeshStandardMaterial({ color: col('#0f4a2e'), roughness: 0.95, metalness: 0, envMapIntensity: 0.35, bumpMap: feltTex, bumpScale: 0.004 }),
+  hoshi: new THREE.MeshBasicMaterial({ color: col('#06140d') }),
   wall: new THREE.MeshStandardMaterial({ color: col('#3a4049'), roughness: 0.34, metalness: 0.2 }),
   shadow: new THREE.ShadowMaterial({ opacity: 0.45 })
 };
@@ -259,7 +383,8 @@ let G = null, W = 8, H = 8;
 let mode = 'local';             // 'local' | 'online'
 let seats = [];                 // seats[p-1] = {type:'human'|'cpu', level, name}
 let history = [], busy = false, gameToken = 0, thinking = 0, pendingMove = false;
-let fxMode = store.get('uo_fx', 'full'), soundOn = store.get('uo_snd', true);
+let fxMode = store.get('uo_fx', 'full'), soundOn = store.get('uo_snd', true), hintsOn = store.get('uo_hint', true);
+let idle = true;                // タイトル表示中（盤は見本で、まだ対局していない）
 let lastCfg = null, lastSeats = null;
 
 /* ---------- board meshes ---------- */
@@ -282,10 +407,15 @@ function buildBoard() {
   floor.rotation.x = -Math.PI / 2;
   const tiles = [], walls = [];
   for (let i = 0; i < G.cells.length; i++) { const v = G.cells[i]; if (v === E.HOLE) continue; tiles.push(i); if (v === E.WALL) walls.push(i); }
-  const tileMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.07, 0.94), M.felt, tiles.length);
+  const tileMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.958, 0.07, 0.958), M.felt, tiles.length);
   const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3();
   tiles.forEach((i, k) => { cellPos(i, v3); m4.makeTranslation(v3.x, TT - 0.035, v3.z); tileMesh.setMatrixAt(k, m4); });
   tileMesh.receiveShadow = true; g.add(tileMesh);
+  // 標準の四角い盤には、本物の盤と同じ4つの星（線の交点の黒点）を打つ
+  if (W === H && W % 2 === 0 && W >= 6 && !G.cells.some((v) => v === E.HOLE)) {
+    const k = Math.round(W / 4), dot = new THREE.CircleGeometry(0.075, 24); dot.rotateX(-Math.PI / 2);
+    for (const sx of [-k, k]) for (const sz of [-k, k]) { const d = new THREE.Mesh(dot, M.hoshi); d.position.set(sx, TT + 0.002, sz); g.add(d); }
+  }
   if (walls.length) {
     const wallMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.84, 0.46, 0.84), M.wall, walls.length);
     walls.forEach((i, k) => { cellPos(i, v3); m4.makeTranslation(v3.x, TT + 0.23, v3.z); wallMesh.setMatrixAt(k, m4); });
@@ -317,8 +447,11 @@ function syncStones() {
 }
 
 // legal-move hints and last-move marker
-const hintGeo = new THREE.CircleGeometry(0.11, 28); hintGeo.rotateX(-Math.PI / 2);
+// 置ける場所: 手番の石の色の半透明円 + 手番のアクセント色の縁
+const hintDiscGeo = new THREE.CircleGeometry(0.3, 40); hintDiscGeo.rotateX(-Math.PI / 2);
+const hintRingGeo = new THREE.RingGeometry(0.3, 0.355, 48); hintRingGeo.rotateX(-Math.PI / 2);
 const hintMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false });
+const hintRingMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false });
 let hintPool = [];
 function buildHints() {
   for (const h of hintPool) scene.remove(h);
@@ -326,11 +459,13 @@ function buildHints() {
 }
 function showHints() {
   hideHints();
-  if (!canInput()) return;
+  if (!canInput() || !hintsOn) return;
+  hintMat.color.copy(col(PCOL[G.turn]));
+  hintRingMat.color.copy(col(ACCENT[G.turn]));
   const ms = E.moves(G, G.turn);
   ms.forEach((i, k) => {
     let h = hintPool[k];
-    if (!h) { h = new THREE.Mesh(hintGeo, hintMat); scene.add(h); hintPool.push(h); }
+    if (!h) { h = new THREE.Group(); h.add(new THREE.Mesh(hintDiscGeo, hintMat), new THREE.Mesh(hintRingGeo, hintRingMat)); scene.add(h); hintPool.push(h); }
     cellPos(i, h.position); h.position.y = TT + 0.003; h.visible = true;
   });
 }
@@ -369,7 +504,8 @@ function computeHome() {
   const top = $('#hud').offsetHeight + 8, bot = $('#bar').offsetHeight + 8;
   const free = Math.max(0.45, 1 - (top + bot) / innerHeight);
   const t = Math.tan(THREE.MathUtils.degToRad(home.fov / 2));
-  const half = Math.max((H + 1.4) / 2, (W + 1.4) / 2 / a) / free;
+  // 縦は HUD と操作バーを除いた空きに、横は画面幅いっぱい（左右に少しだけ余白）に収める
+  const half = Math.max((H + 1.4) / 2 / free, (W + 1.6) / 2 / a);
   const dist = half / t, tilt = THREE.MathUtils.degToRad(9);
   const shift = -((top - bot) / innerHeight) * half;
   home.tgt.set(0, 0, shift);
@@ -481,19 +617,43 @@ function sWhoosh() { if (skipping || !audio()) return; const t = ac.currentTime;
 function seatName(q) {
   const s = seats[q - 1];
   if (!s) return PNAME[q];
-  if (s.type === 'cpu') return 'CPU ' + LEVELS[s.level];
+  if (s.type === 'cpu') {
+    const same = seats.filter((x) => x && x.type === 'cpu' && x.level === s.level).length > 1;
+    return 'CPU ' + LEVELS[s.level] + (same ? `（${PNAME[q]}）` : '');
+  }
   if (mode === 'online') return (s.name || '空き') + (q - 1 === mySeat ? '（あなた）' : '');
   return seats.filter((x) => x.type === 'human').length === 1 ? 'あなた' : 'プレイヤー' + q;
 }
+const isMine = (q) => { const s = seats[q - 1]; return !!s && s.type === 'human' && (mode === 'local' || q - 1 === mySeat); };
+function turnHTML() {
+  if (idle) return { cls: 'idle', html: 'メニューから対局を始めよう' };
+  if (G.over) return { cls: 'idle', html: '対局終了' };
+  const q = thinking || G.turn, dot = `<i class="dot" style="--c:${PCOL[q]}"></i>`;
+  if (thinking) return { cls: '', html: `${dot}<span class="tx">${esc(seatName(q))} が考え中</span><span class="spin"></span>` };
+  const nm = seatName(q), mine = isMine(q);
+  const who = mine && (nm === 'あなた' || q - 1 === mySeat) ? 'あなたの番' : nm + ' の番';
+  return { cls: mine ? 'mine' : '', html: `${dot}<span class="tx">${esc(who)}</span><small>置ける場所 ${E.moves(G, q).length}</small>` };
+}
+let lastHudH = 0;
 function renderHUD() {
   if (!G) return;
   const c = E.counts(G);
-  let h = '';
+  let h = '', tot = 0;
   for (let q = 1; q <= G.n; q++) {
-    h += `<div class="chip${q === G.turn && !G.over ? ' on' : ''}${c[q] === 0 ? ' out' : ''}"><i style="--c:${PCOL[q]}"></i><span class="nm">${esc(seatName(q))}</span><b>${c[q]}</b>${thinking === q ? '<em>思考中</em>' : ''}</div>`;
+    tot += c[q];
+    h += `<div class="chip${q === G.turn && !G.over && !idle ? ' on' : ''}${c[q] === 0 && !idle ? ' out' : ''}"><i style="--c:${PCOL[q]}"></i><span class="nm">${esc(seatName(q))}</span><b>${c[q]}</b></div>`;
   }
   $('#chips').innerHTML = h;
-  $('#bUndo').disabled = mode !== 'local' || !history.length;
+  let bar = '';
+  for (let q = 1; q <= G.n; q++) bar += `<span style="--c:${q === 1 ? '#3a3d45' : PCOL[q]};width:${tot ? (c[q] / tot) * 100 : 100 / G.n}%"></span>`;
+  $('#scorebar').innerHTML = bar;
+  const t = turnHTML(), el = $('#turn');
+  el.className = t.cls; el.innerHTML = t.html;
+  $('#bUndo').disabled = idle || mode !== 'local' || !history.length;
+  // HUD の高さが変わったら、盤が隠れないようにカメラを合わせ直す
+  const hh = $('#hud').offsetHeight;
+  document.documentElement.style.setProperty('--hudh', hh + 'px');
+  if (hh !== lastHudH) { lastHudH = hh; if (boardGroup && !camAway && !busy) fitCamera(false); }
 }
 let toastTimer = 0;
 function toast(msg) { const el = $('#toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 1900); }
@@ -527,7 +687,13 @@ function analyze(rec, before) {
 /* ---------- playing a move on screen ---------- */
 const cheb = (a, b) => Math.max(Math.abs((a % W) - (b % W)), Math.abs(Math.floor(a / W) - Math.floor(b / W)));
 async function showMove(rec, before) {
-  busy = true; hideHints(); placeMarker(-1);
+  busy = true; hideHints(); placeMarker(-1); hover.visible = false;
+  // 演出中のバナー: だれが打って何枚返したか
+  {
+    const nm = seatName(rec.p), me = isMine(rec.p) && (nm === 'あなた' || rec.p - 1 === mySeat);
+    const tEl = $('#turn'); tEl.className = '';
+    tEl.innerHTML = `<i class="dot" style="--c:${PCOL[rec.p]}"></i><span class="tx">${esc(me ? 'あなた' : nm)} の手</span><small>${rec.flips.length / 4}枚返し</small>`;
+  }
   const P = cellPos(rec.i, new THREE.Vector3());
   const info = analyze(rec, before);
   const lvl = fxMode === 'off' ? 0 : info.level;
@@ -604,7 +770,7 @@ async function showMove(rec, before) {
 
 /* ---------- turns (local) ---------- */
 function canInput() {
-  if (!G || G.over || busy || pendingMove) return false;
+  if (!G || idle || G.over || busy || pendingMove) return false;
   const s = seats[G.turn - 1];
   if (!s || s.type !== 'human') return false;
   return mode === 'local' || G.turn - 1 === mySeat;
@@ -613,14 +779,35 @@ function passNote(rec) {
   if (rec.passed.length && !G.over) toast(rec.passed.map(seatName).join('、') + ' はパス');
 }
 function startLocal(cfg, seatDefs) {
-  mode = 'local'; gameToken++; thinking = 0; pendingMove = false;
+  mode = 'local'; gameToken++; thinking = 0; pendingMove = false; idle = false;
   lastCfg = cfg; lastSeats = seatDefs;
   G = E.createGame(cfg);
   seats = seatDefs.slice(0, G.n);
   history = [];
-  closeSheets(); buildBoard(); placeMarker(-1); renderHUD();
+  closeSheets(); renderHUD(); buildBoard(); placeMarker(-1); renderHUD();
   nextTurn();
 }
+// タイトルの後ろに見せる見本の盤（対局はまだ始まらない）
+function previewBoard(cfg, seatDefs) {
+  mode = 'local'; gameToken++; thinking = 0; pendingMove = false; idle = true;
+  G = E.createGame(cfg);
+  seats = seatDefs.slice(0, G.n);
+  history = [];
+  renderHUD(); buildBoard(); placeMarker(-1); hideHints(); renderHUD();
+}
+function showTitle() {
+  const st = setupState, opp = st.seats.slice(1, st.players).filter((v) => v !== 'h');
+  const lv = [...new Set(opp.map((v) => LEVELS[+v.slice(1)]))].join('・');
+  $('#tCpuSub').textContent = `${SHAPES[st.shape] || '標準'} ${st.size}×${st.size}・${st.players}人${lv ? '・CPU ' + lv : ''}`;
+  openSheet('title');
+}
+function goTitle() {
+  if (room) netLeave();
+  const f = readSetupDefaults();
+  previewBoard(f.cfg, f.seats);
+  showTitle();
+}
+const inGame = () => G && !idle && !G.over && (history.length > 0 || mode === 'online');
 async function commitLocal(i) {
   history.push(E.toData(G));
   const before = E.counts(G);
@@ -682,7 +869,8 @@ function undo() {
 function showResult() {
   const list = E.ranking(G), top = list[0].stones;
   const winners = list.filter((x) => x.stones === top);
-  $('#rTitle').textContent = winners.length > 1 ? '引き分け' : seatName(winners[0].p) + ' の勝ち!';
+  $('#rTitle').innerHTML = winners.length > 1 ? '引き分け'
+    : `<i class="dot" style="--c:${PCOL[winners[0].p]}"></i>${esc(winners[0].p - 1 === mySeat || seatName(winners[0].p) === 'あなた' ? 'あなたの勝ち!' : seatName(winners[0].p) + ' の勝ち!')}`;
   let rank = 0, prev = -1;
   $('#rList').innerHTML = list.map((x, k) => { if (x.stones !== prev) { rank = k + 1; prev = x.stones; } return `<li><em>${rank}</em><i style="--c:${PCOL[x.p]}"></i>${esc(seatName(x.p))}<b>${x.stones}</b></li>`; }).join('');
   const host = mode === 'online' && room && room.host === mySeat;
@@ -693,10 +881,26 @@ function showResult() {
 }
 
 /* ---------- sheets ---------- */
-function openSheet(id) { closeSheets(); $('#' + id).hidden = false; }
-function closeSheets() { for (const s of document.querySelectorAll('.sheet')) s.hidden = true; }
+let confirmRes = null;
+function openSheet(id) {
+  for (const s of document.querySelectorAll('.sheet')) s.hidden = s.id !== id;
+  const f = $('#' + id).querySelector('button.primary, button');
+  if (f && matchMedia('(pointer:fine)').matches) f.focus({ preventScroll: true });
+}
+function closeSheets() {
+  for (const s of document.querySelectorAll('.sheet')) s.hidden = true;
+  if (confirmRes) { const r = confirmRes; confirmRes = null; r(false); }
+  if (idle) $('#title').hidden = false; // 対局前なら、閉じたらタイトルに戻る
+}
+function ask(msg, ok) {
+  $('#cMsg').textContent = msg; $('#cOk').textContent = ok || 'OK';
+  openSheet('confirm');
+  return new Promise((r) => { confirmRes = r; });
+}
+$('#cOk').addEventListener('click', () => { const r = confirmRes; confirmRes = null; closeSheets(); if (r) r(true); });
+$('#cNo').addEventListener('click', closeSheets);
 document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeSheets));
-document.querySelectorAll('.sheet').forEach((s) => s.addEventListener('click', (e) => { if (e.target === s && s.id !== 'result') closeSheets(); }));
+document.querySelectorAll('.sheet').forEach((s) => s.addEventListener('click', (e) => { if (e.target === s && !['result', 'title', 'confirm'].includes(s.id)) closeSheets(); }));
 
 // setup form
 const setupState = store.get('uo_setup', { shape: 'square', size: 8, players: 2, walls: 0, chain: false, seats: ['h', 'c3', 'c3', 'c3', 'c3', 'c3'] });
@@ -737,14 +941,31 @@ $('#sStart').addEventListener('click', () => { const r = readSetup(); if (room) 
 /* ---------- buttons ---------- */
 $('#bNew').addEventListener('click', () => { loadSetup(); openSheet('setup'); });
 $('#bUndo').addEventListener('click', undo);
-const fxLabel = { full: 'フル', short: '短め', off: 'オフ' };
-function renderFx() { $('#bFx').textContent = '演出: ' + fxLabel[fxMode]; $('#bSnd').textContent = '音: ' + (soundOn ? 'オン' : 'オフ'); }
-$('#bFx').addEventListener('click', () => { fxMode = fxMode === 'full' ? 'short' : fxMode === 'short' ? 'off' : 'full'; store.set('uo_fx', fxMode); renderFx(); });
-$('#bSnd').addEventListener('click', () => { soundOn = !soundOn; store.set('uo_snd', soundOn); renderFx(); if (soundOn) { audio(); sClick(); } });
 $('#bNet').addEventListener('click', openNet);
+$('#bHelp').addEventListener('click', () => openSheet('help'));
+$('#bSet').addEventListener('click', () => { renderFx(); openSheet('settings'); });
+function renderFx() {
+  for (const b of document.querySelectorAll('#oFx button')) b.setAttribute('aria-pressed', String(b.dataset.fx === fxMode));
+  $('#oSnd').setAttribute('aria-pressed', String(soundOn));
+  $('#oHint').setAttribute('aria-pressed', String(hintsOn));
+}
+$('#oFx').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; fxMode = b.dataset.fx; store.set('uo_fx', fxMode); renderFx(); });
+$('#oSnd').addEventListener('click', () => { soundOn = !soundOn; store.set('uo_snd', soundOn); renderFx(); if (soundOn) { audio(); sClick(); } });
+$('#oHint').addEventListener('click', () => { hintsOn = !hintsOn; store.set('uo_hint', hintsOn); renderFx(); if (hintsOn) showHints(); else hideHints(); });
+$('#oTitle').addEventListener('click', async () => {
+  if (inGame() && !(await ask('対局中です。タイトルに戻ると、この対局は終わります。', 'タイトルに戻る'))) return;
+  goTitle();
+});
+// タイトル画面
+$('#tCpu').addEventListener('click', () => { audio(); const r = readSetupDefaults(); startLocal(r.cfg, r.seats); });
+$('#tSetup').addEventListener('click', () => { loadSetup(); openSheet('setup'); });
+$('#tNet').addEventListener('click', openNet);
+$('#tHelp').addEventListener('click', () => openSheet('help'));
+// 終局
 $('#rAgain').addEventListener('click', () => { if (mode === 'online') { send({ t: 'start' }); closeSheets(); } else startLocal(lastCfg, lastSeats); });
 $('#rSetup').addEventListener('click', () => { loadSetup(); openSheet('setup'); });
 $('#rView').addEventListener('click', closeSheets);
+$('#rHome').addEventListener('click', goTitle);
 renderFx();
 
 /* ---------- input ---------- */
@@ -771,14 +992,18 @@ canvas.addEventListener('pointerup', (e) => {
   if (mode === 'local') commitLocal(i);
   else { pendingMove = true; hideHints(); send({ t: 'move', i }); }
 });
-const hover = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.36, 40), new THREE.MeshBasicMaterial({ color: col('#d8b264'), transparent: true, opacity: 0.8, depthWrite: false }));
+// マウスを乗せると、そこに置く石の影を出す
+const hover = new THREE.Mesh(new THREE.CircleGeometry(0.4, 48), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.62, depthWrite: false }));
 hover.geometry.rotateX(-Math.PI / 2); hover.visible = false; scene.add(hover);
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'mouse') return;
   const i = canInput() ? cellAt(e.clientX, e.clientY) : -1;
-  if (i >= 0 && E.isLegal(G, i, G.turn)) { cellPos(i, hover.position); hover.position.y = TT + 0.004; hover.visible = true; canvas.style.cursor = 'pointer'; }
-  else { hover.visible = false; canvas.style.cursor = ''; }
+  if (i >= 0 && E.isLegal(G, i, G.turn)) {
+    hover.material.color.copy(col(PCOL[G.turn]));
+    cellPos(i, hover.position); hover.position.y = TT + 0.006; hover.visible = true; canvas.style.cursor = 'pointer';
+  } else { hover.visible = false; canvas.style.cursor = ''; }
 });
+canvas.addEventListener('pointerleave', () => { hover.visible = false; });
 addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheets(); if ((e.key === ' ' || e.key === 'Enter') && busy) skipping = true; });
 
 /* ---------- online ---------- */
@@ -816,6 +1041,11 @@ function needWs() { if (!ws || ws.readyState !== 1) { setNet('サーバーに接
 $('#nCreate').addEventListener('click', () => {
   if (!needWs()) return;
   const r = readSetup();
+  // 人間の席が自分だけだと友達が座れない（観戦になる）ので、2人目を参加枠にする
+  if (r.seats.filter((s) => s.type === 'human').length < 2) {
+    const k = r.seats.findIndex((s, i) => i > 0 && s.type !== 'human');
+    if (k > 0) r.seats[k] = { type: 'human' };
+  }
   send({ t: 'hello', token: myToken, name: myName() });
   send({ t: 'create', cfg: r.cfg, seats: r.seats });
 });
@@ -845,9 +1075,9 @@ function onNet(m) {
       renderLobby(); if (mode === 'online') renderHUD();
       break;
     case 'state':
-      mode = 'online'; gameToken++; thinking = 0; netQueue.length = 0; pendingMove = false; history = [];
+      mode = 'online'; gameToken++; thinking = 0; netQueue.length = 0; pendingMove = false; history = []; idle = false;
       G = E.fromData(m.data);
-      closeSheets(); buildBoard(); placeMarker(-1); renderHUD();
+      closeSheets(); renderHUD(); buildBoard(); placeMarker(-1); renderHUD();
       if (G.over) showResult(); else showHints();
       break;
     case 'move': netQueue.push(m); pump(); break;
@@ -879,17 +1109,20 @@ function frame(now) {
   stepTasks(dt);
   updateParticles(dt * timeScale);
   if (burstLight.intensity > 0) burstLight.intensity = Math.max(0, burstLight.intensity - dt * 30);
-  hintMat.opacity = 0.2 + Math.sin(now / 380) * 0.1;
+  const pulse = Math.sin(now / 380);
+  hintMat.opacity = 0.3 + pulse * 0.1;
+  hintRingMat.opacity = 0.72 + pulse * 0.2;
   updateCam(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 addEventListener('resize', () => fitCamera(false));
 
-// first game: the last settings, otherwise you vs CPU つよい on a standard board
-const first = readSetupDefaults();
+// 起動: 前回の設定（無ければ 標準8×8・あなた vs CPU つよい）の盤を見本に出して、タイトルを表示
 function readSetupDefaults() { loadSetup(); return readSetup(); }
-startLocal(first.cfg, first.seats);
+const first = readSetupDefaults();
+previewBoard(first.cfg, first.seats);
+showTitle();
 requestAnimationFrame(frame);
 if (myToken && /^https?:$/.test(location.protocol)) connect().catch(() => {}); // rejoin a room after reload
 }
