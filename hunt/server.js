@@ -10,10 +10,21 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const E = require('./engine.js');
+const Accounts = require('./accounts.js');
 
 const PORT = +process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 const FILES = { '/': 'index.html', '/index.html': 'index.html' };
+const DATA_DIR = process.env.HUNT_DATA_DIR || path.join(__dirname, 'data');
+const accounts = Accounts.create(DATA_DIR);
+// ログインの試しすぎを止める（1つの回線から 10分に 10回まで）
+const LOGIN_MAX = 10, LOGIN_WINDOW = 10 * 60 * 1000;
+const loginTries = new Map();   // ip -> [時刻…]
+function loginAllowed(ip) {
+  const now = Date.now(), a = (loginTries.get(ip) || []).filter((t) => now - t < LOGIN_WINDOW);
+  if (a.length >= LOGIN_MAX) { loginTries.set(ip, a); return false; }
+  a.push(now); loginTries.set(ip, a); return true;
+}
 
 // 乱用対策（UltraOSERO と同じ考え方）
 const MAX_MSG = 8 * 1024;
@@ -121,7 +132,7 @@ function roomView(r, p) {
   return {
     t: 'room', code: r.code, quest: r.quest, public: r.public, phase: r.phase, host: r.players[0] ? r.players[0].id : null,
     you: p.id, max: MAX_PLAYERS,
-    players: r.players.map((x) => ({ id: x.id, name: x.name, online: online(x) })),
+    players: r.players.map((x) => ({ id: x.id, name: x.name, online: online(x), member: !!x.user })),
   };
 }
 function sendRoom(r) { for (const p of r.players) if (p.conn) p.conn.send(roomView(r, p)); notifyLobby(); }
@@ -222,16 +233,29 @@ function armTimer(r, nEvents) {
   }, wait);
 }
 
+function sendMe(p) { if (p.conn) p.conn.send({ t: 'me', me: p.user ? accounts.profile(p.user) : null }); }
+
+/* 狩りが終わった: ログインしている人の戦績・彩石・実績を記録する */
+function recordResult(r) {
+  const s = r.state;
+  for (const p of r.players) {
+    if (!p.user) continue;
+    const res = accounts.record(p.user, { quest: s.quest, win: !!s.win, turns: s.turns, breaks: r.breaks | 0, players: r.players.length });
+    if (res && p.conn) { p.conn.send({ t: 'reward', stones: res.stones, unlocked: res.unlocked }); sendMe(p); }
+  }
+}
+
 function afterAct(r, events) {
   r.touched = Date.now();
-  if (r.state.phase === 'over') { clearTimeout(r.timer); r.deadline = 0; r.phase = 'result'; sendState(r, events); sendRoom(r); return; }
+  r.breaks = (r.breaks | 0) + events.filter((e) => e.t === 'break').length;
+  if (r.state.phase === 'over') { clearTimeout(r.timer); r.deadline = 0; r.phase = 'result'; sendState(r, events); recordResult(r); sendRoom(r); return; }
   armTimer(r, events.length);
   sendState(r, events);
 }
 
 function startBattle(r) {
   r.state = E.createBattle(r.quest, r.players.length, crypto.randomInt(1, 2 ** 31 - 1));
-  r.phase = 'battle';
+  r.phase = 'battle'; r.breaks = 0;
   const ev = E.start(r.state);
   sendRoom(r);
   afterAct(r, ev);
@@ -251,7 +275,9 @@ function handle(c, m) {
     }
     if (m.name) p.name = cleanName(m.name);
     p.conn = c; c.player = p; p.seen = Date.now();
-    c.send({ t: 'welcome', token: p.token, id: p.id, name: p.name, defs: DEFS });
+    const su = accounts.resume(m.session);
+    if (su) { p.user = su; p.session = m.session; p.name = accounts.nameOf(su); } else if (m.session) { p.user = null; p.session = null; }
+    c.send({ t: 'welcome', token: p.token, id: p.id, name: p.name, defs: DEFS, me: p.user ? accounts.profile(p.user) : null, badSession: !!(m.session && !su) });
     if (p.room) {
       const r = p.room;
       sendRoom(r);
@@ -268,7 +294,35 @@ function handle(c, m) {
   p.seen = Date.now();
   const r = p.room;
   switch (m.t) {
-    case 'name': p.name = cleanName(m.name); if (r) sendRoom(r); break;
+    case 'name': if (!p.user) { p.name = cleanName(m.name); if (r) sendRoom(r); } break;
+    case 'register':
+    case 'login': {
+      if (p.authBusy) break;
+      if (!loginAllowed(c.ip)) { c.send({ t: 'auth', error: '試した回数が多すぎます。10分ほど待ってからお試しください。' }); break; }
+      p.authBusy = true;
+      const fn = m.t === 'register' ? accounts.register : accounts.login;
+      fn(m.user, m.pass).then((res) => {
+        p.authBusy = false;
+        if (res.error) { if (p.conn) p.conn.send({ t: 'auth', error: res.error }); return; }
+        p.user = res.user; p.session = res.session; p.name = accounts.nameOf(res.user);
+        if (p.conn) p.conn.send({ t: 'auth', session: res.session, me: accounts.profile(res.user), created: m.t === 'register' });
+        if (p.room) sendRoom(p.room);
+      }).catch(() => { p.authBusy = false; if (p.conn) p.conn.send({ t: 'auth', error: 'うまくいきませんでした。もう一度お試しください。' }); });
+      break;
+    }
+    case 'logout':
+      if (p.user) { accounts.logout(p.user, p.session); p.user = null; p.session = null; }
+      c.send({ t: 'auth', session: null, me: null });
+      break;
+    case 'me': sendMe(p); break;
+    case 'claim': {
+      if (!p.user) { c.send({ t: 'error', msg: 'ログインすると受け取れます。' }); break; }
+      const res = accounts.claim(p.user, String(m.id || ''));
+      if (res.error) c.send({ t: 'error', msg: res.error });
+      else c.send({ t: 'claimed', id: m.id, reward: res.reward });
+      sendMe(p);
+      break;
+    }
     case 'rooms': p.wantList = true; c.send({ t: 'rooms', rooms: listRooms() }); break;
     case 'create': p.wantList = false; createRoom(p, String(m.quest || ''), !!m.public); break;
     case 'join': p.wantList = false; joinRoom(p, m.code); break;
@@ -325,6 +379,8 @@ setInterval(() => {
   }
 }, 60000).unref();
 
-server.listen(PORT, HOST, () => console.log(`hunt server on http://${HOST}:${PORT}/`));
+process.on('SIGTERM', () => { accounts.flush(); process.exit(0); });
+process.on('SIGINT', () => { accounts.flush(); process.exit(0); });
+server.listen(PORT, HOST, () => console.log(`hunt server on http://${HOST}:${PORT}/ (accounts: ${accounts.count()})`));
 
 module.exports = { server };

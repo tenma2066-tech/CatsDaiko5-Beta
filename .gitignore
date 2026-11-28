@@ -3,3 +3,4 @@ instance/
 tsum_engine/tsum_debug.log
 *.log
 tsum_engine/tsum_gs_fulldump.json
+hunt/data/

@@ -7,195 +7,240 @@
 <title>彩狩 -IROGARI-</title>
 <style>
 :root{
-  --bg0:#0b1020; --bg1:#141c36; --panel:rgba(18,24,44,.82); --panel2:rgba(30,38,66,.9);
-  --gold:#d9bf86; --gold2:#f3e2b8; --line:rgba(217,191,134,.42); --ink:#efe8da; --dim:#a8a493;
+  --bg0:#080c1a; --bg1:#131a34; --panel:rgba(14,19,38,.84); --panel2:rgba(26,33,60,.92);
+  --gold:#d9bf86; --gold2:#f6e7c1; --gold3:#8f7743; --line:rgba(217,191,134,.45); --ink:#f1eadb; --dim:#a9a595;
   --red:#ff6f61; --green:#6fd58a; --blue:#5cb2ff; --yellow:#f6d256; --purple:#bb90ff;
   --serif:"Hiragino Mincho ProN","Yu Mincho","YuMincho","Noto Serif JP","Times New Roman",serif;
   --sans:"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",system-ui,sans-serif;
+  --hex:polygon(16px 0,calc(100% - 16px) 0,100% 50%,calc(100% - 16px) 100%,16px 100%,0 50%);
+  --cut:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;overflow:hidden;background:radial-gradient(120% 90% at 50% 18%,#26335e 0%,var(--bg1) 42%,var(--bg0) 100%);color:var(--ink);font-family:var(--sans);user-select:none;-webkit-user-select:none;touch-action:manipulation}
+html,body{margin:0;height:100%;overflow:hidden;background:radial-gradient(120% 90% at 50% 12%,#2a3768 0%,var(--bg1) 45%,var(--bg0) 100%);color:var(--ink);font-family:var(--sans);user-select:none;-webkit-user-select:none;touch-action:manipulation}
 #gl{position:fixed;inset:0;width:100%;height:100%;display:block}
-body.flat #gl{display:none}
 .hidden{display:none!important}
-button{font:inherit;color:inherit;cursor:pointer}
-.serif{font-family:var(--serif);letter-spacing:.08em}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;padding:0}
 
-/* ---- 共通の枠 ---- */
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:0 10px 34px rgba(0,0,0,.45),inset 0 0 0 1px rgba(255,255,255,.04)}
-.orn{display:flex;align-items:center;gap:10px;color:var(--gold);font-size:11px;letter-spacing:.3em}
+/* ---- 枠（角を切った金ぶちの板） ---- */
+.panel{position:relative;background:linear-gradient(160deg,rgba(246,231,193,.75),rgba(143,119,67,.5) 30%,rgba(217,191,134,.25) 60%,rgba(246,231,193,.6));clip-path:var(--cut);padding:1.5px;filter:drop-shadow(0 12px 26px rgba(0,0,0,.55))}
+.panel>.in{position:relative;background:linear-gradient(180deg,rgba(24,31,58,.95),rgba(10,14,30,.96));clip-path:var(--cut);height:100%}
+.panel>.in:before{content:"";position:absolute;inset:5px;border:1px solid rgba(217,191,134,.16);clip-path:var(--cut);pointer-events:none}
+.orn{display:flex;align-items:center;gap:10px;color:var(--gold);font-size:11px;letter-spacing:.32em;font-family:var(--serif)}
 .orn:before,.orn:after{content:"";flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--line),transparent)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:0 22px;border-radius:999px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(60,70,110,.75),rgba(28,34,60,.9));color:var(--ink);font-family:var(--serif);letter-spacing:.12em;font-size:15px;transition:transform .08s,filter .15s,border-color .15s}
-.btn:active{transform:scale(.97)}
-.btn:hover{border-color:var(--gold2);filter:brightness(1.12)}
-.btn.pri{background:linear-gradient(180deg,#f3e2b8,#c9a866);color:#2a2414;border-color:#fff3cf;font-weight:700;box-shadow:0 0 18px rgba(217,191,134,.35)}
-.btn.ghost{background:rgba(18,24,44,.55)}
-.btn:disabled{opacity:.4;pointer-events:none}
-.btn.sm{min-height:36px;padding:0 14px;font-size:13px}
-input.txt{width:100%;height:46px;border-radius:999px;border:1px solid var(--line);background:rgba(8,12,26,.7);color:var(--ink);padding:0 18px;font:inherit;font-size:16px;outline:none;text-align:center;letter-spacing:.08em}
-input.txt:focus{border-color:var(--gold2)}
 
-/* ---- 画面の切り替え ---- */
-.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));overflow:auto}
-#title .box{width:min(440px,100%);padding:28px 22px 22px;text-align:center}
-#title h1{margin:0;font-family:var(--serif);font-weight:500;font-size:46px;letter-spacing:.3em;text-indent:.3em;background:linear-gradient(180deg,#fff7df,#d9bf86 70%,#a98d55);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 2px 14px rgba(217,191,134,.35))}
-#title .sub{font-family:var(--serif);color:var(--gold);letter-spacing:.5em;text-indent:.5em;font-size:12px;margin:2px 0 6px}
-#title .dots{display:flex;justify-content:center;gap:9px;margin:14px 0 18px}
-.dot{width:10px;height:10px;transform:rotate(45deg);border:1px solid rgba(255,255,255,.5)}
-.stack{display:grid;gap:10px;margin-top:14px}
-.row{display:flex;gap:10px}.row>*{flex:1}
-.note{color:var(--dim);font-size:12px;line-height:1.7;margin-top:14px}
+/* ---- ボタン（六角の刃の形・金ぶち・光が走る） ---- */
+.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 30px;clip-path:var(--hex);background:linear-gradient(180deg,#f6e7c1,#8f7743 55%,#d9bf86);font-family:var(--serif);font-size:15px;letter-spacing:.16em;color:var(--ink);isolation:isolate;transition:transform .09s,filter .15s;overflow:hidden;white-space:nowrap}
+.btn:before{content:"";position:absolute;inset:1.5px;clip-path:var(--hex);background:linear-gradient(180deg,#3a4576 0%,#1c2344 48%,#141a36 52%,#232c55 100%);z-index:-1}
+.btn:after{content:"";position:absolute;top:0;bottom:0;left:-60%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent);transform:skewX(-20deg);transition:left .5s;z-index:-1}
+.btn:hover:after{left:120%}.btn:hover{filter:brightness(1.15)}.btn:active{transform:scale(.96)}
+.btn.pri{color:#2b2410;font-weight:700;text-shadow:0 1px 0 rgba(255,255,255,.5)}
+.btn.pri:before{background:linear-gradient(180deg,#fff6dc 0%,#ecd49a 45%,#c9a65f 55%,#e6cc90 100%)}
+.btn.sm{min-height:36px;padding:0 20px;font-size:12px;--hex:polygon(11px 0,calc(100% - 11px) 0,100% 50%,calc(100% - 11px) 100%,11px 100%,0 50%)}
+.btn:disabled{filter:grayscale(.8) brightness(.6);pointer-events:none}
+.btn .gem{width:7px;height:7px;transform:rotate(45deg);background:currentColor;opacity:.75;margin:0 10px}
+.field{position:relative;clip-path:var(--hex);background:linear-gradient(180deg,#8f7743,#4a4030);padding:1.5px}
+.field input{width:100%;height:45px;clip-path:var(--hex);border:0;background:#0a0f22;color:var(--ink);padding:0 26px;font:inherit;font-size:16px;outline:none;text-align:center;letter-spacing:.08em}
+.field:focus-within{background:linear-gradient(180deg,#f6e7c1,#d9bf86)}
 
-#lobby .box{width:min(760px,100%);padding:20px 18px}
-#lobby h2{margin:0 0 4px;font-family:var(--serif);font-weight:500;font-size:22px;letter-spacing:.2em}
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:max(14px,env(safe-area-inset-top)) 14px max(14px,env(safe-area-inset-bottom));overflow:auto}
+.box .in{padding:24px 22px 20px}
+.stack{display:grid;gap:10px;margin-top:12px}.row{display:flex;gap:8px}.row>*{flex:1;min-width:0}
+.note{color:var(--dim);font-size:12px;line-height:1.7;margin-top:12px}
+
+/* ---- タイトル ---- */
+#title .box{width:min(450px,100%);text-align:center}
+#title h1{margin:0;font-family:var(--serif);font-weight:500;font-size:52px;letter-spacing:.32em;text-indent:.32em;background:linear-gradient(180deg,#fffbe9,#d9bf86 65%,#9c7f48);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 2px 16px rgba(217,191,134,.4))}
+#title .sub{font-family:var(--serif);color:var(--gold);letter-spacing:.55em;text-indent:.55em;font-size:11px}
+.dots{display:flex;justify-content:center;gap:10px;margin:12px 0 14px}.dot{width:10px;height:10px;transform:rotate(45deg);box-shadow:0 0 10px currentColor}
+#acct{margin-top:6px}
+#acctIn{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:rgba(8,12,26,.6);border:1px solid rgba(217,191,134,.25)}
+#acctIn .who{font-family:var(--serif);font-size:17px;letter-spacing:.1em;text-align:left}
+.stone{display:inline-flex;align-items:center;gap:6px;color:var(--gold2);font-family:var(--serif);font-size:15px}
+.stone:before{content:"";width:11px;height:11px;transform:rotate(45deg);background:linear-gradient(135deg,#ff9a8e,#f6d256,#6fd58a,#5cb2ff,#bb90ff);box-shadow:0 0 8px rgba(255,255,255,.6)}
+.tabs{display:flex;gap:6px;justify-content:center;margin:10px 0 2px}
+.tab{font-family:var(--serif);font-size:12px;letter-spacing:.14em;color:var(--dim);padding:6px 14px;border-bottom:2px solid transparent}
+.tab.on{color:var(--gold2);border-color:var(--gold)}
+.rooms{display:grid;gap:6px;max-height:150px;overflow:auto;margin-top:10px}
+.roomrow{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(8,12,26,.6);border:1px solid rgba(217,191,134,.22);font-size:13px;width:100%}
+.roomrow:hover{border-color:var(--gold)}
+
+/* ---- 部屋 ---- */
+#lobby .box{width:min(780px,100%)}
+#lobby h2{margin:0;font-family:var(--serif);font-weight:500;font-size:21px;letter-spacing:.2em}
 .code{font-family:var(--serif);font-size:30px;letter-spacing:.35em;color:var(--gold2)}
 .quests{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
-.quest{position:relative;padding:14px 10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);text-align:center;transition:.15s;overflow:hidden}
-.quest:before{content:"";position:absolute;inset:0;background:radial-gradient(90% 70% at 50% 0%,var(--c),transparent 70%);opacity:.22}
-.quest.on{border-color:var(--gold2);box-shadow:0 0 0 1px var(--gold2),0 0 22px rgba(217,191,134,.3);transform:translateY(-2px)}
-.quest .nm{position:relative;font-family:var(--serif);font-size:19px;letter-spacing:.14em}
-.quest .tt{position:relative;color:var(--dim);font-size:11px;margin-top:3px}
-.quest .st{position:relative;color:var(--gold);font-size:13px;letter-spacing:.2em;margin-top:6px}
-.quest .el{position:relative;display:inline-block;margin-top:6px;padding:2px 10px;border-radius:999px;font-size:11px;border:1px solid var(--c);color:var(--c)}
+.quest{position:relative;padding:15px 8px 12px;clip-path:var(--cut);background:linear-gradient(180deg,color-mix(in srgb,var(--c) 26%,#141a36),#0d1228);text-align:center;transition:.15s;outline:1px solid rgba(255,255,255,.1);outline-offset:-1px}
+.quest.on{outline:2px solid var(--gold2);filter:drop-shadow(0 0 14px rgba(217,191,134,.5));transform:translateY(-3px)}
+.quest .nm{font-family:var(--serif);font-size:19px;letter-spacing:.14em}.quest .tt{color:var(--dim);font-size:11px;margin-top:3px}
+.quest .st{color:var(--gold);font-size:13px;letter-spacing:.2em;margin-top:6px}
+.quest .el{display:inline-block;margin-top:6px;padding:2px 10px;font-size:11px;border:1px solid var(--c);color:var(--c)}
 .members{display:grid;gap:6px;margin:10px 0}
-.member{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:rgba(8,12,26,.5);border:1px solid rgba(255,255,255,.07);font-size:14px}
-.member .tag{margin-left:auto;font-size:11px;color:var(--gold)}
-.member.off{opacity:.45}
+.member{display:flex;align-items:center;gap:10px;padding:9px 12px;background:rgba(8,12,26,.55);border-left:3px solid var(--gold3);font-size:14px}
+.member .tag{margin-left:auto;font-size:11px;color:var(--gold)}.member.off{opacity:.45}
 .share{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
-.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11px;border:1px solid var(--c,var(--line));color:var(--c,var(--ink));background:rgba(8,12,26,.5)}
-.rooms{display:grid;gap:6px;max-height:190px;overflow:auto;margin-top:10px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;font-size:11px;border:1px solid var(--c,var(--line));color:var(--c,var(--ink));background:rgba(8,12,26,.55)}
 
-/* ---- 戦いの画面 ---- */
-#hud{position:fixed;inset:0;pointer-events:none}
-#hud>*{pointer-events:auto}
-#order{position:absolute;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));display:flex;flex-direction:column;gap:5px;padding:9px 8px;width:66px}
-#order .lbl{font-family:var(--serif);font-size:10px;letter-spacing:.2em;color:var(--gold);text-align:center;margin-bottom:2px}
-.ord{position:relative;height:30px;border-radius:8px;border:1px solid var(--c);background:linear-gradient(90deg,color-mix(in srgb,var(--c) 34%,transparent),rgba(8,12,26,.6));display:flex;align-items:center;justify-content:center;font-size:11px;font-family:var(--serif);letter-spacing:.05em;overflow:hidden;white-space:nowrap;transition:.25s}
-.ord.now{height:38px;box-shadow:0 0 14px var(--c);font-size:12px;border-width:2px}
-.ord.foe{border-style:double;border-width:3px}
+/* ---- 戦い ---- */
+#hud{position:fixed;inset:0;pointer-events:none}#hud>*{pointer-events:auto}
+#order{position:absolute;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));display:flex;flex-direction:column;gap:5px;width:74px}
+#order .lbl{font-family:var(--serif);font-size:10px;letter-spacing:.24em;color:var(--gold);text-align:center;text-shadow:0 1px 4px #000}
+.ord{position:relative;height:28px;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%);background:linear-gradient(90deg,var(--c),color-mix(in srgb,var(--c) 30%,#0b1020));display:flex;align-items:center;justify-content:center;font-size:11px;font-family:var(--serif);color:#fff;text-shadow:0 1px 3px #000;white-space:nowrap;transition:.25s;opacity:.82}
+.ord.now{height:38px;font-size:13px;opacity:1;filter:drop-shadow(0 0 8px var(--c));margin-right:-10px}
+.ord.foe{background:linear-gradient(90deg,#3a0d0d,var(--c))}
 
-#boss{position:absolute;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 180px));padding:10px 14px 9px;text-align:center}
-#boss .nm{font-family:var(--serif);font-size:20px;letter-spacing:.22em;text-indent:.22em}
-#boss .meta{display:flex;justify-content:center;gap:6px;margin:2px 0 6px;flex-wrap:wrap;min-height:20px}
-.bar{position:relative;height:10px;border-radius:999px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.12);overflow:hidden}
-.bar>i{position:absolute;inset:0 auto 0 0;width:100%;border-radius:999px;background:linear-gradient(90deg,#ff8e7c,#ffd27a);transition:width .35s cubic-bezier(.2,.8,.2,1)}
-.bar>b{position:absolute;inset:0 auto 0 0;width:100%;background:rgba(255,255,255,.55);transition:width .8s .25s}
-#boss .hpn{font-size:11px;color:var(--dim);margin-top:3px;letter-spacing:.05em}
+#boss{position:absolute;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(540px,calc(100% - 200px))}
+#boss .in{padding:9px 16px 10px;text-align:center}
+#boss .nm{font-family:var(--serif);font-size:20px;letter-spacing:.24em;text-indent:.24em}
+#boss .meta{display:flex;justify-content:center;gap:5px;margin:3px 0 6px;flex-wrap:wrap;min-height:20px}
+.bar{position:relative;height:11px;background:#05070f;outline:1px solid rgba(217,191,134,.35);transform:skewX(-18deg);overflow:hidden}
+.bar>i{position:absolute;inset:0 auto 0 0;width:100%;background:linear-gradient(180deg,#ffb199,#ff6f61 55%,#c43b33);transition:width .3s cubic-bezier(.2,.8,.2,1)}
+.bar>b{position:absolute;inset:0 auto 0 0;width:100%;background:#fff;opacity:.6;transition:width .8s .25s}
+#boss .hpn{font-size:11px;color:var(--dim);margin-top:3px}
 #parts{display:flex;gap:6px;margin-top:8px}
-.part{flex:1;padding:6px 6px 7px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(8,12,26,.55);font-size:11px;transition:.15s}
-.part .bar{height:5px;margin-top:4px}.part .bar>i{background:linear-gradient(90deg,#9fd0ff,#e9f4ff)}
-.part.sel{border-color:var(--gold2);box-shadow:0 0 12px rgba(217,191,134,.5);color:var(--gold2)}
-.part.broken{opacity:.4;text-decoration:line-through;pointer-events:none}
-#warn{position:absolute;top:calc(max(10px,env(safe-area-inset-top)) + 150px);left:50%;transform:translateX(-50%);padding:8px 18px;border-radius:999px;border:1px solid #ff8f7f;background:rgba(80,12,12,.82);color:#ffd9d2;font-size:13px;font-family:var(--serif);letter-spacing:.08em;white-space:nowrap;max-width:94vw;overflow:hidden;text-overflow:ellipsis;animation:pulse 1s infinite alternate}
-@keyframes pulse{from{box-shadow:0 0 0 rgba(255,120,100,0)}to{box-shadow:0 0 22px rgba(255,120,100,.7)}}
-#banner{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);font-family:var(--serif);font-size:30px;letter-spacing:.3em;text-indent:.3em;color:#fff;text-shadow:0 0 18px var(--c,#fff),0 2px 6px #000;opacity:0;white-space:nowrap;pointer-events:none}
-#banner.show{animation:ban .9s ease-out forwards}
-@keyframes ban{0%{opacity:0;transform:translate(-50%,-30%) scale(.9)}18%{opacity:1;transform:translate(-50%,-50%) scale(1)}75%{opacity:1}100%{opacity:0;transform:translate(-50%,-62%)}}
-#log{opacity:0;position:absolute;left:50%;transform:translateX(-50%);bottom:calc(max(10px,env(safe-area-inset-bottom)) + 210px);padding:6px 16px;border-radius:999px;background:rgba(8,12,26,.72);border:1px solid rgba(255,255,255,.1);font-size:12px;color:var(--ink);white-space:nowrap;max-width:94vw;overflow:hidden;text-overflow:ellipsis;transition:opacity .3s}
+.part{flex:1;position:relative;padding:6px 6px 7px;clip-path:polygon(7px 0,100% 0,calc(100% - 7px) 100%,0 100%);background:#1a2142;font-size:11px;color:var(--ink);transition:.15s}
+.part .bar{height:4px;margin:4px 6px 0;outline:0}.part .bar>i{background:linear-gradient(90deg,#9fd0ff,#eef7ff)}
+.part.sel{background:linear-gradient(180deg,#f6e7c1,#c9a65f);color:#2b2410;font-weight:700;filter:drop-shadow(0 0 8px rgba(246,231,193,.7))}
+.part.broken{opacity:.35;text-decoration:line-through;pointer-events:none}
+#warn{position:absolute;top:calc(max(10px,env(safe-area-inset-top)) + 150px);left:50%;transform:translateX(-50%);padding:7px 26px;clip-path:var(--hex);background:linear-gradient(90deg,#5a0c0c,#b3261e,#5a0c0c);color:#ffe4dd;font-size:13px;font-family:var(--serif);letter-spacing:.1em;white-space:nowrap;max-width:94vw;animation:warn .5s infinite alternate}
+@keyframes warn{to{filter:brightness(1.5)}}
+#log{opacity:0;position:absolute;left:38%;transform:translateX(-50%);bottom:calc(max(10px,env(safe-area-inset-bottom)) + 112px);padding:5px 22px;background:linear-gradient(90deg,transparent,rgba(5,8,18,.85) 18%,rgba(5,8,18,.85) 82%,transparent);font-size:12px;white-space:nowrap;max-width:96vw;overflow:hidden;text-overflow:ellipsis;transition:opacity .3s}
 
-#party{position:absolute;left:50%;transform:translateX(-50%);bottom:max(10px,env(safe-area-inset-bottom));display:flex;gap:7px;width:min(820px,calc(100% - 16px))}
-.card{flex:1;min-width:0;padding:8px 8px 7px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:var(--panel);position:relative;transition:.2s;overflow:hidden}
-.card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c)}
-.card .nm{font-family:var(--serif);font-size:14px;letter-spacing:.08em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:4px}
-.card .rl{font-size:9px;color:var(--dim);padding-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .bar{height:8px;margin-top:5px}.card .bar>i{background:linear-gradient(90deg,#57d38a,#b9f5a8)}
-.card.low .bar>i{background:linear-gradient(90deg,#ff7a6b,#ffb38a)}
+#party{position:absolute;left:50%;transform:translateX(-50%);bottom:max(8px,env(safe-area-inset-bottom));display:flex;gap:6px;width:min(840px,calc(100% - 12px))}
+.card{flex:1;min-width:0;position:relative;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);background:linear-gradient(180deg,var(--c),color-mix(in srgb,var(--c) 25%,#0b1020));padding:1.5px;transition:transform .2s,filter .2s}
+.card>.in{clip-path:inherit;background:linear-gradient(180deg,color-mix(in srgb,var(--c) 20%,#161d3c),#0b1024);padding:8px 8px 7px;height:100%}
+.card .nm{font-family:var(--serif);font-size:14px;letter-spacing:.08em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .rl{font-size:9px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .bar{height:8px;margin:5px 3px 0}.card .bar>i{background:linear-gradient(180deg,#c4f7b1,#57d38a 60%,#2f9a5e)}
+.card.low .bar>i{background:linear-gradient(180deg,#ffc1a3,#ff7a6b 60%,#c43b33)}
 .card .hpn{font-size:10px;color:var(--dim);margin-top:2px;text-align:right}
-.card .bst{height:3px;margin-top:3px;border-radius:99px;background:rgba(255,255,255,.1);overflow:hidden}.card .bst>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--c),#fff);transition:width .3s}
+.card .bst{height:3px;margin:3px 3px 0;background:rgba(255,255,255,.1);transform:skewX(-18deg);overflow:hidden}.card .bst>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--c),#fff);transition:width .3s}
 .card.full .bst{box-shadow:0 0 8px var(--c)}
-.card .sts{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:16px}
-.card .own{position:absolute;right:6px;top:6px;font-size:9px;padding:1px 6px;border-radius:99px;border:1px solid var(--line);color:var(--gold);background:rgba(8,12,26,.6);max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card.now{border-color:var(--c);box-shadow:0 0 0 1px var(--c),0 0 20px color-mix(in srgb,var(--c) 60%,transparent);transform:translateY(-6px)}
-.card.ko{filter:grayscale(1) brightness(.6)}
-.card.pick{border-color:var(--gold2);animation:pulse2 .7s infinite alternate;cursor:pointer}
-@keyframes pulse2{to{box-shadow:0 0 18px rgba(243,226,184,.8)}}
-.stc{font-size:9px;padding:1px 5px;border-radius:5px;border:1px solid;white-space:nowrap}
-.stc.buff{color:#9fe6b4;border-color:rgba(159,230,180,.5);background:rgba(30,80,50,.4)}
-.stc.debuff{color:#ffb0a6;border-color:rgba(255,176,166,.5);background:rgba(90,30,26,.4)}
+.card .sts{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:15px}
+.card .own{position:absolute;right:8px;top:5px;font-size:9px;padding:0 6px;color:var(--gold2);background:rgba(8,12,26,.7);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card.now{transform:translateY(-8px);filter:drop-shadow(0 0 12px var(--c))}
+.card.ko{filter:grayscale(1) brightness(.55)}
+.card.pick{animation:pick .6s infinite alternate;cursor:pointer}@keyframes pick{to{filter:drop-shadow(0 0 14px #f6e7c1) brightness(1.25)}}
+.stc{font-size:9px;padding:0 5px;white-space:nowrap;border-left:2px solid}
+.stc.buff{color:#b7f0c6;border-color:#6fd58a;background:rgba(30,80,50,.55)}.stc.debuff{color:#ffc2ba;border-color:#ff6f61;background:rgba(90,30,26,.55)}
 
-#skills{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:calc(max(10px,env(safe-area-inset-bottom)) + 118px);display:flex;align-items:flex-end;gap:10px}
-.sk{position:relative;width:62px;height:62px;border-radius:50%;border:1.5px solid var(--line);background:radial-gradient(circle at 35% 28%,rgba(120,134,190,.9),rgba(22,28,52,.95) 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--serif);font-size:10px;line-height:1.15;text-align:center;padding:4px;transition:.12s}
-.sk .ty{font-size:8px;letter-spacing:.1em;color:var(--gold);margin-bottom:2px;font-family:var(--sans)}
-.sk.sel{border-color:var(--gold2);box-shadow:0 0 0 2px rgba(243,226,184,.5),0 0 22px rgba(243,226,184,.6);transform:translateY(-6px) scale(1.06)}
-.sk.off{filter:grayscale(.9) brightness(.55)}
-.sk .cdn{position:absolute;inset:0;border-radius:50%;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;font-family:var(--serif)}
-.sk.ult{width:74px;height:74px;font-size:11px;border-color:var(--c);background:radial-gradient(circle at 35% 28%,color-mix(in srgb,var(--c) 75%,#fff),rgba(22,28,52,.95) 72%)}
-.sk.ult.ready{box-shadow:0 0 22px var(--c);animation:pulse3 .9s infinite alternate}
-@keyframes pulse3{to{box-shadow:0 0 34px var(--c),0 0 0 3px rgba(255,255,255,.25)}}
-.sk.ult .ring{position:absolute;inset:-5px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p)*1%),rgba(255,255,255,.08) 0);-webkit-mask:radial-gradient(circle,transparent 62%,#000 64%);mask:radial-gradient(circle,transparent 62%,#000 64%);pointer-events:none}
-#desc{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:calc(max(10px,env(safe-area-inset-bottom)) + 204px);width:min(330px,calc(100% - 20px));padding:11px 14px}
+/* 技のボタン（紋章の形） */
+#skills{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:calc(max(8px,env(safe-area-inset-bottom)) + 122px);display:flex;align-items:flex-end;gap:12px}
+.sk{position:relative;width:74px;display:flex;flex-direction:column;align-items:center;gap:3px;transition:transform .12s}
+.sk .em{position:relative;width:64px;height:64px;transform:rotate(45deg);background:linear-gradient(135deg,#f6e7c1,#8f7743 50%,#d9bf86);padding:2px;filter:drop-shadow(0 4px 8px rgba(0,0,0,.6))}
+.sk .em i{position:absolute;inset:2px;background:radial-gradient(circle at 30% 30%,color-mix(in srgb,var(--k) 55%,#fff),var(--k) 38%,#0d1228 92%)}
+.sk .em b{position:absolute;inset:7px;border:1px solid rgba(255,255,255,.35)}
+.sk svg{position:absolute;left:50%;top:32px;width:34px;height:34px;transform:translate(-50%,-50%);fill:#fff;filter:drop-shadow(0 1px 3px rgba(0,0,0,.7));pointer-events:none}
+.sk .kd{font-size:9px;letter-spacing:.12em;color:var(--gold);margin-top:14px;text-shadow:0 1px 3px #000;font-family:var(--serif)}
+.sk .nm{font-size:11px;font-family:var(--serif);text-shadow:0 1px 4px #000,0 0 6px #000;white-space:nowrap}
+.sk.sel{transform:translateY(-10px) scale(1.08)}.sk.sel .em{filter:drop-shadow(0 0 14px #f6e7c1) brightness(1.25)}
+.sk.off .em{filter:grayscale(1) brightness(.5)}.sk.off .nm{color:var(--dim)}
+.sk .cdn{position:absolute;left:50%;top:32px;transform:translate(-50%,-50%);font-family:var(--serif);font-size:26px;color:#fff;text-shadow:0 0 8px #000,0 2px 0 #000}
+.sk.ult{width:88px}.sk.ult .em{width:76px;height:76px}.sk.ult svg,.sk.ult .cdn{top:38px}.sk.ult svg{width:40px;height:40px}
+.sk.ult .em i{background:linear-gradient(315deg,var(--c) calc(var(--p)*1%),#232c55 calc(var(--p)*1%))}
+.sk.ult.off .em{filter:brightness(.8)}
+.sk.ult.ready .em{animation:rdy .8s infinite alternate}.sk.ult.ready .em i{background:radial-gradient(circle at 30% 30%,#fff,var(--c) 45%,#0d1228)}
+@keyframes rdy{to{filter:drop-shadow(0 0 20px var(--c)) brightness(1.3)}}
+#passive{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:calc(max(8px,env(safe-area-inset-bottom)) + 256px);display:flex;gap:6px}
+.pv{font-size:10px;font-family:var(--serif);padding:3px 12px;clip-path:polygon(7px 0,100% 0,calc(100% - 7px) 100%,0 100%);background:rgba(10,14,30,.85);color:var(--gold2);letter-spacing:.06em}
+.pv small{color:var(--dim);margin-right:5px;font-size:9px}
+#desc{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:calc(max(8px,env(safe-area-inset-bottom)) + 288px);width:min(340px,calc(100% - 24px))}
+#desc .in{padding:11px 15px}
 #desc .nm{font-family:var(--serif);font-size:16px;letter-spacing:.12em;color:var(--gold2)}
-#desc .tx{font-size:12px;line-height:1.65;color:var(--ink);margin:4px 0 9px}
-#desc .how{font-size:11px;color:var(--gold)}
-#clock{position:absolute;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));display:flex;gap:8px;align-items:center}
-#time{min-width:54px;height:38px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:17px;padding:0 12px}
-#time.hot{color:#ff9a8c;border-color:#ff9a8c}
-#whose{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(max(10px,env(safe-area-inset-bottom)) + 122px);font-family:var(--serif);font-size:13px;letter-spacing:.16em;color:var(--gold2);text-shadow:0 2px 8px #000;white-space:nowrap}
-.float{position:fixed;left:0;top:0;font-family:var(--serif);font-weight:700;font-size:26px;color:#fff;text-shadow:0 0 6px #000,0 2px 0 #000;pointer-events:none;white-space:nowrap;animation:fl 1s ease-out forwards;z-index:30}
-.float.crit{font-size:36px;color:#ffe27a}.float.heal{color:#8df0a8}.float.adv{color:#ffb86b}.float.dis{color:#9fb6cf;font-size:20px}.float.txt{font-size:15px;font-weight:500;color:#ffe9c4}.float.psn{color:#c9a0ff}
-@keyframes fl{0%{opacity:0;transform:translate(-50%,-10%) scale(.6)}15%{opacity:1;transform:translate(-50%,-60%) scale(1.15)}30%{transform:translate(-50%,-80%) scale(1)}100%{opacity:0;transform:translate(-50%,-190%)}}
+#desc .tx{font-size:12px;line-height:1.65;margin:4px 0 8px}#desc .how{font-size:11px;color:var(--gold)}
+#clock{position:absolute;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));display:flex;gap:6px;align-items:center}
+#time{min-width:58px;height:36px;clip-path:var(--hex);background:#0a0f22;outline:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:17px}
+#time.hot{color:#ff9a8c;background:#3a0d0d}
+#whose{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(max(8px,env(safe-area-inset-bottom)) + 104px);font-family:var(--serif);font-size:12px;letter-spacing:.14em;color:var(--gold2);text-shadow:0 2px 8px #000;white-space:nowrap}
 
-/* 2D表示のときの舞台 */
-#stage2d{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);display:none;flex-direction:column;align-items:center;gap:8px}
-body.flat #stage2d{display:flex}
-#emblem{width:min(42vw,210px);aspect-ratio:1;border-radius:50%;border:2px solid var(--c);background:radial-gradient(circle at 40% 30%,color-mix(in srgb,var(--c) 70%,#fff),color-mix(in srgb,var(--c) 30%,#0b1020) 60%,#0b1020);box-shadow:0 0 50px color-mix(in srgb,var(--c) 55%,transparent),inset 0 0 40px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:min(16vw,84px);color:rgba(255,255,255,.92);text-shadow:0 4px 18px rgba(0,0,0,.6);transition:transform .12s,filter .12s}
-#emblem.hit{transform:scale(.93) rotate(-3deg);filter:brightness(1.9)}
-#emblem.rage{animation:rg .5s infinite alternate}
-@keyframes rg{to{box-shadow:0 0 70px #ff5a4a,inset 0 0 40px rgba(120,0,0,.6)}}
+/* ---- 演出の重ね ---- */
+#tband{position:fixed;left:0;right:0;top:34%;height:64px;pointer-events:none;z-index:20;opacity:0;display:flex;align-items:center;justify-content:center;transform:skewY(-4deg)}
+#tband:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--c) 85%,#000) 20%,color-mix(in srgb,var(--c) 85%,#000) 80%,transparent);clip-path:polygon(0 18%,100% 0,100% 82%,0 100%)}
+#tband:after{content:"";position:absolute;left:0;right:0;top:6px;bottom:6px;border-top:2px solid rgba(255,255,255,.8);border-bottom:2px solid rgba(255,255,255,.8);clip-path:polygon(8% 0,92% 0,92% 100%,8% 100%)}
+#tband span{position:relative;font-family:var(--serif);font-weight:700;font-size:34px;letter-spacing:.2em;color:#fff;text-shadow:0 0 14px var(--c),0 3px 0 rgba(0,0,0,.6);font-style:italic;white-space:nowrap}
+#tband.go{animation:tband .78s cubic-bezier(.15,.85,.25,1) forwards}
+@keyframes tband{0%{opacity:0;transform:skewY(-4deg) translateX(-110%)}22%{opacity:1;transform:skewY(-4deg) translateX(0)}74%{opacity:1;transform:skewY(-4deg) translateX(2%)}100%{opacity:0;transform:skewY(-4deg) translateX(110%)}}
+#banner{position:fixed;top:25%;left:50%;transform:translate(-50%,-50%);font-family:var(--serif);font-size:30px;letter-spacing:.3em;text-indent:.3em;color:#fff;text-shadow:0 0 18px var(--c,#fff),0 0 4px var(--c,#fff),0 2px 6px #000;opacity:0;white-space:nowrap;pointer-events:none;z-index:21}
+#banner small{display:block;font-size:11px;letter-spacing:.5em;color:var(--gold2);text-indent:.5em;text-align:center}
+#banner.show{animation:ban .95s ease-out forwards}
+@keyframes ban{0%{opacity:0;transform:translate(-50%,-30%) scale(1.5)}16%{opacity:1;transform:translate(-50%,-50%) scale(1)}75%{opacity:1}100%{opacity:0;transform:translate(-50%,-62%)}}
+#cut{position:fixed;inset:0;pointer-events:none;z-index:19;opacity:0;background:linear-gradient(180deg,#000 0,#000 16%,transparent 16%,transparent 84%,#000 84%)}
+#cut.go{animation:cut 1.25s ease-out forwards}@keyframes cut{0%{opacity:0}12%{opacity:1}80%{opacity:1}100%{opacity:0}}
+#cut span{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%) skewX(-12deg);text-align:center;font-family:var(--serif);font-weight:700;font-size:54px;letter-spacing:.24em;color:#fff;text-shadow:0 0 30px var(--c),0 0 8px var(--c),4px 4px 0 rgba(0,0,0,.7);animation:none}
+#cut.go span{animation:cutT 1.25s cubic-bezier(.1,.9,.2,1) forwards}@keyframes cutT{0%{transform:translate(60%,-50%) skewX(-12deg);opacity:0}18%{transform:translate(0,-50%) skewX(-12deg);opacity:1}80%{transform:translate(-3%,-50%) skewX(-12deg);opacity:1}100%{transform:translate(-60%,-50%) skewX(-12deg);opacity:0}}
+#flash{position:fixed;inset:0;pointer-events:none;z-index:18;opacity:0;background:#fff}
+.float{position:fixed;left:0;top:0;font-family:var(--serif);font-weight:900;font-size:30px;color:#fff;-webkit-text-stroke:1px rgba(0,0,0,.55);text-shadow:0 3px 0 rgba(0,0,0,.6),0 0 10px rgba(0,0,0,.8);pointer-events:none;white-space:nowrap;animation:fl 1.05s ease-out forwards;z-index:30;font-style:italic}
+.float.crit{font-size:50px;background:linear-gradient(180deg,#fff,#ffe27a 45%,#ff8a3c);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-stroke:1.5px #6b2a00;filter:drop-shadow(0 0 12px #ffb347);animation:flc 1.2s cubic-bezier(.2,1.6,.3,1) forwards}
+.float.crit:before{content:"会心!!";display:block;font-size:17px;letter-spacing:.2em;text-align:center;-webkit-text-stroke:0;color:#fff3c4;background:none;-webkit-background-clip:initial}
+.float.heal{color:#9bf5b3;-webkit-text-stroke:1px #0d4a22}.float.adv{color:#ffc26b}.float.dis{color:#a7b9cf;font-size:22px}.float.psn{color:#d0a8ff;-webkit-text-stroke:1px #3a0d66}
+.float.txt{font-size:17px;font-weight:700;color:#ffe9c4;font-style:normal;letter-spacing:.1em}
+.float.bad{font-size:19px;color:#ffb4a8;-webkit-text-stroke:1px #5a0c0c;font-style:normal}.float.good{font-size:19px;color:#c5f7d0;-webkit-text-stroke:1px #0d4a22;font-style:normal}
+@keyframes fl{0%{opacity:0;transform:translate(-50%,-10%) scale(.5)}14%{opacity:1;transform:translate(-50%,-60%) scale(1.25)}28%{transform:translate(-50%,-80%) scale(1)}100%{opacity:0;transform:translate(-50%,-210%)}}
+@keyframes flc{0%{opacity:0;transform:translate(-50%,-30%) scale(2.6) rotate(-8deg)}16%{opacity:1;transform:translate(-50%,-70%) scale(1) rotate(-4deg)}70%{opacity:1}100%{opacity:0;transform:translate(-50%,-160%) scale(1.05) rotate(-4deg)}}
 
-/* 結果 */
-#result .box{width:min(430px,100%);padding:28px 22px;text-align:center}
-#result h2{margin:0;font-family:var(--serif);font-weight:500;font-size:40px;letter-spacing:.3em;text-indent:.3em}
-#result.win h2{background:linear-gradient(180deg,#fff7df,#d9bf86);-webkit-background-clip:text;background-clip:text;color:transparent}
-#result.lose h2{color:#9aa3c0}
-#toast{position:fixed;left:50%;top:18%;transform:translateX(-50%);padding:9px 18px;border-radius:999px;background:rgba(8,12,26,.92);border:1px solid var(--line);font-size:13px;z-index:50;opacity:0;transition:opacity .25s;pointer-events:none;max-width:92vw;text-align:center}
+#result .box,#achv .box,#menu .box{width:min(440px,100%);text-align:center}
+#result h2{margin:10px 0 0;font-family:var(--serif);font-weight:500;font-size:42px;letter-spacing:.3em;text-indent:.3em}
+#result.win h2{background:linear-gradient(180deg,#fffbe9,#d9bf86);-webkit-background-clip:text;background-clip:text;color:transparent}#result.lose h2{color:#9aa3c0}
+#gain{margin-top:10px;font-size:13px;line-height:1.9}
+.ach{display:flex;align-items:center;gap:10px;padding:9px 12px;background:rgba(8,12,26,.6);border-left:3px solid var(--gold3);text-align:left}
+.ach.ready{border-color:var(--gold2);background:rgba(60,50,20,.5)}.ach.claimed{opacity:.5}
+.ach .an{font-family:var(--serif);font-size:14px}.ach .ad{font-size:11px;color:var(--dim)}.ach .ar{margin-left:auto;display:flex;align-items:center;gap:8px;white-space:nowrap}
+#achList{display:grid;gap:6px;max-height:52vh;overflow:auto;margin-top:12px}
+#toast{position:fixed;left:50%;top:14%;transform:translateX(-50%);padding:9px 26px;clip-path:var(--hex);background:#0a0f22;outline:1px solid var(--line);font-size:13px;z-index:60;opacity:0;transition:opacity .25s;pointer-events:none;max-width:94vw;text-align:center}
 #toast.show{opacity:1}
-#menu{position:fixed;inset:0;background:rgba(4,6,14,.6);display:flex;align-items:center;justify-content:center;z-index:40;padding:16px}
-#menu .box{width:min(340px,100%);padding:20px}
+.over{position:fixed;inset:0;background:rgba(4,6,14,.62);z-index:40;display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto}
 
 @media (max-width:700px){
-  #order{flex-direction:row;width:auto;right:168px;left:8px;top:max(6px,env(safe-area-inset-top));padding:6px;overflow:hidden}
-  #order .lbl{display:none}.ord{flex:1;min-width:0;height:26px;font-size:9px}.ord.now{height:26px;flex:1.5}
-  #boss{top:calc(max(6px,env(safe-area-inset-top)) + 46px);width:calc(100% - 16px);padding:8px 10px}
-  #boss .nm{font-size:17px}
-  #clock{top:max(6px,env(safe-area-inset-top));right:6px}#time{min-width:44px;height:38px;font-size:14px;padding:0 8px}#clock .btn{display:none}
-  #clock .btn.keep{display:inline-flex;min-height:38px;padding:0 10px}
-  #warn{top:auto;bottom:calc(max(8px,env(safe-area-inset-bottom)) + 250px);font-size:11px}
-  #party{gap:4px;width:calc(100% - 8px)}.card{padding:6px 4px 5px}.card .nm{font-size:11px}.card .rl{display:none}.card .hpn{font-size:8px}.card .own{display:none}.stc{font-size:8px;padding:0 3px}
-  #skills{right:50%;transform:translateX(50%);bottom:calc(max(8px,env(safe-area-inset-bottom)) + 104px);gap:8px}
-  .sk{width:56px;height:56px;font-size:9px}.sk.ult{width:64px;height:64px;font-size:10px}
-  #desc{right:50%;transform:translateX(50%);bottom:calc(max(8px,env(safe-area-inset-bottom)) + 178px)}
-  #whose{bottom:calc(max(8px,env(safe-area-inset-bottom)) + 88px);font-size:10px}
-  #log{bottom:calc(max(8px,env(safe-area-inset-bottom)) + 226px);font-size:10px}
-  #banner{font-size:22px}
-  #title h1{font-size:38px}.quests{gap:6px}.quest .nm{font-size:15px}
+  #order{flex-direction:row;width:auto;right:150px;left:6px;top:max(6px,env(safe-area-inset-top));gap:2px}
+  #order .lbl{display:none}.ord{flex:1;min-width:0;height:26px;font-size:9px}.ord.now{height:26px;flex:1.6;margin:0}
+  #boss{top:calc(max(6px,env(safe-area-inset-top)) + 34px);width:calc(100% - 12px)}#boss .nm{font-size:16px}#boss .in{padding:7px 10px 8px}
+  #clock{top:max(4px,env(safe-area-inset-top));right:4px;gap:3px}#time{min-width:46px;height:30px;font-size:14px}#clock .btn{min-height:30px;padding:0 14px}
+  #warn{top:auto;bottom:calc(max(8px,env(safe-area-inset-bottom)) + 300px);font-size:11px}
+  #party{gap:3px;width:calc(100% - 6px)}.card>.in{padding:6px 4px 5px}.card .nm{font-size:11px}.card .rl,.card .own{display:none}.card .hpn{font-size:8px}.stc{font-size:8px;padding:0 3px}
+  #skills{right:50%;transform:translateX(50%);bottom:calc(max(8px,env(safe-area-inset-bottom)) + 96px);gap:6px}
+  .sk{width:70px}.sk .em{width:54px;height:54px}.sk svg,.sk .cdn{top:27px}.sk svg{width:28px;height:28px}.sk .nm{font-size:10px}.sk .kd{margin-top:11px;font-size:8px}
+  .sk.ult{width:78px}.sk.ult .em{width:62px;height:62px}.sk.ult svg,.sk.ult .cdn{top:31px}
+  #passive{right:50%;transform:translateX(50%);bottom:calc(max(8px,env(safe-area-inset-bottom)) + 214px)}
+  #desc{right:50%;transform:translateX(50%);bottom:calc(max(8px,env(safe-area-inset-bottom)) + 240px)}#desc .in{padding:7px 12px}#desc .nm{font-size:13px}#desc .tx{font-size:11px;margin:2px 0 3px;line-height:1.45}#desc .how{font-size:10px}
+  #whose{bottom:calc(max(8px,env(safe-area-inset-bottom)) + 80px);font-size:10px}
+  #log{bottom:calc(max(8px,env(safe-area-inset-bottom)) + 330px);font-size:10px}
+  #tband{height:50px}#tband span{font-size:22px}#banner{font-size:22px}#cut span{font-size:32px}
+  #title h1{font-size:42px}.quests{gap:6px}.quest .nm{font-size:15px}.box .in{padding:20px 16px 16px}
 }
 </style>
 </head>
 <body>
 <canvas id="gl"></canvas>
 
-<!-- タイトル -->
 <div id="title" class="screen">
-  <div class="box panel">
+  <div class="box panel"><div class="in">
     <div class="sub">FIVE COLORS HUNT</div>
     <h1>彩狩</h1>
-    <div class="dots"><i class="dot" style="background:var(--red)"></i><i class="dot" style="background:var(--green)"></i><i class="dot" style="background:var(--blue)"></i><i class="dot" style="background:var(--yellow)"></i><i class="dot" style="background:var(--purple)"></i></div>
-    <div class="orn">◆ ハンター名 ◆</div>
+    <div class="dots"><i class="dot" style="background:var(--red);color:var(--red)"></i><i class="dot" style="background:var(--green);color:var(--green)"></i><i class="dot" style="background:var(--blue);color:var(--blue)"></i><i class="dot" style="background:var(--yellow);color:var(--yellow)"></i><i class="dot" style="background:var(--purple);color:var(--purple)"></i></div>
+    <div id="acct">
+      <div id="acctIn" class="hidden"><div><div class="who" id="who"></div><span class="stone" id="stones">0</span></div><div style="display:flex;gap:6px"><button id="bAch" class="btn sm">実績</button><button id="bOut" class="btn sm">ログアウト</button></div></div>
+      <div id="acctOut">
+        <div class="tabs"><button class="tab on" id="tGuest">ゲストで遊ぶ</button><button class="tab" id="tLogin">ログイン</button><button class="tab" id="tReg">新規登録</button></div>
+        <div class="stack" id="fGuest" style="margin-top:6px"><div class="field"><input id="name" maxlength="12" placeholder="なまえ（12文字まで）" autocomplete="off"></div></div>
+        <div class="stack hidden" id="fAuth" style="margin-top:6px">
+          <div class="field"><input id="user" maxlength="12" placeholder="ユーザー名（3〜12文字）" autocomplete="username"></div>
+          <div class="field"><input id="pass" type="password" maxlength="64" placeholder="パスワード（6文字以上）" autocomplete="current-password"></div>
+          <button id="bAuth" class="btn pri">ログイン</button>
+          <div class="note" style="margin:0" id="authNote">ログインすると、戦績・実績・報酬（彩石）が残ります。</div>
+        </div>
+      </div>
+    </div>
+    <div class="orn" style="margin-top:14px">◆ 狩りへ ◆</div>
     <div class="stack">
-      <input id="name" class="txt" maxlength="12" placeholder="なまえ（12文字まで）" autocomplete="off">
-      <button id="bSolo" class="btn pri">ひとりで狩る</button>
+      <button id="bSolo" class="btn pri"><i class="gem"></i>ひとりで狩る<i class="gem"></i></button>
       <div class="row"><button id="bQuick" class="btn">すぐ入る</button><button id="bMake" class="btn">部屋を作る</button></div>
-      <div class="row"><input id="code" class="txt" inputmode="numeric" maxlength="4" placeholder="合言葉（4けた）"><button id="bJoin" class="btn" style="flex:.7">入る</button></div>
+      <div class="row"><div class="field"><input id="code" inputmode="numeric" maxlength="4" placeholder="合言葉"></div><button id="bJoin" class="btn" style="flex:.7">入る</button></div>
     </div>
     <div id="roomList" class="rooms"></div>
-    <div class="note">5色のハンターで大型モンスターを狩るターン制バトル。<br>1〜5人。人数に合わせてハンターを分けて操作します。</div>
-  </div>
+  </div></div>
 </div>
 
-<!-- 部屋 -->
 <div id="lobby" class="screen hidden">
-  <div class="box panel">
+  <div class="box panel"><div class="in">
     <div class="orn">◆ 狩りの準備 ◆</div>
     <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:8px">
       <div><h2>依頼をえらぶ</h2><div class="note" style="margin:0" id="lobbyHint"></div></div>
@@ -204,45 +249,40 @@ body.flat #stage2d{display:flex}
     <div class="quests" id="quests"></div>
     <div class="orn">◆ なかま ◆</div>
     <div class="members" id="members"></div>
-    <div class="row" style="margin-top:12px"><button id="bLeave" class="btn ghost" style="flex:.6">戻る</button><button id="bStart" class="btn pri">狩りに出る</button></div>
-  </div>
+    <div class="row" style="margin-top:12px"><button id="bLeave" class="btn" style="flex:.6">戻る</button><button id="bStart" class="btn pri">狩りに出る</button></div>
+  </div></div>
 </div>
 
-<!-- 戦い -->
 <div id="hud" class="hidden">
-  <div id="order" class="panel"></div>
-  <div id="boss" class="panel">
-    <div class="nm" id="bossName"></div>
-    <div class="meta" id="bossMeta"></div>
-    <div class="bar"><b id="bossHpB"></b><i id="bossHp"></i></div>
-    <div class="hpn" id="bossHpN"></div>
+  <div id="order"></div>
+  <div id="boss" class="panel"><div class="in">
+    <div class="nm" id="bossName"></div><div class="meta" id="bossMeta"></div>
+    <div class="bar"><b id="bossHpB"></b><i id="bossHp"></i></div><div class="hpn" id="bossHpN"></div>
     <div id="parts"></div>
-  </div>
-  <div id="clock"><div id="time" class="panel">--</div><button id="bView" class="btn sm ghost keep">2D</button><button id="bMenu" class="btn sm ghost keep">☰</button></div>
+  </div></div>
+  <div id="clock"><div id="time">--</div><button id="bMenu" class="btn sm">MENU</button></div>
   <div id="warn" class="hidden"></div>
-  <div id="stage2d"><div id="emblem"></div></div>
-  <div id="banner"></div>
-  <div id="log"></div>
-  <div id="whose"></div>
-  <div id="desc" class="panel hidden"><div class="nm" id="descName"></div><div class="tx" id="descText"></div><div class="how" id="descHow"></div></div>
+  <div id="log"></div><div id="whose"></div>
+  <div id="desc" class="panel hidden"><div class="in"><div class="nm" id="descName"></div><div class="tx" id="descText"></div><div class="how" id="descHow"></div></div></div>
+  <div id="passive"></div>
   <div id="skills"></div>
   <div id="party"></div>
 </div>
+<div id="cut"><span></span></div><div id="tband"><span></span></div><div id="banner"></div><div id="flash"></div>
 
-<!-- 結果 -->
-<div id="result" class="screen hidden" style="background:rgba(4,6,14,.55);z-index:35">
-  <div class="box panel">
-    <div class="orn">◆ 狩りの結果 ◆</div>
-    <h2 id="resTitle" style="margin-top:12px"></h2>
-    <div class="note" id="resText"></div>
-    <div class="stack"><button id="bAgain" class="btn pri">部屋に戻る</button><button id="bQuit" class="btn ghost">タイトルへ</button></div>
-  </div>
+<div id="result" class="over hidden" style="z-index:35">
+  <div class="box panel"><div class="in">
+    <div class="orn">◆ 狩りの結果 ◆</div><h2 id="resTitle"></h2><div class="note" id="resText"></div><div id="gain"></div>
+    <div class="stack"><button id="bAgain" class="btn pri">部屋に戻る</button><button id="bQuit" class="btn">タイトルへ</button></div>
+  </div></div>
 </div>
-
-<div id="menu" class="hidden"><div class="box panel">
-  <div class="orn">◆ メニュー ◆</div>
-  <div class="stack"><button id="mView" class="btn">表示を切り替える（3D / 2D）</button><button id="mQuit" class="btn">狩りをやめる</button><button id="mClose" class="btn pri">とじる</button></div>
-</div></div>
+<div id="achv" class="over hidden"><div class="box panel"><div class="in">
+  <div class="orn">◆ 実績と報酬 ◆</div><div style="margin-top:8px"><span class="stone" id="stones2">0</span></div>
+  <div id="achList"></div><div class="stack"><button id="bAchClose" class="btn pri">とじる</button></div>
+</div></div></div>
+<div id="menu" class="over hidden"><div class="box panel"><div class="in">
+  <div class="orn">◆ メニュー ◆</div><div class="stack"><button id="mQuit" class="btn">狩りをやめる</button><button id="mClose" class="btn pri">とじる</button></div>
+</div></div></div>
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -255,20 +295,26 @@ body.flat #stage2d{display:flex}
 const $ = (id) => document.getElementById(id);
 const EL = { red: '#ff6f61', green: '#6fd58a', blue: '#5cb2ff', yellow: '#f6d256', purple: '#bb90ff' };
 const TYPE = { phys: '物理', spec: '特殊', guard: '防御', heal: '回復', debuff: '妨害' };
-const GLYPH = { wolf: '狼', lizard: '蜥', beast: '獣' };
-const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+const TYPE_C = { phys: '#c8553f', spec: '#3f79c8', guard: '#4a8f86', heal: '#3f9a5c', debuff: '#7a4fc0' };
+const ICON = {
+  phys: '<svg viewBox="0 0 24 24"><path d="M19.5 2 21 3.5 9.6 14.9l1.5 1.5-1.4 1.4-1.6-1.6-3 3L3.7 17.8l3-3-1.6-1.6 1.4-1.4 1.5 1.5z"/></svg>',
+  spec: '<svg viewBox="0 0 24 24"><path d="M12 1l2.4 7.2L22 11l-7.6 2.6L12 23l-2.4-9.4L2 11l7.6-2.8z"/></svg>',
+  guard: '<svg viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z"/></svg>',
+  heal: '<svg viewBox="0 0 24 24"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/></svg>',
+  debuff: '<svg viewBox="0 0 24 24"><path d="M12 2a8 8 0 0 0-5 14.2V19h3v2h4v-2h3v-2.8A8 8 0 0 0 12 2zM9 9a1.6 1.6 0 1 1 0 3.2A1.6 1.6 0 0 1 9 9zm6 0a1.6 1.6 0 1 1 0 3.2A1.6 1.6 0 0 1 15 9z"/></svg>',
+};
+const ST_COL = { atkUp: 0xff9a4a, atkDown: 0x8a6bff, slow: 0x5cb2ff, stop: 0xdfe8ff, poison: 0xb06bff, defDown: 0xff6f61, immune: 0xf6e7c1, guard: 0x8fd0ff, taunt: 0xff5a8a, stopResist: 0x999999 };
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} } };
 
-let ws = null, me = null, defs = null, room = null, st = null, timeOff = 0;
-let sel = { si: -1, part: 'm' };          // 選んでいる技と、ねらう部位
-let queue = [], playing = false, disp = {}; // 演出の待ち行列と、画面に出している体力
-let flat = store.get('hunt_flat') === '1';
-let showTurn = null;                       // 演出の中で「いま動いている」ユニット
+let ws = null, me = null, defs = null, room = null, st = null, timeOff = 0, acct = null, lastReward = null;
+let sel = { si: -1, part: 'm', pv: null };
+let queue = [], playing = false, disp = {}, showTurn = null;
 
 /* ---------------- 通信 ---------------- */
 function connect() {
   const base = location.pathname.endsWith('/') ? location.pathname : location.pathname.replace(/[^/]*$/, '');
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + base + 'ws');
-  ws.onopen = () => send({ t: 'hello', token: store.get('hunt_token'), name: $('name').value });
+  ws.onopen = () => send({ t: 'hello', token: store.get('hunt_token'), name: $('name').value || store.get('hunt_name') || '', session: store.get('hunt_session') || undefined });
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } onMsg(m); };
   ws.onclose = () => { toast('接続が切れました。つなぎ直しています…'); setTimeout(connect, 1500); };
 }
@@ -279,17 +325,27 @@ function onMsg(m) {
   switch (m.t) {
     case 'welcome':
       me = m.id; defs = m.defs; store.set('hunt_token', m.token);
+      if (m.badSession) store.set('hunt_session', null);
       if (!$('name').value) $('name').value = store.get('hunt_name') || '';
+      setAcct(m.me);
       if (!room) send({ t: 'rooms' });
       break;
+    case 'auth':
+      $('bAuth').disabled = false;
+      if (m.error) { toast(m.error); break; }
+      store.set('hunt_session', m.session || null); setAcct(m.me); $('pass').value = '';
+      toast(m.me ? (m.created ? `ようこそ、${m.me.name} さん！` : `おかえりなさい、${m.me.name} さん`) : 'ログアウトしました');
+      break;
+    case 'me': setAcct(m.me); break;
+    case 'reward': lastReward = m; drawGain(); break;
+    case 'claimed': toast(`彩石 ${m.reward} を受け取りました`); break;
     case 'rooms': drawRoomList(m.rooms); break;
     case 'room':
       room = m; drawLobby();
-      if (m.phase === 'lobby') { st = null; queue = []; disp = {}; show('lobby'); }
+      if (m.phase === 'lobby') { st = null; queue = []; disp = {}; lastReward = null; show('lobby'); }
       break;
     case 'state':
-      timeOff = m.now - Date.now();
-      st = m.state;
+      timeOff = m.now - Date.now(); st = m.state;
       if ($('hud').classList.contains('hidden')) { show('hud'); disp = {}; }
       if (!Object.keys(disp).length) { syncDisp(); if (m.events.length) rewindDisp(m.events); }
       scene3d.build(st);
@@ -298,8 +354,40 @@ function onMsg(m) {
       pump();
       break;
     case 'left': room = null; st = null; queue = []; show('title'); send({ t: 'rooms' }); break;
-    case 'error': toast(m.msg); break;
-    case 'notice': toast(m.msg); break;
+    case 'error': case 'notice': toast(m.msg); break;
+  }
+}
+
+/* ---------------- アカウント ---------------- */
+function setAcct(a) {
+  acct = a || null;
+  $('acctIn').classList.toggle('hidden', !acct); $('acctOut').classList.toggle('hidden', !!acct);
+  if (acct) { $('who').textContent = acct.name; $('stones').textContent = acct.stones.toLocaleString(); $('stones2').textContent = acct.stones.toLocaleString() + ' 彩石'; const n = acct.achievements.filter((x) => x.state === 'ready').length; $('bAch').textContent = n ? `実績（${n}）` : '実績'; drawAch(); }
+}
+let authMode = 'guest';
+function setTab(m) {
+  authMode = m; for (const [id, k] of [['tGuest', 'guest'], ['tLogin', 'login'], ['tReg', 'register']]) $(id).classList.toggle('on', k === m);
+  $('fGuest').classList.toggle('hidden', m !== 'guest'); $('fAuth').classList.toggle('hidden', m === 'guest');
+  $('bAuth').textContent = m === 'register' ? 'この内容で登録する' : 'ログイン';
+  $('pass').autocomplete = m === 'register' ? 'new-password' : 'current-password';
+  $('authNote').textContent = m === 'register' ? 'パスワードは忘れると元に戻せません。ほかのサービスと同じものは使わないでください。' : 'ログインすると、戦績・実績・報酬（彩石）が残ります。';
+}
+$('tGuest').onclick = () => setTab('guest'); $('tLogin').onclick = () => setTab('login'); $('tReg').onclick = () => setTab('register');
+$('bAuth').onclick = () => { const u = $('user').value.trim(), p = $('pass').value; if (!u || !p) return toast('ユーザー名とパスワードを入力してください'); $('bAuth').disabled = true; send({ t: authMode === 'register' ? 'register' : 'login', user: u, pass: p }); setTimeout(() => { $('bAuth').disabled = false; }, 6000); };
+$('pass').onkeydown = (e) => { if (e.key === 'Enter') $('bAuth').click(); };
+$('bOut').onclick = () => send({ t: 'logout' });
+$('bAch').onclick = () => { send({ t: 'me' }); $('achv').classList.remove('hidden'); };
+$('bAchClose').onclick = () => $('achv').classList.add('hidden');
+function drawAch() {
+  const box = $('achList'); box.innerHTML = ''; if (!acct) return;
+  for (const a of acct.achievements) {
+    const d = document.createElement('div'); d.className = 'ach ' + a.state;
+    d.innerHTML = `<div><div class="an"></div><div class="ad"></div></div><div class="ar"><span class="stone"></span></div>`;
+    d.querySelector('.an').textContent = a.name; d.querySelector('.ad').textContent = a.desc; d.querySelector('.stone').textContent = a.reward;
+    const r = d.querySelector('.ar');
+    if (a.state === 'ready') { const b = document.createElement('button'); b.className = 'btn sm pri'; b.textContent = '受け取る'; b.onclick = () => send({ t: 'claim', id: a.id }); r.appendChild(b); }
+    else { const s = document.createElement('span'); s.style.cssText = 'font-size:11px;color:var(--dim)'; s.textContent = a.state === 'claimed' ? '受け取り済み' : '未達成'; r.appendChild(s); }
+    box.appendChild(d);
   }
 }
 
@@ -307,40 +395,34 @@ function onMsg(m) {
 function show(id) {
   for (const k of ['title', 'lobby', 'hud']) $(k).classList.toggle('hidden', k !== id);
   if (id !== 'hud') $('result').classList.add('hidden');
-  document.body.classList.toggle('flat', flat && id === 'hud');
   scene3d.setMode(id === 'hud' ? 'battle' : 'idle');
 }
 let toastT = 0;
-function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
-const myName = () => { const n = $('name').value.trim(); store.set('hunt_name', n); return n; };
-
-$('bSolo').onclick = () => { send({ t: 'name', name: myName() }); send({ t: 'create', quest: 'hibashiri', public: false }); };
-$('bMake').onclick = () => { send({ t: 'name', name: myName() }); send({ t: 'create', quest: 'hibashiri', public: true }); };
-$('bQuick').onclick = () => { send({ t: 'name', name: myName() }); send({ t: 'quick' }); };
-$('bJoin').onclick = () => { send({ t: 'name', name: myName() }); send({ t: 'join', code: $('code').value.trim() }); };
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2800); }
+const sendName = () => { if (acct) return; const n = $('name').value.trim(); store.set('hunt_name', n); send({ t: 'name', name: n }); };
+$('bSolo').onclick = () => { sendName(); send({ t: 'create', quest: 'hibashiri', public: false }); };
+$('bMake').onclick = () => { sendName(); send({ t: 'create', quest: 'hibashiri', public: true }); };
+$('bQuick').onclick = () => { sendName(); send({ t: 'quick' }); };
+$('bJoin').onclick = () => { sendName(); send({ t: 'join', code: $('code').value.trim() }); };
 $('bLeave').onclick = () => send({ t: 'leave' });
 $('bStart').onclick = () => send({ t: 'start' });
 $('bAgain').onclick = () => { if (room && room.host === me) send({ t: 'again' }); else toast('部屋を作った人が戻すのを待っています'); };
 $('bQuit').onclick = $('mQuit').onclick = () => { $('menu').classList.add('hidden'); send({ t: 'leave' }); };
 $('bMenu').onclick = () => $('menu').classList.remove('hidden');
 $('mClose').onclick = () => $('menu').classList.add('hidden');
-$('bView').onclick = $('mView').onclick = () => { flat = !flat; store.set('hunt_flat', flat ? '1' : '0'); document.body.classList.toggle('flat', flat); $('bView').textContent = flat ? '3D' : '2D'; $('menu').classList.add('hidden'); };
-$('bView').textContent = flat ? '3D' : '2D';
 
 function drawRoomList(list) {
   const box = $('roomList'); box.innerHTML = '';
-  if (!list.length) return;
+  if (!list.length || !defs) return;
   const h = document.createElement('div'); h.className = 'orn'; h.textContent = '◆ 募集中の部屋 ◆'; box.appendChild(h);
   for (const r of list) {
-    const q = defs.quests[r.quest];
-    const b = document.createElement('button'); b.className = 'btn sm ghost'; b.style.justifyContent = 'space-between';
+    const q = defs.quests[r.quest], b = document.createElement('button'); b.className = 'roomrow';
     b.innerHTML = `<span></span><span style="color:var(--dim);font-size:11px"></span>`;
     b.children[0].textContent = `${q.name}　${r.host}`; b.children[1].textContent = `${r.n} / 5人`;
-    b.onclick = () => { send({ t: 'name', name: myName() }); send({ t: 'join', code: r.code }); };
+    b.onclick = () => { sendName(); send({ t: 'join', code: r.code }); };
     box.appendChild(b);
   }
 }
-
 function drawLobby() {
   if (!room || !defs) return;
   const host = room.host === me;
@@ -348,21 +430,17 @@ function drawLobby() {
   $('lobbyHint').textContent = host ? (room.public ? 'だれでも入れる部屋です' : '合言葉を知っている人だけ入れます') : '部屋を作った人が依頼をえらびます';
   const qs = $('quests'); qs.innerHTML = '';
   for (const k of Object.keys(defs.quests)) {
-    const q = defs.quests[k];
-    const b = document.createElement('button'); b.className = 'quest' + (room.quest === k ? ' on' : ''); b.style.setProperty('--c', EL[q.el]);
+    const q = defs.quests[k], b = document.createElement('button'); b.className = 'quest' + (room.quest === k ? ' on' : ''); b.style.setProperty('--c', EL[q.el]);
     b.innerHTML = `<div class="nm"></div><div class="tt"></div><div class="st"></div><span class="el"></span>`;
     b.children[0].textContent = q.name; b.children[1].textContent = q.title; b.children[2].textContent = '★'.repeat(q.star) + '☆'.repeat(3 - q.star); b.children[3].textContent = defs.elName[q.el] + '属性';
-    b.disabled = !host; b.onclick = () => send({ t: 'quest', quest: k });
-    qs.appendChild(b);
+    b.disabled = !host; b.onclick = () => send({ t: 'quest', quest: k }); qs.appendChild(b);
   }
-  const ms = $('members'); ms.innerHTML = '';
-  const n = room.players.length;
+  const ms = $('members'); ms.innerHTML = ''; const n = room.players.length;
   room.players.forEach((p, i) => {
     const d = document.createElement('div'); d.className = 'member' + (p.online ? '' : ' off');
-    const mine = defs.party.filter((_, k) => k % n === i);
     d.innerHTML = `<div><div class="pn"></div><div class="share"></div></div><span class="tag"></span>`;
     d.querySelector('.pn').textContent = p.name + (p.id === me ? '（あなた）' : '');
-    for (const k of mine) { const h = defs.hunters[k]; const c = document.createElement('span'); c.className = 'chip'; c.style.setProperty('--c', EL[h.el]); c.textContent = `${h.name}・${h.role}`; d.querySelector('.share').appendChild(c); }
+    for (const k of defs.party.filter((_, j) => j % n === i)) { const h = defs.hunters[k], c = document.createElement('span'); c.className = 'chip'; c.style.setProperty('--c', EL[h.el]); c.textContent = `${h.name}・${h.role}`; d.querySelector('.share').appendChild(c); }
     d.querySelector('.tag').textContent = i === 0 ? '部屋主' : (p.online ? '' : '切断中');
     ms.appendChild(d);
   });
@@ -376,57 +454,44 @@ const myIndex = () => (room ? room.players.findIndex((p) => p.id === me) : -1);
 const isMine = (u) => u && u.side === 'h' && u.owner === myIndex();
 const ownerName = (u) => (room && room.players[u.owner] ? room.players[u.owner].name : '');
 function syncDisp() { disp = {}; if (!st) return; for (const u of st.units) { disp[u.id] = u.hp; if (u.parts) for (const p of u.parts) disp[p.id] = p.hp; } }
-
-/* 演出の前の体力に巻き戻す（最初の表示が、結果を先に見せないように） */
 function rewindDisp(events) {
   for (const e of events) {
     if (e.t === 'dmg' || e.t === 'poison') { disp[e.u] = (disp[e.u] || 0) + e.v; if (e.part) disp[e.part] = (disp[e.part] || 0) + e.v; }
     else if (e.t === 'heal') disp[e.u] = (disp[e.u] || 0) - e.v;
   }
 }
-
-function stChips(u) {
-  return u.st.map((x) => { const d = defs.status[x.id]; return `<span class="stc ${d.kind}">${d.name}${x.turns < 50 ? x.turns : ''}</span>`; }).join('');
-}
+const stChips = (u) => u.st.filter((x) => x.id !== 'stopResist').map((x) => { const d = defs.status[x.id]; return `<span class="stc ${d.kind}">${d.name}${x.turns < 50 ? x.turns : ''}</span>`; }).join('');
 
 function drawHud() {
   if (!st || !defs) return;
-  const m = U('m'), q = defs.quests[st.quest];
+  const m = U('m');
   $('bossName').textContent = m.name;
-  $('boss').style.setProperty('--c', EL[m.el]);
   $('bossMeta').innerHTML = `<span class="chip" style="--c:${EL[m.el]}">${defs.elName[m.el]}属性</span>` + (m.rage ? '<span class="chip" style="--c:#ff7a6b">怒り</span>' : '') + stChips(m);
   const hp = disp.m == null ? m.hp : disp.m, pct = Math.max(0, hp / m.maxHp * 100);
   $('bossHp').style.width = pct + '%'; $('bossHpB').style.width = pct + '%';
   $('bossHpN').textContent = `${Math.max(0, Math.round(hp)).toLocaleString()} / ${m.maxHp.toLocaleString()}`;
-  const em = $('emblem'); em.style.setProperty('--c', EL[m.el]); em.textContent = GLYPH[m.shape] || '獣'; em.classList.toggle('rage', !!m.rage);
-  // 部位（ねらう場所）
+  if (m.parts.find((p) => p.id === sel.part && p.broken)) sel.part = 'm';
   const ps = $('parts'); ps.innerHTML = '';
   const mk = (id, name, hpv, max, broken) => {
     const b = document.createElement('button'); b.className = 'part' + (sel.part === id ? ' sel' : '') + (broken ? ' broken' : '');
     b.innerHTML = `<span></span>` + (max ? `<div class="bar"><i style="width:${Math.max(0, hpv / max * 100)}%"></i></div>` : '');
-    b.firstChild.textContent = name; b.onclick = () => { sel.part = id; drawHud(); };
-    ps.appendChild(b);
+    b.firstChild.textContent = name; b.onclick = () => { sel.part = id; drawHud(); }; ps.appendChild(b);
   };
   mk('m', '本体をねらう', 0, 0, false);
   for (const p of m.parts) mk(p.id, p.name, disp[p.id] == null ? p.hp : disp[p.id], p.maxHp, p.broken);
-  if (m.parts.find((p) => p.id === sel.part && p.broken)) sel.part = 'm';
   $('warn').classList.toggle('hidden', !m.charging);
   if (m.charging) $('warn').textContent = '⚠ 大技の予告！ 守りを固めよう';
-
-  // 行動順
   const od = $('order'); od.innerHTML = '<div class="lbl">行動順</div>';
   st.order.forEach((id, i) => { const u = U(id); if (!u) return; const d = document.createElement('div'); d.className = 'ord' + (i === 0 ? ' now' : '') + (u.side === 'm' ? ' foe' : ''); d.style.setProperty('--c', EL[u.el]); d.textContent = u.name; od.appendChild(d); });
-
-  // 味方のカード
   const pa = $('party'); pa.innerHTML = '';
-  const cur = U(st.turn), sk = cur && sel.si >= 0 ? defs.hunters[cur.key].skills[sel.si] : null;
+  const cur = U(st.turn), sk = cur && cur.side === 'h' && sel.si >= 0 ? defs.hunters[cur.key].skills[sel.si] : null;
   const picking = sk && sk.target === 'ally' && isMine(cur) && !playing;
   for (const u of st.units.filter((x) => x.side === 'h')) {
     const hpv = disp[u.id] == null ? u.hp : disp[u.id], p = Math.max(0, hpv / u.maxHp * 100);
     const d = document.createElement('div');
     d.className = 'card' + ((playing ? showTurn : st.turn) === u.id ? ' now' : '') + (hpv <= 0 ? ' ko' : '') + (p < 35 ? ' low' : '') + (u.burst >= 100 ? ' full' : '') + (picking && hpv > 0 ? ' pick' : '');
     d.id = 'card_' + u.id; d.style.setProperty('--c', EL[u.el]);
-    d.innerHTML = `<div class="nm"></div><div class="rl"></div><div class="bar"><i style="width:${p}%"></i></div><div class="hpn">${Math.max(0, Math.round(hpv))} / ${u.maxHp}</div><div class="bst"><i style="width:${u.burst}%"></i></div><div class="sts">${stChips(u)}</div>` + (room && room.players.length > 1 ? `<span class="own"></span>` : '');
+    d.innerHTML = `<div class="in"><div class="nm"></div><div class="rl"></div><div class="bar"><i style="width:${p}%"></i></div><div class="hpn">${Math.max(0, Math.round(hpv))} / ${u.maxHp}</div><div class="bst"><i style="width:${u.burst}%"></i></div><div class="sts">${stChips(u)}</div></div>` + (room && room.players.length > 1 ? `<span class="own"></span>` : '');
     d.querySelector('.nm').textContent = u.name; d.querySelector('.rl').textContent = `${defs.elName[u.el]}・${u.role}`;
     const ow = d.querySelector('.own'); if (ow) ow.textContent = isMine(u) ? 'あなた' : ownerName(u);
     if (picking && hpv > 0) d.onclick = () => fire(u.id);
@@ -436,41 +501,38 @@ function drawHud() {
 }
 
 function drawSkills() {
-  const box = $('skills'); box.innerHTML = '';
+  const box = $('skills'), pv = $('passive'); box.innerHTML = ''; pv.innerHTML = '';
   const cur = st && U(st.turn);
   const can = cur && isMine(cur) && st.phase === 'input' && !playing;
-  $('whose').textContent = !st || st.phase !== 'input' || playing ? '' : (can ? `◆ ${cur.name} の番 ◆` : (cur ? `${cur.name}（${cur.side === 'h' ? ownerName(cur) : ''}）の番を待っています` : ''));
-  if (!can) { $('desc').classList.add('hidden'); sel.si = -1; return; }
-  const sks = defs.hunters[cur.key].skills;
+  $('whose').textContent = !st || st.phase !== 'input' || playing ? '' : (can ? '' : (cur ? `${cur.name}（${ownerName(cur)}）の番を待っています` : ''));
+  if (!can) { $('desc').classList.add('hidden'); sel.si = -1; sel.pv = null; return; }
+  const h = defs.hunters[cur.key], sks = h.skills;
+  // 選べない動作（セット・条件）は、説明だけ見られる
+  for (const k of ['set', 'cond']) { const b = document.createElement('button'); b.className = 'pv'; b.innerHTML = `<small></small><span></span>`; b.children[0].textContent = k === 'set' ? 'セット' : '条件'; b.children[1].textContent = h[k].name; b.onclick = () => { sel.pv = sel.pv === k ? null : k; sel.si = -1; drawHud(); }; pv.appendChild(b); }
   sks.forEach((sk, i) => {
     const cd = cur.cds[i], notReady = sk.burst && cur.burst < 100, off = cd > 0 || notReady;
     const b = document.createElement('button');
     b.className = 'sk' + (sk.burst ? ' ult' + (cur.burst >= 100 ? ' ready' : '') : '') + (sel.si === i ? ' sel' : '') + (off ? ' off' : '');
-    b.style.setProperty('--c', EL[cur.el]); b.style.setProperty('--p', cur.burst);
-    b.innerHTML = `<span class="ty">${sk.burst ? '奥義' : TYPE[sk.type]}</span><span></span>` + (sk.burst ? '<i class="ring"></i>' : '') + (cd > 0 ? `<span class="cdn">${cd}</span>` : '');
-    b.children[1].textContent = sk.name;
-    b.onclick = () => {
-      if (sel.si === i && !off) { if (sk.target !== 'ally') fire(sk.target === 'enemy' ? sel.part : null); return; }
-      sel.si = i; drawHud();
-    };
+    b.style.setProperty('--c', EL[cur.el]); b.style.setProperty('--k', TYPE_C[sk.type]); b.style.setProperty('--p', cur.burst);
+    b.innerHTML = `<div class="em"><i></i><b></b></div>${cd > 0 ? `<span class="cdn">${cd}</span>` : ICON[sk.type]}<span class="kd"></span><span class="nm"></span>`;
+    b.querySelector('.kd').textContent = defs.kindName[sk.kind]; b.querySelector('.nm').textContent = sk.name;
+    b.onclick = () => { if (sel.si === i && !off) { if (sk.target !== 'ally') fire(sk.target === 'enemy' ? sel.part : null); return; } sel.si = i; sel.pv = null; drawHud(); };
     box.appendChild(b);
   });
   const d = $('desc');
+  if (sel.pv) { const a = h[sel.pv]; d.classList.remove('hidden'); $('descName').textContent = `${a.name}　〔${defs.kindName[sel.pv]}〕`; $('descText').textContent = a.desc; $('descHow').textContent = sel.pv === 'set' ? 'いつも効いています（選ぶ必要はありません）' : '条件を満たすと自動で発動します'; return; }
   if (sel.si < 0) { d.classList.add('hidden'); return; }
   const sk = sks[sel.si], cd = cur.cds[sel.si];
   d.classList.remove('hidden');
-  $('descName').textContent = `${sk.name}　〔${sk.burst ? '奥義' : TYPE[sk.type]}〕`;
+  $('descName').textContent = `${sk.name}　〔${defs.kindName[sk.kind]}・${TYPE[sk.type]}〕`;
   $('descText').textContent = sk.desc + (sk.cd ? `　（使ったあと ${sk.cd} ターン待ち）` : '');
   $('descHow').textContent = cd > 0 ? `あと ${cd} ターンで使えます` : sk.burst && cur.burst < 100 ? `奥義ゲージ ${cur.burst} / 100` : sk.target === 'ally' ? '▶ 回復する味方のカードをタップ' : '▶ もう一度タップで発動';
 }
-
 function fire(target) {
-  const cur = st && U(st.turn);
-  if (!cur || sel.si < 0) return;
+  const cur = st && U(st.turn); if (!cur || sel.si < 0) return;
   send({ t: 'act', u: cur.id, si: sel.si, target });
-  sel.si = -1; $('desc').classList.add('hidden'); $('skills').innerHTML = '';
+  sel.si = -1; $('desc').classList.add('hidden'); $('skills').innerHTML = ''; $('passive').innerHTML = '';
 }
-
 setInterval(() => {
   const t = $('time');
   if (!st || !st.deadline || st.phase !== 'input' || playing) { t.textContent = '--'; t.classList.remove('hot'); return; }
@@ -478,19 +540,17 @@ setInterval(() => {
   t.textContent = left; t.classList.toggle('hot', left <= 10);
 }, 250);
 
-/* ---------------- 演出（起きたことを順番に見せる） ---------------- */
-function pos(id) {
-  if (!flat) { const p = scene3d.screenPos(id); if (p) return p; }
-  const el = id === 'm' || /^p\d/.test(id) ? $('emblem') : $('card_' + id);
-  if (!el) return { x: innerWidth / 2, y: innerHeight / 2 };
-  const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * (id === 'm' ? 0.5 : 0.2) };
-}
-function float(id, text, cls) {
+/* ---------------- 演出 ---------------- */
+function pos(id) { return scene3d.screenPos(id) || { x: innerWidth / 2, y: innerHeight * 0.45 }; }
+function float(id, text, cls, dy) {
   const p = pos(id), d = document.createElement('div'); d.className = 'float ' + (cls || ''); d.textContent = text;
-  d.style.left = (p.x + (Math.random() * 40 - 20)) + 'px'; d.style.top = (p.y + (Math.random() * 16 - 8)) + 'px';
-  document.body.appendChild(d); setTimeout(() => d.remove(), 1000);
+  d.style.left = (p.x + (Math.random() * 46 - 23)) + 'px'; d.style.top = (p.y + (dy || 0) + (Math.random() * 16 - 8)) + 'px';
+  document.body.appendChild(d); setTimeout(() => d.remove(), 1250);
 }
-function banner(text, color) { const b = $('banner'); b.textContent = text; b.style.setProperty('--c', color || '#fff'); b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
+function banner(text, color, small) { const b = $('banner'); b.innerHTML = (small ? '<small></small>' : '') + '<span></span>'; if (small) b.firstChild.textContent = small; b.lastChild.textContent = text; b.style.setProperty('--c', color || '#fff'); b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
+function turnBand(u) { const b = $('tband'); b.style.setProperty('--c', u.side === 'm' ? '#c0281f' : EL[u.el]); b.firstChild.textContent = `${u.name} のターン！！`; b.classList.remove('go'); void b.offsetWidth; b.classList.add('go'); }
+function cutIn(text, color) { const c = $('cut'); c.style.setProperty('--c', color); c.firstChild.textContent = text; c.classList.remove('go'); void c.offsetWidth; c.classList.add('go'); }
+function flash(color, strength) { const f = $('flash'); f.style.background = color || '#fff'; f.style.transition = 'none'; f.style.opacity = strength || 0.7; void f.offsetWidth; f.style.transition = 'opacity .35s'; f.style.opacity = 0; }
 function log(text) { const l = $('log'); l.textContent = text; l.style.opacity = text ? 1 : 0; }
 const nameOf = (id) => { const u = U(id); return u ? u.name : ''; };
 
@@ -502,247 +562,402 @@ function pump() {
   const wait = playEvent(e);
   setTimeout(() => { playing = false; pump(); }, wait);
 }
-
 function playEvent(e) {
   const m = U('m');
   switch (e.t) {
     case '_sync': st = e.state; showTurn = st.turn; syncDisp(); drawHud(); scene3d.sync(st); if (st.phase === 'over') showResult(); return 0;
-    case 'turn': showTurn = e.u; scene3d.focus(e.u); drawHudLight(e.u); return 220;
+    case 'turn': { const u = U(e.u); showTurn = e.u; scene3d.focus(e.u); for (const c of document.querySelectorAll('.card')) c.classList.toggle('now', c.id === 'card_' + e.u); if (u) turnBand(u); return 680; }
     case 'auto': log(`${nameOf(e.u)} は時間切れ。自動で通常攻撃`); return 300;
     case 'skill': {
-      const u = U(e.u);
-      banner(e.name, EL[u.el]); log(`${u.name} の ${e.name}`);
-      scene3d.attack(e.u, e.targets[0], e.type, e.burst);
-      return e.burst ? 900 : 620;
+      const u = U(e.u), col = u.side === 'm' ? '#ff6f61' : EL[u.el];
+      log(`${u.name} の ${e.name}`);
+      if (e.kind === 'ultimate') { cutIn(e.name, col); scene3d.attack(e.u, e.targets[0], e.type, 'ultimate'); return 1250; }
+      banner(e.name, col, u.side === 'h' ? defs.kindName[e.kind] : null);
+      scene3d.attack(e.u, e.targets[0], e.type, e.kind);
+      return e.kind === 'special' ? 780 : 620;
     }
     case 'dmg': {
       disp[e.u] = Math.max(0, (disp[e.u] || 0) - e.v);
       if (e.part) disp[e.part] = Math.max(0, (disp[e.part] || 0) - e.v);
-      float(e.u, (e.crit ? '会心 ' : '') + e.v.toLocaleString(), e.crit ? 'crit' : e.em === 'adv' ? 'adv' : e.em === 'dis' ? 'dis' : '');
-      if (e.em === 'adv') setTimeout(() => float(e.u, '有利！', 'txt'), 120);
-      scene3d.hit(e.u, e.crit); if (e.u === 'm') { const em = $('emblem'); em.classList.add('hit'); setTimeout(() => em.classList.remove('hit'), 130); }
-      drawHud(); return 330;
+      const src = U(e.src);
+      scene3d.impact(e.u, { type: e.ty, crit: e.crit, guard: e.guard, color: src ? EL[src.el] : '#fff', big: e.v > 300 });
+      if (e.crit) flash('#fff6d8', 0.55);
+      float(e.u, e.v.toLocaleString(), e.crit ? 'crit' : e.em === 'adv' ? 'adv' : e.em === 'dis' ? 'dis' : '');
+      if (e.em === 'adv') setTimeout(() => float(e.u, '有利！', 'txt', -34), 100);
+      if (e.em === 'dis') setTimeout(() => float(e.u, 'いまひとつ', 'txt', -30), 100);
+      if (e.guard) setTimeout(() => float(e.u, 'ガード！', 'good', 30), 60);
+      drawHud(); return e.crit ? 520 : 340;
     }
-    case 'heal': disp[e.u] = (disp[e.u] || 0) + e.v; float(e.u, '+' + e.v, 'heal'); scene3d.glow(e.u, 0x8df0a8); drawHud(); return 300;
-    case 'revive': disp[e.u] = e.v; float(e.u, '復活！', 'heal'); scene3d.revive(e.u); drawHud(); return 420;
-    case 'poison': disp[e.u] = Math.max(0, (disp[e.u] || 0) - e.v); float(e.u, '毒 ' + e.v, 'psn'); scene3d.hit(e.u); drawHud(); return 380;
-    case 'st': if (e.st !== 'stopResist') float(e.u, defs.status[e.st].name, 'txt'); scene3d.glow(e.u, defs.status[e.st].kind === 'buff' ? 0xf3e2b8 : 0xb98cff); return 240;
-    case 'resist': float(e.u, e.why === 'immune' ? '妨害無効！' : '効かない！', 'txt'); return 260;
-    case 'cleanse': float(e.u, '治療', 'heal'); return 160;
-    case 'skip': float(e.u, '動けない！', 'txt'); log(`${nameOf(e.u)} は停止していて動けない`); return 520;
-    case 'ko': scene3d.ko(e.u); log(`${nameOf(e.u)} は倒れた…`); drawHud(); return 520;
-    case 'break': banner('部位破壊！', '#f3e2b8'); log(`${e.name} を壊した！ ${m.name} はひるんでいる`); scene3d.breakPart(e.part); return 800;
-    case 'rage': banner('怒り', '#ff6f61'); log(`${m.name} が怒った！ 攻撃と速さが上がる`); scene3d.rage(); return 800;
-    case 'telegraph': banner('⚠ ' + e.name, '#ff6f61'); log(e.text); scene3d.charge(); $('warn').classList.remove('hidden'); $('warn').textContent = '⚠ ' + e.text; return 1100;
+    case 'heal': disp[e.u] = (disp[e.u] || 0) + e.v; float(e.u, '+' + e.v, 'heal'); scene3d.healFx(e.u); drawHud(); return 340;
+    case 'revive': disp[e.u] = e.v; float(e.u, '復活！', 'good'); scene3d.revive(e.u); drawHud(); return 520;
+    case 'poison': disp[e.u] = Math.max(0, (disp[e.u] || 0) - e.v); float(e.u, e.v.toLocaleString(), 'psn'); float(e.u, '毒', 'bad', -32); scene3d.statusFx(e.u, 'poison'); drawHud(); return 460;
+    case 'st': if (e.st !== 'stopResist') { const d = defs.status[e.st]; float(e.u, (d.kind === 'buff' ? '▲ ' : '▼ ') + d.name, d.kind === 'buff' ? 'good' : 'bad'); scene3d.statusFx(e.u, e.st); return 420; } return 0;
+    case 'resist': float(e.u, e.why === 'immune' ? '妨害無効！' : '効かない！', 'good'); scene3d.statusFx(e.u, 'immune'); return 380;
+    case 'cleanse': float(e.u, '治療', 'good'); scene3d.healFx(e.u); return 220;
+    case 'cond': { const u = U(e.u); banner(e.name, u ? EL[u.el] : '#fff', '条件アビリティ'); scene3d.condFx(e.u); log(`${nameOf(e.u)} の条件アビリティ「${e.name}」が発動！`); return 760; }
+    case 'skip': float(e.u, '動けない！', 'bad'); scene3d.statusFx(e.u, 'stop'); log(`${nameOf(e.u)} は停止していて動けない`); return 600;
+    case 'ko': scene3d.ko(e.u); log(`${nameOf(e.u)} は倒れた…`); drawHud(); return 620;
+    case 'break': banner('部位破壊！', '#f6e7c1'); flash('#fff', 0.5); log(`${e.name} を壊した！ ${m.name} はひるんでいる`); scene3d.breakPart(e.part); return 900;
+    case 'rage': banner('怒り', '#ff6f61', '条件アビリティ'); flash('#ff3b2b', 0.35); log(`${m.name} が怒った！ 攻撃と速さが上がる`); scene3d.rage(); return 900;
+    case 'telegraph': banner('⚠ ' + e.name, '#ff6f61', '大技の予告'); log(e.text); scene3d.charge(); $('warn').classList.remove('hidden'); $('warn').textContent = '⚠ ' + e.text; return 1150;
     case 'end': return 500;
   }
   return 0;
 }
-function drawHudLight(turnId) { for (const c of document.querySelectorAll('.card')) c.classList.toggle('now', c.id === 'card_' + turnId); }
-
+function drawGain() {
+  const g = $('gain'); g.innerHTML = '';
+  if (!st || st.phase !== 'over') return;
+  if (!acct) { g.innerHTML = '<span style="color:var(--dim)">ログインすると、戦績が残り、実績や報酬（彩石）がもらえます。</span>'; return; }
+  if (!lastReward) return;
+  if (lastReward.stones) { const d = document.createElement('div'); d.innerHTML = '報酬 <span class="stone"></span>'; d.querySelector('.stone').textContent = '+' + lastReward.stones; g.appendChild(d); }
+  for (const n of lastReward.unlocked || []) { const d = document.createElement('div'); d.style.color = 'var(--gold2)'; d.textContent = `◆ 実績「${n}」を達成！（タイトルの「実績」で報酬を受け取れます）`; g.appendChild(d); }
+}
 function showResult() {
   const r = $('result'); r.classList.remove('hidden'); r.classList.toggle('win', !!st.win); r.classList.toggle('lose', !st.win);
   $('resTitle').textContent = st.win ? '討伐成功' : '力尽きた';
   const q = defs.quests[st.quest];
   $('resText').textContent = st.win ? `${q.name} を狩った！（${st.turns} ターン）` : `${q.name} に敗れた…（${st.turns} ターン）`;
   $('bAgain').textContent = room && room.host === me ? '部屋に戻る' : '部屋主を待つ';
+  drawGain();
 }
 
 /* =====================================================================
-   3D の舞台（Three.js）。モンスターもハンターも、部品を組み合わせてコードで作る。
+   3D の舞台（Three.js）。キャラもモンスターも、部品を組み合わせてコードで作る（トゥーン調＋ふちどり）。
+   あとで glTF などのモデルに差し替えるときは buildHunter / buildMonster の戻り値を置き換える。
    ===================================================================== */
 const scene3d = (() => {
-  const noop = { build() {}, setMode() {}, previewQuest() {}, sync() {}, focus() {}, attack() {}, hit() {}, glow() {}, ko() {}, revive() {}, breakPart() {}, rage() {}, charge() {}, screenPos() { return null; } };
-  if (!window.THREE) return noop;
+  const noop = new Proxy({}, { get: () => () => null });
+  if (!window.THREE) { setTimeout(() => toast('3D の部品を読み込めませんでした。通信を確かめて、開き直してください。'), 500); return noop; }
   const T = THREE, canvas = $('gl');
   let renderer;
-  try { renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' }); } catch (e) { flat = true; return noop; }
+  try { renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' }); } catch (e) { setTimeout(() => toast('この端末では 3D 表示が使えません。'), 500); return noop; }
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
-  const scene = new T.Scene(); scene.fog = new T.Fog(0x141c36, 14, 36);
+  const scene = new T.Scene(); scene.fog = new T.Fog(0x131a34, 16, 40);
   const cam = new T.PerspectiveCamera(42, 1, 0.1, 100);
-  scene.add(new T.HemisphereLight(0xbcd0ff, 0x1a1430, 0.85));
-  const sun = new T.DirectionalLight(0xfff0d0, 1.15); sun.position.set(5, 10, 6); sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = -9; sun.shadow.camera.right = 9; sun.shadow.camera.top = 9; sun.shadow.camera.bottom = -9; scene.add(sun);
-  const rim = new T.PointLight(0x88aaff, 0.9, 20); rim.position.set(0, 4, -7); scene.add(rim);
+  scene.add(new T.HemisphereLight(0xcfdcff, 0x241a3a, 0.62));
+  const sun = new T.DirectionalLight(0xfff2d6, 0.78); sun.position.set(-6, 11, -7); sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -10, right: 10, top: 10, bottom: -10 }); scene.add(sun);
+  const rim = new T.PointLight(0x7fa0ff, 0.8, 26); rim.position.set(0, 5, 9); scene.add(rim);
 
-  // 地面（円い舞台）と飾り
-  const ground = new T.Mesh(new T.CylinderGeometry(9.5, 10.5, 0.6, 64), new T.MeshStandardMaterial({ color: 0x232c4a, roughness: 0.95 }));
-  ground.position.y = -0.3; ground.receiveShadow = true; scene.add(ground);
-  const ringM = new T.MeshBasicMaterial({ color: 0xd9bf86, transparent: true, opacity: 0.35, side: T.DoubleSide });
-  for (const [r0, r1] of [[9.1, 9.2], [5.4, 5.45], [2.6, 2.64]]) { const r = new T.Mesh(new T.RingGeometry(r0, r1, 96), ringM); r.rotation.x = -Math.PI / 2; r.position.y = 0.01; scene.add(r); }
-  const rockM = new T.MeshStandardMaterial({ color: 0x2e385c, roughness: 1, flatShading: true });
-  for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2 + 0.3, d = 10.5 + (i % 3) * 1.2; const rk = new T.Mesh(new T.DodecahedronGeometry(0.9 + (i % 4) * 0.45, 0), rockM); rk.position.set(Math.cos(a) * d, 0.5 + (i % 2) * 0.6, Math.sin(a) * d); rk.rotation.set(i, i * 2, i * 3); rk.castShadow = true; scene.add(rk); }
-  // ただよう光の粒
-  const pg = new T.BufferGeometry(), pn = 160, pp = new Float32Array(pn * 3);
-  for (let i = 0; i < pn; i++) { pp[i * 3] = (Math.random() - 0.5) * 26; pp[i * 3 + 1] = Math.random() * 9; pp[i * 3 + 2] = (Math.random() - 0.5) * 26; }
-  pg.setAttribute('position', new T.BufferAttribute(pp, 3));
-  const dust = new T.Points(pg, new T.PointsMaterial({ color: 0xf3e2b8, size: 0.06, transparent: true, opacity: 0.7 })); scene.add(dust);
-
-  const mat = (c, o) => new T.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.7, metalness: 0.1, flatShading: true }, o || {}));
-  const add = (g, geo, m, x, y, z, rx, ry, rz) => { const me = new T.Mesh(geo, m); me.position.set(x || 0, y || 0, z || 0); me.rotation.set(rx || 0, ry || 0, rz || 0); me.castShadow = true; g.add(me); return me; };
-
-  /* ---- モンスター ---- */
-  function buildMonster(shape, el) {
-    const g = new T.Group(), c = new T.Color(EL[el]);
-    const skin = mat(c.clone().multiplyScalar(0.42)), dark = mat(c.clone().multiplyScalar(0.22));
-    const glow = mat(c, { emissive: c, emissiveIntensity: 0.9 });
-    const eye = new T.MeshBasicMaterial({ color: 0xffffff });
-    const parts = { p0: new T.Group(), p1: new T.Group() }; g.add(parts.p0, parts.p1);
-    if (shape === 'wolf') {
-      add(g, new T.BoxGeometry(1.5, 1.3, 3.0), skin, 0, 1.75, -0.2);
-      add(g, new T.BoxGeometry(1.25, 1.15, 1.2), skin, 0, 2.25, 1.75);
-      add(g, new T.ConeGeometry(0.42, 1.2, 5), dark, 0, 2.05, 2.75, Math.PI / 2);
-      for (const sx of [-1, 1]) { add(g, new T.ConeGeometry(0.22, 0.6, 4), dark, sx * 0.42, 3.05, 1.55); add(g, new T.SphereGeometry(0.09, 8, 8), eye, sx * 0.4, 2.45, 2.36); }
-      for (const [x, z] of [[-0.6, 0.9], [0.6, 0.9], [-0.6, -1.3], [0.6, -1.3]]) add(g, new T.CylinderGeometry(0.24, 0.18, 1.4, 6), dark, x, 0.7, z);
-      add(g, new T.ConeGeometry(0.3, 1.9, 6), glow, 0, 2.3, -2.4, -Math.PI / 2.6);
-      for (let i = 0; i < 7; i++) add(parts.p0, new T.ConeGeometry(0.26, 1.1 + (i % 3) * 0.3, 5), glow, (i - 3) * 0.2, 2.9, 1.2 - Math.abs(i - 3) * 0.28, -0.5);   // たてがみ
-      for (const sx of [-1, 1]) for (let k = 0; k < 3; k++) add(parts.p1, new T.ConeGeometry(0.09, 0.5, 4), glow, sx * 0.6 + (k - 1) * 0.13, 0.12, 1.25, Math.PI / 2);  // 前足の爪
-    } else if (shape === 'lizard') {
-      const body = add(g, new T.SphereGeometry(1.3, 12, 10), skin, 0, 1.1, -0.2); body.scale.set(1.25, 0.72, 2.0);
-      const head = add(g, new T.SphereGeometry(0.85, 10, 8), skin, 0, 1.25, 2.6); head.scale.set(1.1, 0.7, 1.5);
-      for (const sx of [-1, 1]) { add(g, new T.SphereGeometry(0.11, 8, 8), eye, sx * 0.5, 1.6, 3.2); add(g, new T.CylinderGeometry(0.3, 0.22, 0.9, 6), dark, sx * 1.6, 0.45, 1.1, 0, 0, sx * 0.5); add(g, new T.CylinderGeometry(0.3, 0.22, 0.9, 6), dark, sx * 1.6, 0.45, -1.3, 0, 0, sx * 0.5); }
-      for (let i = 0; i < 4; i++) add(parts.p0, new T.SphereGeometry(0.55 - i * 0.06, 8, 6), glow, 0, 2.05 - i * 0.05, 0.9 - i * 0.85);               // 背中のこぶ
-      for (let i = 0; i < 5; i++) add(parts.p1, new T.ConeGeometry(0.62 - i * 0.1, 1.1, 6), i % 2 ? dark : glow, 0, 0.95 - i * 0.08, -2.7 - i * 0.8, -Math.PI / 2); // 尻尾
-    } else {
-      add(g, new T.BoxGeometry(2.3, 2.0, 3.2), skin, 0, 2.2, -0.3);
-      add(g, new T.BoxGeometry(1.5, 1.4, 1.5), skin, 0, 2.6, 1.95);
-      add(g, new T.BoxGeometry(1.1, 0.6, 0.9), dark, 0, 2.1, 2.85);
-      for (const sx of [-1, 1]) add(g, new T.SphereGeometry(0.1, 8, 8), eye, sx * 0.5, 2.9, 2.72);
-      for (const [x, z] of [[-0.85, 0.9], [0.85, 0.9], [-0.85, -1.4], [0.85, -1.4]]) add(g, new T.CylinderGeometry(0.36, 0.28, 1.5, 6), dark, x, 0.75, z);
-      for (const sx of [-1, 1]) { add(parts.p0, new T.ConeGeometry(0.22, 2.0, 6), glow, sx * 0.55, 3.9, 2.2, 0.5, 0, -sx * 0.4); }                    // 雷角
-      for (let i = 0; i < 5; i++) add(parts.p1, new T.OctahedronGeometry(0.42 + (i % 2) * 0.16, 0), glow, (i % 2 ? 0.45 : -0.45), 3.55, 0.8 - i * 0.6); // 蓄電器官
-    }
-    g.userData = { parts, glow, skin, h: shape === 'lizard' ? 2.2 : shape === 'wolf' ? 3.0 : 3.9 };
-    return g;
+  // 3段階の陰（トゥーン）と、黒いふちどり
+  const grad = new T.DataTexture(new Uint8Array([70, 150, 255]), 3, 1, T.LuminanceFormat); grad.minFilter = grad.magFilter = T.NearestFilter; grad.needsUpdate = true;
+  const mat = (c, o) => new T.MeshToonMaterial(Object.assign({ color: c, gradientMap: grad }, o || {}));
+  const glowMat = (c, k) => new T.MeshToonMaterial({ color: c, gradientMap: grad, emissive: c, emissiveIntensity: (k == null ? 0.85 : k) * 0.42 });
+  const lineMat = new T.MeshBasicMaterial({ color: 0x0b0e1c, side: T.BackSide });
+  function add(g, geo, m, p, r, s, noLine) {
+    const me = new T.Mesh(geo, m); if (p) me.position.set(p[0], p[1], p[2]); if (r) me.rotation.set(r[0], r[1], r[2]); if (s) me.scale.set(s[0], s[1], s[2]);
+    me.castShadow = true; g.add(me);
+    if (!noLine) { const o = new T.Mesh(geo, lineMat); o.scale.setScalar(1.07); me.add(o); }
+    return me;
   }
+  const sph = (r, w, h) => new T.SphereGeometry(r, w || 18, h || 14), cyl = (a, b, h, n) => new T.CylinderGeometry(a, b, h, n || 14), cone = (r, h, n) => new T.ConeGeometry(r, h, n || 10);
 
-  /* ---- ハンター ---- */
+  // 舞台
+  const ground = new T.Mesh(new T.CylinderGeometry(10, 11, 0.6, 72), mat(0x27315a)); ground.position.y = -0.3; ground.receiveShadow = true; scene.add(ground);
+  const ringM = new T.MeshBasicMaterial({ color: 0xd9bf86, transparent: true, opacity: 0.4, side: T.DoubleSide });
+  for (const [a, b] of [[9.5, 9.62], [6.9, 6.95], [3.0, 3.05]]) { const r = new T.Mesh(new T.RingGeometry(a, b, 96), ringM); r.rotation.x = -Math.PI / 2; r.position.y = 0.01; scene.add(r); }
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2, r = new T.Mesh(new T.CircleGeometry(0.12, 4), ringM); r.rotation.x = -Math.PI / 2; r.position.set(Math.cos(a) * 8.2, 0.012, Math.sin(a) * 8.2); scene.add(r); }
+  const rockM = mat(0x333e6a);
+  for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2 + 0.2, d = 11.5 + (i % 3) * 1.4; const rk = new T.Mesh(new T.DodecahedronGeometry(0.9 + (i % 4) * 0.5, 0), rockM); rk.position.set(Math.cos(a) * d, 0.6 + (i % 2) * 0.7, Math.sin(a) * d); rk.rotation.set(i, i * 2, i * 3); rk.castShadow = true; scene.add(rk); if (i % 4 === 0) { const cr = new T.Mesh(new T.OctahedronGeometry(0.5, 0), glowMat(0x8fb4ff, 0.9)); cr.position.set(Math.cos(a) * d, 2.4, Math.sin(a) * d); cr.scale.y = 2; scene.add(cr); } }
+  const pg = new T.BufferGeometry(), pn = 200, pp = new Float32Array(pn * 3);
+  for (let i = 0; i < pn; i++) { pp[i * 3] = (Math.random() - 0.5) * 30; pp[i * 3 + 1] = Math.random() * 10; pp[i * 3 + 2] = (Math.random() - 0.5) * 30; }
+  pg.setAttribute('position', new T.BufferAttribute(pp, 3));
+  const dust = new T.Points(pg, new T.PointsMaterial({ color: 0xf6e7c1, size: 0.07, transparent: true, opacity: 0.75, blending: T.AdditiveBlending, depthWrite: false })); scene.add(dust);
+
+  /* ---------- ハンター（デフォルメの3頭身） ---------- */
+  const SKIN = 0xffdcc2;
   function buildHunter(key, el) {
     const g = new T.Group(), c = new T.Color(EL[el]);
-    const cloak = mat(c.clone().multiplyScalar(0.75)), trim = mat(c, { emissive: c, emissiveIntensity: 0.55 }), skin = mat(0xf2d3b8), dark = mat(0x2a3050), steel = mat(0xcfd8ea, { metalness: 0.7, roughness: 0.3 });
-    add(g, new T.CylinderGeometry(0.2, 0.42, 1.0, 8), cloak, 0, 0.72, 0);
-    add(g, new T.SphereGeometry(0.27, 12, 10), skin, 0, 1.46, 0);
-    const hair = add(g, new T.SphereGeometry(0.3, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), trim, 0, 1.5, 0); hair.rotation.x = 0.25;
-    for (const sx of [-1, 1]) add(g, new T.CylinderGeometry(0.09, 0.1, 0.5, 6), dark, sx * 0.14, 0.25, 0);
-    const w = new T.Group(); w.position.set(0.42, 1.0, -0.1); g.add(w);
-    if (key === 'kagari') { add(w, new T.BoxGeometry(0.16, 1.5, 0.05), steel, 0, 0.55, 0); add(w, new T.BoxGeometry(0.4, 0.07, 0.09), trim, 0, -0.18, 0); }
-    else if (key === 'minamo') { add(w, new T.CylinderGeometry(0.035, 0.035, 1.6, 6), dark, 0, 0.3, 0); add(w, new T.OctahedronGeometry(0.16, 0), trim, 0, 1.2, 0); }
-    else if (key === 'touka') { add(w, new T.TorusGeometry(0.5, 0.035, 6, 14, Math.PI), dark, 0, 0.3, 0, 0, Math.PI / 2, -Math.PI / 2); add(w, new T.CylinderGeometry(0.012, 0.012, 1.0, 4), trim, 0, 0.3, 0); }
-    else if (key === 'raiga') { add(w, new T.CylinderGeometry(0.035, 0.035, 1.9, 6), dark, 0, 0.35, 0); add(w, new T.ConeGeometry(0.1, 0.42, 6), trim, 0, 1.5, 0); }
-    else { w.position.set(-0.4, 0.95, -0.25); add(w, new T.BoxGeometry(0.62, 0.86, 0.08), steel, 0, 0, 0); add(w, new T.OctahedronGeometry(0.15, 0), trim, 0, 0, -0.07); }
-    const ring = new T.Mesh(new T.RingGeometry(0.55, 0.68, 40), new T.MeshBasicMaterial({ color: c, transparent: true, opacity: 0, side: T.DoubleSide }));
+    const coat = mat(c.clone().lerp(new T.Color(0x1a2040), 0.35)), light = mat(c.clone().lerp(new T.Color(0xffffff), 0.35)), hairM = mat(c.clone().lerp(new T.Color(0x20140c), 0.18)),
+      dark = mat(0x232945), white = mat(0xf4f1ea), goldM = mat(0xe5c877), steel = mat(0xc9d3ea), skin = mat(SKIN), gl = glowMat(c, 1.0);
+    const eyeM = new T.MeshBasicMaterial({ color: 0x1b1d33 }), hi = new T.MeshBasicMaterial({ color: 0xffffff }), iris = new T.MeshBasicMaterial({ color: c.clone().lerp(new T.Color(0xffffff), 0.2) });
+    // 脚と靴
+    for (const sx of [-1, 1]) { add(g, cyl(0.085, 0.075, 0.36), dark, [sx * 0.12, 0.3, 0]); add(g, sph(0.12, 12, 10), white, [sx * 0.12, 0.09, 0.04], null, [1, 0.75, 1.35]); }
+    // 上着（すそが広がる）
+    const pts = [[0.0, 0.42], [0.36, 0.42], [0.33, 0.6], [0.24, 0.88], [0.2, 1.08], [0.13, 1.14], [0, 1.14]].map((p) => new T.Vector2(p[0], p[1]));
+    add(g, new T.LatheGeometry(pts, 18), coat);
+    add(g, new T.TorusGeometry(0.235, 0.03, 8, 20), goldM, [0, 0.86, 0], [Math.PI / 2, 0, 0], null, true);
+    add(g, sph(0.05, 8, 8), gl, [0, 0.86, 0.24], null, null, true);
+    add(g, new T.TorusGeometry(0.15, 0.045, 8, 16), light, [0, 1.13, 0], [Math.PI / 2, 0, 0]);
+    // 頭
+    const head = new T.Group(); head.position.set(0, 1.5, 0); g.add(head);
+    add(head, sph(0.36, 24, 18), skin);
+    for (const sx of [-1, 1]) {
+      add(head, sph(0.075, 12, 10), eyeM, [sx * 0.135, 0.0, 0.315], null, [0.78, 1.15, 0.4], true);
+      add(head, sph(0.045, 10, 8), iris, [sx * 0.135, -0.02, 0.34], null, [0.8, 1, 0.35], true);
+      add(head, sph(0.024, 8, 6), hi, [sx * 0.115, 0.045, 0.352], null, null, true);
+      add(head, sph(0.05, 8, 6), new T.MeshBasicMaterial({ color: 0xff9d9d, transparent: true, opacity: 0.5 }), [sx * 0.22, -0.1, 0.27], null, [1.2, 0.6, 0.3], true);
+      add(head, sph(0.07, 10, 8), skin, [sx * 0.355, -0.02, 0], null, [0.5, 1, 0.8]);
+    }
+    add(head, sph(0.022, 8, 6), new T.MeshBasicMaterial({ color: 0xc46a5a }), [0, -0.14, 0.34], null, [1.6, 0.6, 0.4], true);
+    // 髪（後ろ頭と前髪。キャラごとに形を変える）
+    add(head, new T.SphereGeometry(0.395, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.58), hairM, [0, 0.03, -0.04], [-0.42, 0, 0]);
+    for (let i = -2; i <= 2; i++) add(head, cone(0.085, 0.24, 6), hairM, [i * 0.11, 0.2 - Math.abs(i) * 0.02, 0.3 - Math.abs(i) * 0.03], [Math.PI * 0.94, 0, i * 0.12]);
+    if (key === 'kagari') { for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2; add(head, cone(0.11, 0.42, 6), hairM, [Math.sin(a) * 0.24, 0.36, Math.cos(a) * 0.2 - 0.08], [Math.cos(a) * 0.7 - 0.2, 0, -Math.sin(a) * 0.7]); } add(head, new T.TorusGeometry(0.37, 0.03, 6, 20), mat(0xf4f1ea), [0, 0.1, -0.02], [Math.PI / 2 - 0.25, 0, 0], null, true); }
+    if (key === 'minamo') { for (const sx of [-1, 1]) { add(head, sph(0.15, 12, 10), hairM, [sx * 0.36, -0.28, -0.1], [0, 0, sx * 0.15], [0.8, 2.6, 0.8]); add(head, sph(0.06, 8, 8), goldM, [sx * 0.36, 0.08, -0.06], null, null, true); } add(head, cone(0.1, 0.16, 5), gl, [0, 0.42, 0.05], null, null, true); }
+    if (key === 'touka') { add(head, sph(0.13, 12, 10), hairM, [0, -0.1, -0.5], [0.5, 0, 0], [0.8, 2.6, 0.8]); add(head, sph(0.07, 8, 8), goldM, [0, 0.16, -0.38], null, null, true); for (const sx of [-1, 1]) add(head, cone(0.07, 0.3, 4), light, [sx * 0.16, 0.4, 0.02], [0, 0, -sx * 0.3]); }
+    if (key === 'raiga') { for (let i = 0; i < 5; i++) add(head, cone(0.1, 0.5, 5), hairM, [-0.16 + i * 0.09, 0.36 + (i % 2) * 0.05, -0.02 - i * 0.05], [-0.5, 0, 0.5 - i * 0.12]); add(head, cone(0.035, 0.34, 4), gl, [0.2, 0.42, 0.16], [0.3, 0, -0.6], null, true); }
+    if (key === 'shion') { add(head, new T.TorusGeometry(0.385, 0.045, 8, 24), steel, [0, 0.12, 0], [Math.PI / 2 - 0.12, 0, 0]); add(head, new T.OctahedronGeometry(0.075, 0), gl, [0, 0.17, 0.375], null, null, true); for (const sx of [-1, 1]) add(head, sph(0.12, 12, 10), hairM, [sx * 0.3, -0.26, 0.06], null, [0.75, 1.9, 0.75]); }
+    // 腕
+    const mkArm = (sx) => { const a = new T.Group(); a.position.set(sx * 0.25, 1.06, 0); add(a, sph(0.09, 10, 8), light); add(a, cyl(0.062, 0.052, 0.36), coat, [0, -0.2, 0]); add(a, sph(0.07, 10, 8), skin, [0, -0.41, 0]); g.add(a); return a; };
+    const armL = mkArm(-1), armR = mkArm(1); armL.rotation.set(0.15, 0, -0.28); armR.rotation.set(-0.9, 0, 0.2);
+    // マント
+    const cape = add(g, new T.BoxGeometry(0.56, 0.74, 0.04), mat(c), [0, 0.8, -0.24], [0.2, 0, 0]);
+    // 武器（右手）
+    const w = new T.Group(); w.position.set(0, -0.42, 0); w.rotation.x = Math.PI / 2; armR.add(w);
+    if (key === 'kagari') { add(w, new T.BoxGeometry(0.2, 1.45, 0.06), steel, [0, 0.9, 0]); add(w, cone(0.14, 0.3, 4), steel, [0, 1.77, 0], [0, Math.PI / 4, 0], [1, 1, 0.3]); add(w, new T.BoxGeometry(0.05, 1.4, 0.07), gl, [0, 0.9, 0], null, null, true); add(w, new T.BoxGeometry(0.46, 0.08, 0.1), goldM, [0, 0.16, 0]); add(w, cyl(0.035, 0.035, 0.3, 8), dark, [0, 0, 0]); }
+    else if (key === 'minamo') { add(w, cyl(0.03, 0.03, 1.5, 8), white, [0, 0.45, 0]); add(w, new T.TorusGeometry(0.17, 0.03, 8, 18), goldM, [0, 1.3, 0]); g.userData.orb = add(w, new T.OctahedronGeometry(0.11, 0), gl, [0, 1.3, 0], null, null, true); }
+    else if (key === 'touka') { armR.rotation.set(-1.25, 0, 0.1); add(w, new T.TorusGeometry(0.55, 0.035, 8, 20, Math.PI * 0.9), dark, [0, 0, 0.1], [0, Math.PI / 2, Math.PI * 0.05]); add(w, cyl(0.008, 0.008, 1.06, 4), white, [0, 0, 0.1], null, null, true); add(w, cyl(0.015, 0.015, 0.8, 5), gl, [0, 0, 0.35], [Math.PI / 2, 0, 0], null, true); }
+    else if (key === 'raiga') { add(w, cyl(0.03, 0.03, 1.9, 8), dark, [0, 0.5, 0]); add(w, cone(0.1, 0.5, 4), gl, [0, 1.7, 0], null, null, true); add(w, new T.TorusGeometry(0.09, 0.025, 6, 12), goldM, [0, 1.42, 0], [Math.PI / 2, 0, 0], null, true); }
+    else { armR.rotation.set(-0.5, 0, 0.3); add(w, cyl(0.03, 0.03, 0.7, 8), dark, [0, 0.25, 0]); add(w, sph(0.13, 10, 8), steel, [0, 0.66, 0]); const sh = new T.Group(); sh.position.set(0.05, -0.3, 0.12); armL.add(sh); armL.rotation.set(-1.0, 0.3, -0.2); add(sh, new T.BoxGeometry(0.66, 0.9, 0.08), steel, null, [0, 0, 0]); add(sh, new T.BoxGeometry(0.5, 0.74, 0.1), coat); add(sh, new T.OctahedronGeometry(0.16, 0), gl, [0, 0, 0.07], null, [1, 1.3, 0.4], true); }
+    const ring = new T.Mesh(new T.RingGeometry(0.62, 0.78, 48), new T.MeshBasicMaterial({ color: c, transparent: true, opacity: 0, side: T.DoubleSide, blending: T.AdditiveBlending, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; g.add(ring);
-    g.userData = { ring, h: 1.9 };
+    g.scale.setScalar(1.3);
+    g.userData = Object.assign(g.userData, { ring, head, armL, armR, cape, armR0: armR.rotation.clone(), h: 2.5 });
     return g;
   }
 
-  /* ---- 置き場所と状態 ---- */
-  const ents = {};       // id -> { g, home, ... }
-  let monKey = '', mode = 'idle', tweens = [], focusId = null, shake = 0, t0 = performance.now();
-  const MON_POS = new T.Vector3(0, 0, 3.0);
-  function clearEnts() { for (const k of Object.keys(ents)) { scene.remove(ents[k].g); delete ents[k]; } monKey = ''; }
+  /* ---------- モンスター ---------- */
+  function leg(g, m, m2, x, z, h, r) { const l = new T.Group(); l.position.set(x, h, z); add(l, sph(r * 1.15, 12, 10), m); add(l, cyl(r, r * 0.75, h * 0.55), m, [0, -h * 0.28, 0.05], [0.18, 0, 0]); add(l, cyl(r * 0.72, r * 0.6, h * 0.5), m2, [0, -h * 0.72, 0], [-0.15, 0, 0]); add(l, sph(r * 1.05, 12, 10), m2, [0, -h + r * 0.4, 0.12], null, [1, 0.55, 1.4]); g.add(l); return l; }
+  function buildMonster(shape, el) {
+    const g = new T.Group(), c = new T.Color(EL[el]);
+    const skin = mat(c.clone().lerp(new T.Color(0x1a1326), 0.5)), dark = mat(c.clone().lerp(new T.Color(0x0c0a16), 0.78)), belly = mat(c.clone().lerp(new T.Color(0xf3e6d0), 0.45)),
+      glow = glowMat(c, 1.0), bone = mat(0xf4efe0), eyeM = new T.MeshBasicMaterial({ color: 0xfff6c8 }), pupil = new T.MeshBasicMaterial({ color: 0x220a0a });
+    const parts = { p0: new T.Group(), p1: new T.Group() }; g.add(parts.p0, parts.p1);
+    const tail = [], flames = [], legs = []; let jaw = null, headG = new T.Group(); g.add(headG);
+    const eyes = (y, z, x, r) => { for (const sx of [-1, 1]) { add(headG, sph(r, 12, 10), eyeM, [sx * x, y, z], null, [1, 0.75, 0.6], true); add(headG, sph(r * 0.45, 8, 6), pupil, [sx * x, y, z + r * 0.5], null, [0.5, 1, 0.4], true); add(headG, new T.BoxGeometry(r * 2.6, r * 0.5, r), dark, [sx * x, y + r * 0.8, z + r * 0.2], [0, 0, -sx * 0.45], null, true); } };
+    const teeth = (parent, n, w, z0, y, down) => { for (let i = 0; i < n; i++) for (const sx of [-1, 1]) add(parent, cone(0.055, 0.2, 5), bone, [sx * w, y, z0 + i * 0.17], [down ? Math.PI : 0, 0, 0], null, true); };
+    if (shape === 'wolf') {
+      add(g, sph(1.0), skin, [0, 2.0, 0.7], null, [1, 1.02, 1.25]); add(g, sph(0.82), skin, [0, 1.85, -0.6], null, [0.9, 0.86, 1.4]); add(g, sph(0.78), skin, [0, 1.92, -1.5]);
+      add(g, sph(0.7), belly, [0, 1.6, 0.7], null, [0.8, 0.7, 1.2]);
+      add(g, cyl(0.5, 0.66, 1.0), skin, [0, 2.5, 1.5], [0.95, 0, 0]);
+      headG.position.set(0, 2.9, 2.15);
+      add(headG, sph(0.62), skin, null, null, [1.05, 0.92, 1.15]); add(headG, cyl(0.26, 0.4, 0.85), skin, [0, -0.12, 0.72], [Math.PI / 2, 0, 0]); add(headG, sph(0.12, 10, 8), dark, [0, -0.04, 1.16]);
+      for (const sx of [-1, 1]) { add(headG, cone(0.2, 0.6, 5), skin, [sx * 0.38, 0.6, -0.2], [-0.25, 0, -sx * 0.3]); add(headG, cone(0.1, 0.34, 5), glow, [sx * 0.38, 0.56, -0.14], [-0.25, 0, -sx * 0.3], null, true); add(headG, cone(0.07, 0.34, 5), bone, [sx * 0.2, -0.4, 0.98], [Math.PI, 0, 0], null, true); }
+      eyes(0.14, 0.5, 0.3, 0.11); teeth(headG, 3, 0.2, 0.5, -0.36, true);
+      jaw = new T.Group(); jaw.position.set(0, -0.36, 0.2); headG.add(jaw); add(jaw, new T.BoxGeometry(0.5, 0.14, 0.9), dark, [0, 0, 0.42]); teeth(jaw, 3, 0.2, 0.3, 0.14, false);
+      legs.push(leg(g, skin, dark, -0.62, 1.05, 1.7, 0.27), leg(g, skin, dark, 0.62, 1.05, 1.7, 0.27), leg(g, skin, dark, -0.56, -1.5, 1.7, 0.29), leg(g, skin, dark, 0.56, -1.5, 1.7, 0.29));
+      for (let i = 0; i < 16; i++) { const a = (i / 16 - 0.5) * 2.6, r = 0.66 + (i % 2) * 0.1; const f = add(parts.p0, cone(0.2, 0.9 + (i % 3) * 0.35, 6), glow, [Math.sin(a) * r, 2.75 + Math.cos(a) * 0.5, 1.45 - (i % 4) * 0.35], [-0.7, 0, -Math.sin(a) * 0.9], null, true); flames.push(f); }   // たてがみ
+      for (const sx of [-1, 1]) for (let k = -1; k <= 1; k++) add(parts.p1, cone(0.075, 0.42, 5), bone, [sx * 0.62 + k * 0.13, 0.16, 1.52], [Math.PI / 2 + 0.3, 0, 0], null, true);   // 前足の爪
+      for (let i = 0; i < 6; i++) { const f = add(g, sph(0.34 - i * 0.04, 10, 8), glow, [0, 2.2 + i * 0.22, -2.1 - i * 0.36], null, [1, 1, 1.3], true); tail.push(f); flames.push(f); }
+      g.userData.h = 3.9;
+    } else if (shape === 'lizard') {
+      const prof = [0.82, 1.08, 1.18, 1.08, 0.86, 0.66];
+      prof.forEach((r, i) => { add(g, sph(r), skin, [0, 1.0, 1.6 - i * 0.7], null, [1.12, 0.72, 1]); add(g, sph(r * 0.8), belly, [0, 0.72, 1.6 - i * 0.7], null, [1, 0.55, 0.95]); });
+      for (let i = 0; i < 9; i++) add(g, cone(0.13, 0.42, 5), dark, [0, 1.75 - Math.abs(i - 3) * 0.05, 1.9 - i * 0.48], [-0.3, 0, 0]);
+      headG.position.set(0, 1.12, 2.75);
+      add(headG, sph(0.8), skin, null, null, [1.12, 0.66, 1.4]); add(headG, sph(0.5), skin, [0, -0.02, 0.86], null, [1.05, 0.6, 1.1]);
+      for (const sx of [-1, 1]) { add(headG, sph(0.2, 10, 8), skin, [sx * 0.5, 0.36, 0.2]); add(headG, sph(0.05, 8, 6), pupil, [sx * 0.16, 0.14, 1.34], null, null, true); add(headG, cone(0.13, 0.5, 5), dark, [sx * 0.6, 0.3, -0.5], [-1.1, 0, -sx * 0.5]); }
+      eyes(0.44, 0.34, 0.5, 0.12); teeth(headG, 4, 0.36, 0.5, -0.34, true);
+      jaw = new T.Group(); jaw.position.set(0, -0.34, -0.1); headG.add(jaw); add(jaw, sph(0.6), belly, [0, -0.06, 0.6], null, [1.1, 0.3, 1.5]); teeth(jaw, 4, 0.36, 0.6, 0.1, false);
+      for (const [x, z] of [[-1.25, 1.2], [1.25, 1.2], [-1.2, -1.2], [1.2, -1.2]]) { const l = leg(g, skin, dark, x, z, 1.05, 0.3); l.rotation.z = x > 0 ? -0.45 : 0.45; legs.push(l); for (let k = -1; k <= 1; k++) add(g, cone(0.06, 0.3, 5), bone, [x * 1.3 + k * 0.12, 0.1, z + 0.5], [Math.PI / 2 + 0.3, 0, 0], null, true); }
+      for (let i = 0; i < 4; i++) { const hmp = add(parts.p0, sph(0.6 - i * 0.07), glow, [0, 1.95 - i * 0.06, 1.1 - i * 0.95], null, null, true); flames.push(hmp); for (let k = 0; k < 3; k++) add(parts.p0, cone(0.09, 0.4, 5), dark, [(k - 1) * 0.28, 2.45 - i * 0.1, 1.1 - i * 0.95], [0, 0, -(k - 1) * 0.5], null, true); }   // 背中のこぶ
+      for (let i = 0; i < 7; i++) { const s = add(parts.p1, sph(0.62 - i * 0.075), i % 2 ? skin : dark, [0, 0.9 - i * 0.04, -2.7 - i * 0.6]); tail.push(s); if (i > 3) add(s, cone(0.14, 0.5, 5), glow, [0, 0.4, 0], null, null, true); }   // 尻尾
+      g.userData.h = 2.9;
+    } else {
+      add(g, sph(1.35), skin, [0, 2.6, 0.75], null, [1.05, 1, 1.1]); add(g, sph(1.2), skin, [0, 3.0, -0.2]); add(g, sph(1.05), skin, [0, 2.4, -1.5]); add(g, sph(1.0), belly, [0, 2.0, 0.5], null, [0.85, 0.7, 1.3]);
+      for (let i = 0; i < 12; i++) { const a = (i / 12 - 0.5) * 3.0; add(g, cone(0.2, 0.8, 5), dark, [Math.sin(a) * 1.05, 3.0 + Math.cos(a) * 0.7, 1.55], [-1.0, 0, -Math.sin(a)]); }
+      headG.position.set(0, 2.85, 2.25);
+      add(headG, sph(0.8), skin, null, null, [1.1, 1, 1.15]); add(headG, cyl(0.42, 0.52, 0.7), skin, [0, -0.2, 0.75], [Math.PI / 2, 0, 0]); add(headG, sph(0.14, 10, 8), dark, [0, -0.08, 1.14], null, [1.6, 0.8, 0.6]);
+      for (const sx of [-1, 1]) { add(headG, cone(0.09, 0.6, 6), bone, [sx * 0.4, -0.3, 0.95], [-0.5, 0, sx * 0.5], null, true); }
+      eyes(0.2, 0.62, 0.36, 0.12); teeth(headG, 3, 0.28, 0.5, -0.5, true);
+      jaw = new T.Group(); jaw.position.set(0, -0.52, 0.1); headG.add(jaw); add(jaw, new T.BoxGeometry(0.8, 0.2, 1.0), dark, [0, 0, 0.5]); teeth(jaw, 3, 0.28, 0.4, 0.16, false);
+      legs.push(leg(g, skin, dark, -0.95, 1.1, 2.0, 0.4), leg(g, skin, dark, 0.95, 1.1, 2.0, 0.4), leg(g, skin, dark, -0.85, -1.6, 2.0, 0.42), leg(g, skin, dark, 0.85, -1.6, 2.0, 0.42));
+      for (const sx of [-1, 1]) { let px = sx * 0.5, py = 3.55, pz = 2.1, rx = 0.5; for (let i = 0; i < 5; i++) { const s = add(parts.p0, cone(0.24 - i * 0.04, 0.7, 7), glow, [px, py, pz], [rx, 0, -sx * (0.5 - i * 0.05)], null, true); flames.push(s); px += sx * 0.2; py += 0.42 - i * 0.06; pz += 0.14 + i * 0.1; rx += 0.25; } }   // 雷角
+      for (let i = 0; i < 6; i++) { const s = add(parts.p1, new T.OctahedronGeometry(0.4 + (i % 2) * 0.16, 0), glow, [(i % 2 ? 0.5 : -0.5), 4.05 - i * 0.12, 0.6 - i * 0.55], [0, i, 0], [1, 1.9, 1], true); flames.push(s); }   // 蓄電器官
+      for (let i = 0; i < 4; i++) { const s = add(g, sph(0.34 - i * 0.05), i === 3 ? glow : skin, [0, 2.3 + i * 0.14, -2.5 - i * 0.36]); tail.push(s); }
+      g.userData.h = 4.9;
+    }
+    g.userData = Object.assign(g.userData, { parts, glow, tail, flames, legs, jaw, headG, headY: headG.position.y, tailX: tail.map((t) => t.position.x) });
+    return g;
+  }
+
+  /* ---------- 置き場所 ---------- */
+  const ents = {};
+  let monKey = '', mode = 'idle', tweens = [], shake = 0, t0 = performance.now(), zoom = 0;
+  const MON_POS = new T.Vector3(0, 0, 3.4);
+  function clearEnts() { for (const k of Object.keys(ents)) { scene.remove(ents[k].g); for (const a of ents[k].aura || []) scene.remove(a); delete ents[k]; } monKey = ''; }
   function ensure(state) {
     const m = state.units.find((u) => u.id === 'm');
-    if (monKey === state.quest && ents.m) return;
+    if (monKey === state.quest && ents.m && !ents.m.preview) return;
     clearEnts(); monKey = state.quest;
     const mg = buildMonster(m.shape, m.el); mg.position.copy(MON_POS); mg.rotation.y = Math.PI; scene.add(mg);
-    ents.m = { g: mg, home: MON_POS.clone(), baseRot: Math.PI, dead: false };
+    ents.m = { g: mg, home: MON_POS.clone(), dead: false, aura: [], side: 'm' };
     const hs = state.units.filter((u) => u.side === 'h');
     hs.forEach((u, i) => {
-      const a = (i - (hs.length - 1) / 2) * 0.36, r = 6.6;
-      const g = buildHunter(u.key, u.el); const home = new T.Vector3(-Math.sin(a) * r, 0, MON_POS.z - Math.cos(a) * r);   // カメラは後ろから見るので、カードの並びと合わせて左右を逆に置く
+      const a = (i - (hs.length - 1) / 2) * 0.3, r = 6.6;
+      const g = buildHunter(u.key, u.el), home = new T.Vector3(-Math.sin(a) * r, 0, MON_POS.z - Math.cos(a) * r);
       g.position.copy(home); g.lookAt(MON_POS.x, 0, MON_POS.z); scene.add(g);
-      ents[u.id] = { g, home, baseRot: g.rotation.y, dead: false };
+      ents[u.id] = { g, home, dead: false, aura: [], side: 'h', seed: i * 1.7 };
     });
   }
   function tween(ms, fn, done) { tweens.push({ t: 0, ms, fn, done }); }
-  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2), out = (x) => 1 - Math.pow(1 - x, 3);
+  const center = (id) => { const e = ents[id]; return e ? e.g.position.clone().add(new T.Vector3(0, (e.g.userData.h || 2) * (id === 'm' ? 0.55 : 0.5), 0)) : new T.Vector3(); };
 
+  /* ---------- エフェクトの部品 ---------- */
+  const addM = (o) => new T.MeshBasicMaterial(Object.assign({ transparent: true, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }, o));
+  function burst(p, color, n, speed, life, size, up) {
+    const geo = new T.BufferGeometry(), arr = new Float32Array(n * 3), vel = [];
+    for (let i = 0; i < n; i++) { const v = new T.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(speed * (0.4 + Math.random() * 0.8)); v.y += up || 0; vel.push(v); }
+    geo.setAttribute('position', new T.BufferAttribute(arr, 3));
+    const m = new T.PointsMaterial({ color, size: size || 0.22, transparent: true, blending: T.AdditiveBlending, depthWrite: false }), pts = new T.Points(geo, m); scene.add(pts);
+    tween(life, (x) => { const tsec = x * life / 1000; for (let i = 0; i < n; i++) { arr[i * 3] = p.x + vel[i].x * tsec; arr[i * 3 + 1] = p.y + vel[i].y * tsec - 2.2 * tsec * tsec * (up ? 0 : 1); arr[i * 3 + 2] = p.z + vel[i].z * tsec; } geo.attributes.position.needsUpdate = true; m.opacity = 1 - x * x; }, () => { scene.remove(pts); geo.dispose(); });
+  }
+  function shock(p, color, r1, ms, flat) {
+    const r = new T.Mesh(new T.RingGeometry(0.82, 1, 48), addM({ color })); r.position.copy(p); if (flat) { r.rotation.x = -Math.PI / 2; r.position.y = 0.06; } else r.lookAt(cam.position); scene.add(r);
+    tween(ms || 420, (x) => { const s = 0.2 + out(x) * r1; r.scale.set(s, s, s); r.material.opacity = 1 - x; }, () => scene.remove(r));
+  }
+  function slash(p, color, big) {
+    for (let k = 0; k < (big ? 3 : 1); k++) {
+      const s = new T.Mesh(new T.RingGeometry(1.0, 1.42, 32, 1, 0, Math.PI * 0.95), addM({ color: k ? 0xffffff : color })); s.position.copy(p); s.lookAt(cam.position); const q0 = s.quaternion.clone(), base = Math.random() * 6.28, zAxis = new T.Vector3(0, 0, 1); s.visible = false; scene.add(s);
+      setTimeout(() => { s.visible = true; tween(300, (x) => { s.quaternion.copy(q0).multiply(new T.Quaternion().setFromAxisAngle(zAxis, base + out(x) * 2.6 * (k % 2 ? -1 : 1))); const sc = (big ? 2.0 : 1.35) * (0.5 + out(x) * 0.8); s.scale.set(sc, sc, sc); s.material.opacity = 1 - x * x; }, () => scene.remove(s)); }, k * 90);
+    }
+  }
+  function star(p, color, sc) {
+    for (const rz of [0.5, -0.5, Math.PI / 2 + 0.5, Math.PI / 2 - 0.5]) { const s = new T.Mesh(new T.PlaneGeometry(6, 0.28), addM({ color })); s.position.copy(p); s.lookAt(cam.position); s.rotateZ(rz); scene.add(s); tween(360, (x) => { const k = sc * (0.2 + out(x)); s.scale.set(k, (1 - x) * 1.6, 1); s.material.opacity = 1 - x; }, () => scene.remove(s)); }
+  }
+  function dome(p, color, r) {
+    const g = new T.Group(); g.position.copy(p); const a = new T.Mesh(new T.IcosahedronGeometry(r, 1), addM({ color, opacity: 0.25 })), b = new T.Mesh(new T.IcosahedronGeometry(r * 1.01, 1), new T.MeshBasicMaterial({ color, wireframe: true, transparent: true })); g.add(a, b); scene.add(g);
+    tween(520, (x) => { const s = 0.6 + out(Math.min(1, x * 3)) * 0.4; g.scale.setScalar(s); a.material.opacity = 0.35 * (1 - x); b.material.opacity = 1 - x; g.rotation.y = x; }, () => scene.remove(g));
+  }
+  function arrows(p, color, dir, r) {
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2, s = new T.Mesh(new T.ConeGeometry(0.16, 0.5, 4), addM({ color })); if (dir < 0) s.rotation.x = Math.PI; scene.add(s); const y0 = dir > 0 ? 0.2 : 2.6; tween(620, (x) => { s.position.set(p.x + Math.cos(a) * r, p.y - 1 + y0 + dir * x * 2.2, p.z + Math.sin(a) * r); s.material.opacity = Math.sin(x * Math.PI); }, () => scene.remove(s)); }
+  }
+  function cage(p, color, r, h) {
+    const g = new T.Group(); g.position.copy(p);
+    for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2, s = new T.Mesh(new T.OctahedronGeometry(0.34, 0), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.75 })); s.position.set(Math.cos(a) * r, 0, Math.sin(a) * r); s.scale.y = h; g.add(s); }
+    scene.add(g); tween(700, (x) => { g.scale.setScalar(1.6 - out(Math.min(1, x * 2.5)) * 0.6); g.rotation.y = x * 0.8; for (const s of g.children) s.material.opacity = 0.8 * (1 - Math.max(0, x - 0.6) / 0.4); }, () => scene.remove(g));
+  }
+  function bolt(from, to, color, big, done) {
+    const s = new T.Mesh(sph(big ? 0.42 : 0.24, 12, 10), new T.MeshBasicMaterial({ color: 0xffffff })), halo = new T.Mesh(sph(big ? 0.8 : 0.45, 12, 10), addM({ color, opacity: 0.6 })); s.add(halo); const l = new T.PointLight(color, 2.2, 8); s.add(l); scene.add(s);
+    let last = 0; tween(big ? 380 : 300, (x) => { s.position.lerpVectors(from, to, x); s.position.y += Math.sin(x * Math.PI) * 1.0; if (x - last > 0.12) { last = x; burst(s.position.clone(), color, 6, 0.8, 300, 0.16); } }, () => { scene.remove(s); if (done) done(); });
+  }
+
+  /* ---------- 外から呼ぶもの ---------- */
   const api = {
+    build(state) { ensure(state); },
     setMode(m) { mode = m; if (m === 'idle' && !ents.m) api.previewQuest({ shape: 'wolf', el: 'red' }); },
     previewQuest(q) {
       if (mode === 'battle' || !q) return;
       const key = 'preview:' + q.shape + q.el; if (monKey === key) return;
       clearEnts(); monKey = key;
-      const mg = buildMonster(q.shape, q.el); mg.position.set(0, 0, 0); scene.add(mg); ents.m = { g: mg, home: new T.Vector3(), baseRot: 0, dead: false, preview: true };
+      const mg = buildMonster(q.shape, q.el); scene.add(mg); ents.m = { g: mg, home: new T.Vector3(), dead: false, preview: true, aura: [], side: 'm' };
     },
-    build(state) { ensure(state); },
     sync(state) {
       ensure(state);
       for (const u of state.units) {
         const e = ents[u.id]; if (!e) continue;
         const dead = u.hp <= 0;
-        if (dead !== e.dead) { e.dead = dead; e.g.rotation.z = dead && u.side === 'h' ? Math.PI / 2 : 0; e.g.position.y = dead && u.side === 'h' ? 0.3 : 0; if (u.side === 'm') e.g.visible = !dead; }
+        if (dead !== e.dead) { e.dead = dead; e.g.rotation.z = dead && u.side === 'h' ? Math.PI / 2 : 0; e.g.position.y = dead && u.side === 'h' ? 0.35 : 0; if (u.side === 'm') e.g.visible = !dead; }
         if (u.parts) for (const p of u.parts) e.g.userData.parts[p.id].visible = !p.broken;
-        if (u.side === 'm') { e.g.userData.glow.emissiveIntensity = u.rage ? 1.8 : 0.9; e.charging = u.charging; }
+        if (u.side === 'm') { e.rage = u.rage; e.charging = u.charging; }
+        // かかっている状態を、まわりを回る光の玉で見せる
+        for (const a of e.aura) scene.remove(a); e.aura = []; e.stopped = false;
+        if (!dead) u.st.filter((x) => x.id !== 'stopResist').forEach((x, i, arr) => {
+          const o = new T.Mesh(new T.OctahedronGeometry(u.side === 'm' ? 0.26 : 0.13, 0), new T.MeshBasicMaterial({ color: ST_COL[x.id] || 0xffffff })); o.userData = { k: i / arr.length * Math.PI * 2, r: u.side === 'm' ? 2.6 : 0.85 }; const hl = new T.Mesh(sph(u.side === 'm' ? 0.45 : 0.22, 8, 6), addM({ color: ST_COL[x.id] || 0xffffff, opacity: 0.45 })); o.add(hl); scene.add(o); e.aura.push(o);
+          if (x.id === 'stop') e.stopped = true;
+        });
       }
       api.focus(state.turn);
     },
-    focus(id) { focusId = id; for (const k of Object.keys(ents)) { const r = ents[k].g.userData.ring; if (r) r.material.opacity = k === id ? 0.95 : 0; } },
-    attack(uid, tid, type, burst) {
+    focus(id) { for (const k of Object.keys(ents)) { const r = ents[k].g.userData.ring; if (r) r.material.opacity = k === id ? 0.95 : 0; } },
+    attack(uid, tid, type, kind) {
       const a = ents[uid], b = ents[tid]; if (!a) return;
+      const ult = kind === 'ultimate', sp = kind === 'special', col = uid === 'm' ? 0xff5a4a : new T.Color(EL[(U(uid) || {}).el] || '#fff').getHex();
+      if (ult || sp) { burst(center(uid), col, ult ? 60 : 28, ult ? 5 : 3, ult ? 800 : 500, 0.2, 2.5); shock(a.g.position.clone(), col, ult ? 5 : 3, ult ? 700 : 450, true); zoom = ult ? 1 : 0.4; }
+      if (uid === 'm' && a.g.userData.jaw) tween(520, (x) => { a.g.userData.jaw.rotation.x = Math.sin(x * Math.PI) * 0.7; a.g.userData.headG.rotation.x = -Math.sin(x * Math.PI) * 0.25; });
+      const ar = a.g.userData.armR;
+      if (ar) { const r0 = a.g.userData.armR0; tween(ult ? 700 : 420, (x) => { ar.rotation.x = r0.x - Math.sin(x * Math.PI) * 2.3; ar.rotation.z = r0.z + Math.sin(x * Math.PI * 2) * 0.5; }, () => ar.rotation.copy(r0)); }
       const from = a.home.clone();
-      if ((type === 'phys' || uid === 'm') && b && b !== a) {
-        const dir = b.home.clone().sub(a.home); const dist = dir.length(); dir.normalize();
-        const to = a.home.clone().add(dir.multiplyScalar(Math.max(0.5, dist - (uid === 'm' ? 3.0 : 3.4))));
-        tween(240, (x) => a.g.position.lerpVectors(from, to, ease(x)), () => tween(300, (x) => a.g.position.lerpVectors(to, from, ease(x))));
+      if ((type === 'phys' || uid === 'm') && b && b !== a && type !== 'debuff') {
+        const dir = b.home.clone().sub(a.home), dist = dir.length(); dir.normalize();
+        const to = a.home.clone().add(dir.multiplyScalar(Math.max(0.5, dist - (uid === 'm' ? 3.6 : 4.2))));
+        setTimeout(() => tween(200, (x) => { a.g.position.lerpVectors(from, to, out(x)); a.g.position.y = Math.sin(x * Math.PI) * 0.5; }, () => tween(340, (x) => { a.g.position.lerpVectors(to, from, ease(x)); })), ult ? 320 : 0);
       } else {
-        tween(380, (x) => { a.g.position.y = a.home.y + Math.sin(x * Math.PI) * (burst ? 0.9 : 0.45); }, () => { a.g.position.y = a.home.y; });
-        if (b && b !== a && type !== 'heal' && type !== 'guard') bolt(a, b, burst);
+        const ry = a.g.rotation.y;
+        tween(ult ? 800 : 420, (x) => { a.g.position.y = a.home.y + Math.sin(x * Math.PI) * (ult ? 1.2 : 0.5); if (ult && uid !== 'm') a.g.rotation.y = ry + x * Math.PI * 2; }, () => { a.g.position.y = a.home.y; a.g.rotation.y = ry; });
+        if (b && b !== a && type !== 'heal' && type !== 'guard') setTimeout(() => bolt(center(uid).add(new T.Vector3(0, 0.6, 0)), center(tid), col, ult || sp), ult ? 420 : 120);
+        if (type === 'guard') dome(center(uid), 0x8fd0ff, uid === 'm' ? 3 : 1.5);
       }
-      if (burst) shake = Math.max(shake, 0.25);
+      if (ult) shake = Math.max(shake, 0.3);
     },
-    hit(id, crit) {
-      const e = ents[id]; if (!e) return; shake = Math.max(shake, id === 'm' ? (crit ? 0.22 : 0.1) : 0.16);
-      const s0 = 1; tween(220, (x) => { const k = 1 + Math.sin(x * Math.PI) * (id === 'm' ? 0.06 : 0.14); e.g.scale.set(s0 * k, s0 / k, s0 * k); }, () => e.g.scale.set(1, 1, 1));
-      api.glow(id, 0xffffff, 160);
+    impact(id, o) {
+      const e = ents[id]; if (!e) return; const p = center(id), col = new T.Color(o.color).getHex(), big = o.crit || o.big;
+      shake = Math.max(shake, o.crit ? 0.45 : id === 'm' ? 0.14 : 0.2);
+      if (o.type === 'phys') { slash(p, col, big); burst(p, 0xfff1c9, big ? 40 : 18, big ? 6 : 4, 420, 0.18); }
+      else { shock(p, col, big ? 4.2 : 2.6, 420); burst(p, col, big ? 46 : 22, big ? 6 : 4, 520, 0.24); shock(e.g.position.clone(), col, big ? 4 : 2.4, 480, true); }
+      if (o.crit) { star(p, 0xffe27a, id === 'm' ? 1.6 : 1.0); burst(p, 0xffe27a, 50, 8, 620, 0.26); shock(p, 0xffffff, 5, 380); zoom = Math.max(zoom, 0.7); }
+      if (o.guard) dome(p, 0x8fd0ff, id === 'm' ? 3 : 1.5);
+      const l = new T.PointLight(o.crit ? 0xfff0b0 : col, o.crit ? 5 : 2.6, 10), i0 = l.intensity; l.position.copy(p); scene.add(l); tween(o.crit ? 420 : 220, (x) => { l.intensity = i0 * (1 - x); }, () => scene.remove(l));
+      const b = e.side === 'h' ? 1.3 : 1;
+      tween(260, (x) => { const k = 1 + Math.sin(x * Math.PI) * (id === 'm' ? 0.07 : 0.16); e.g.scale.set(b * k, b / k, b * k); e.g.position.x = e.home.x + Math.sin(x * 30) * 0.08 * (1 - x); }, () => { e.g.scale.set(b, b, b); e.g.position.x = e.home.x; });
     },
-    glow(id, color, ms) {
-      const e = ents[id]; if (!e) return;
-      const l = new T.PointLight(color, 2.4, 7); l.position.copy(e.g.position).add(new T.Vector3(0, (e.g.userData.h || 2) * 0.6, 0)); scene.add(l);
-      tween(ms || 420, (x) => { l.intensity = 2.4 * (1 - x); }, () => scene.remove(l));
+    healFx(id) { const e = ents[id]; if (!e) return; burst(e.g.position.clone().add(new T.Vector3(0, 0.3, 0)), 0x8df0a8, 30, 0.9, 900, 0.2, 2.6); shock(e.g.position.clone(), 0x8df0a8, 2.2, 600, true); arrows(center(id), 0x8df0a8, 1, 0.9); },
+    statusFx(id, stId) {
+      const e = ents[id]; if (!e) return; const p = center(id), col = ST_COL[stId] || 0xffffff, r = id === 'm' ? 2.6 : 0.95;
+      if (stId === 'atkUp') { arrows(p, col, 1, r); burst(p, col, 24, 2, 600, 0.2, 2); }
+      else if (stId === 'atkDown' || stId === 'defDown') { arrows(p, col, -1, r); burst(p, col, 18, 2.5, 500, 0.18); }
+      else if (stId === 'slow') { for (let i = 0; i < 3; i++) setTimeout(() => { const rg = new T.Mesh(new T.TorusGeometry(r * 1.2, 0.07, 6, 40), addM({ color: col })); rg.rotation.x = Math.PI / 2; rg.position.copy(e.g.position); scene.add(rg); tween(560, (x) => { rg.position.y = 0.3 + (e.g.userData.h || 2) * 0.8 * (1 - x); const s = 1.3 - x * 0.45; rg.scale.set(s, s, s); rg.material.opacity = 1 - x * x; }, () => scene.remove(rg)); }, i * 130); }
+      else if (stId === 'stop') { cage(p, col, r * 1.1, id === 'm' ? 4 : 2.6); shock(e.g.position.clone(), col, r * 2, 500, true); }
+      else if (stId === 'poison') { burst(p, col, 34, 1.2, 950, 0.26, 1.8); for (let i = 0; i < 5; i++) setTimeout(() => { const b = new T.Mesh(sph(0.16 + Math.random() * 0.14, 10, 8), addM({ color: col, opacity: 0.7 })); const x0 = p.x + (Math.random() - 0.5) * r * 1.6, z0 = p.z + (Math.random() - 0.5) * r * 1.6; scene.add(b); tween(700, (x) => { b.position.set(x0, p.y - 0.6 + x * 2.2, z0); b.scale.setScalar(1 + x * 0.6); b.material.opacity = 0.75 * (1 - x); }, () => scene.remove(b)); }, i * 90); }
+      else if (stId === 'immune' || stId === 'guard') dome(p, col, id === 'm' ? 3 : 1.5);
+      else if (stId === 'taunt') { shock(e.g.position.clone(), col, 3.4, 600, true); star(p.clone().add(new T.Vector3(0, 1.2, 0)), col, 0.5); }
     },
-    ko(id) { const e = ents[id]; if (!e) return; e.dead = true; if (id === 'm') { tween(700, (x) => { e.g.rotation.z = x * 1.2; e.g.position.y = -x * 1.2; }, () => { e.g.visible = false; }); shake = 0.4; } else tween(380, (x) => { e.g.rotation.z = x * Math.PI / 2; e.g.position.y = x * 0.3; }); },
-    revive(id) { const e = ents[id]; if (!e) return; e.dead = false; e.g.rotation.z = 0; e.g.position.y = 0; api.glow(id, 0x8df0a8, 600); },
-    breakPart(pid) { const e = ents.m; if (!e) return; const p = e.g.userData.parts[pid]; if (p) { tween(360, (x) => { p.position.y = x * 1.6; p.rotation.x = x * 2; }, () => { p.visible = false; p.position.y = 0; p.rotation.x = 0; }); } shake = 0.35; api.glow('m', 0xf3e2b8, 600); },
-    rage() { const e = ents.m; if (!e) return; e.g.userData.glow.emissiveIntensity = 1.8; shake = 0.35; api.glow('m', 0xff5a4a, 800); },
-    charge() { const e = ents.m; if (!e) return; e.charging = true; api.glow('m', 0xff5a4a, 900); },
+    condFx(id) { const e = ents[id]; if (!e) return; const col = new T.Color(EL[(U(id) || {}).el] || '#fff').getHex(); star(center(id), col, 0.9); shock(e.g.position.clone(), col, 3.2, 600, true); burst(center(id), col, 36, 3, 700, 0.22, 2); },
+    ko(id) { const e = ents[id]; if (!e) return; e.dead = true; if (id === 'm') { burst(center('m'), 0xffffff, 90, 7, 1100, 0.3); tween(900, (x) => { e.g.rotation.z = x * 1.3; e.g.position.y = -x * 1.6; }, () => { e.g.visible = false; }); shake = 0.6; } else tween(420, (x) => { e.g.rotation.z = x * Math.PI / 2; e.g.position.y = x * 0.35; }); },
+    revive(id) { const e = ents[id]; if (!e) return; e.dead = false; e.g.rotation.z = 0; e.g.position.y = 0; api.healFx(id); dome(center(id), 0x8df0a8, 1.5); },
+    breakPart(pid) {
+      const e = ents.m; if (!e) return; const p = e.g.userData.parts[pid], c = center('m').add(new T.Vector3(0, 1, 0));
+      burst(c, 0xf6e7c1, 80, 7, 900, 0.28); shock(c, 0xffffff, 6, 520); star(c, 0xf6e7c1, 1.6); shake = 0.55;
+      for (let i = 0; i < 10; i++) { const s = new T.Mesh(new T.TetrahedronGeometry(0.22, 0), new T.MeshBasicMaterial({ color: 0xf6e7c1 })); const v = new T.Vector3(Math.random() - 0.5, Math.random() * 0.9 + 0.3, Math.random() - 0.5).multiplyScalar(6); scene.add(s); tween(800, (x) => { const tt = x * 0.8; s.position.set(c.x + v.x * tt, c.y + v.y * tt - 6 * tt * tt, c.z + v.z * tt); s.rotation.set(x * 9, x * 7, 0); }, () => scene.remove(s)); }
+      if (p) tween(300, (x) => { p.scale.setScalar(1 + x * 0.4); }, () => { p.visible = false; p.scale.setScalar(1); });
+    },
+    rage() { const e = ents.m; if (!e) return; e.rage = true; shake = 0.5; shock(e.g.position.clone(), 0xff3b2b, 8, 800, true); burst(center('m'), 0xff5a4a, 80, 6, 1000, 0.3, 2); },
+    charge() { const e = ents.m; if (!e) return; e.charging = true; burst(center('m'), 0xff5a4a, 50, 4, 900, 0.24, 1); for (let i = 0; i < 3; i++) setTimeout(() => shock(new T.Vector3(0, 0, MON_POS.z - 6.4), 0xff3b2b, 7, 700, true), i * 220); },
     screenPos(id) {
       const pid = /^p\d/.test(id) ? 'm' : id, e = ents[pid]; if (!e || mode !== 'battle') return null;
-      const v = e.g.position.clone(); v.y += (e.g.userData.h || 2) * (pid === 'm' ? 0.75 : 1.05); v.project(cam);
+      const v = e.home.clone(); v.y += (e.g.userData.h || 2) * (pid === 'm' ? 0.72 : 1.0); v.project(cam);
       return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight };
     },
   };
-  function bolt(a, b, burst) {
-    const s = new T.Mesh(new T.SphereGeometry(burst ? 0.34 : 0.2, 10, 10), new T.MeshBasicMaterial({ color: a.g.children[1] ? 0xffffff : 0xffffff }));
-    const from = a.g.position.clone().add(new T.Vector3(0, 1.4, 0)), to = b.home.clone().add(new T.Vector3(0, (b.g.userData.h || 2) * 0.6, 0));
-    scene.add(s); const l = new T.PointLight(0xffffff, 1.6, 6); s.add(l);
-    tween(300, (x) => { s.position.lerpVectors(from, to, x); s.position.y += Math.sin(x * Math.PI) * 0.8; }, () => scene.remove(s));
-  }
 
-  function resize() {
-    const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); cam.aspect = w / h; cam.fov = w / h < 0.8 ? 62 : 42; cam.updateProjectionMatrix();
-  }
+  function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); cam.aspect = w / h; cam.fov = w / h < 0.8 ? 60 : 42; cam.updateProjectionMatrix(); }
   addEventListener('resize', resize); resize();
   const look = new T.Vector3(), want = new T.Vector3(); let camMode = '';
   function frame(now) {
     requestAnimationFrame(frame);
-    if (document.hidden || (flat && mode === 'battle')) return;
+    if (document.hidden) return;
     const dt = Math.min(50, now - t0); t0 = now; const tt = now / 1000;
     for (let i = tweens.length - 1; i >= 0; i--) { const tw = tweens[i]; tw.t += dt; const x = Math.min(1, tw.t / tw.ms); tw.fn(x); if (x >= 1) { tweens.splice(i, 1); if (tw.done) tw.done(); } }
     const m = ents.m;
     if (m && !m.dead) {
-      if (m.preview) { m.g.rotation.y = tt * 0.35; m.g.position.y = Math.sin(tt * 1.3) * 0.06; }
-      else { m.g.position.y += ((Math.sin(tt * 1.4) * 0.08) - (m.g.position.y - m.home.y)) * 0.08; if (m.charging) m.g.rotation.x = Math.sin(tt * 18) * 0.02; else m.g.rotation.x = 0; }
+      const ud = m.g.userData, frozen = m.stopped;
+      if (m.preview) m.g.rotation.y = tt * 0.35;
+      if (!frozen) {
+        ud.headG.position.y = ud.headY + Math.sin(tt * 1.6) * 0.06;
+        ud.tail.forEach((s, i) => { s.position.x = ud.tailX[i] + Math.sin(tt * 2.2 - i * 0.55) * 0.12 * (i + 1); });
+        ud.flames.forEach((f, i) => { const k = 1 + Math.sin(tt * (m.rage ? 14 : 7) + i * 1.9) * (m.rage ? 0.22 : 0.1); f.scale.y = (f.userData.sy || (f.userData.sy = f.scale.y)) * k; });
+        ud.legs.forEach((l, i) => { l.rotation.x = Math.sin(tt * 1.6 + i * 1.6) * 0.04; });
+      }
+      ud.glow.emissiveIntensity = (m.rage ? 0.95 : 0.42) + Math.sin(tt * (m.charging ? 22 : 3)) * (m.charging ? 0.45 : 0.08);
     }
-    for (const k of Object.keys(ents)) { if (k === 'm') continue; const e = ents[k]; if (!e.dead) e.g.children[0].scale.y = 1 + Math.sin(tt * 2 + k.charCodeAt(1)) * 0.015; const r = e.g.userData.ring; if (r && r.material.opacity) r.rotation.z = tt; }
+    for (const k of Object.keys(ents)) {
+      const e = ents[k];
+      e.aura.forEach((o) => { const a = tt * 1.8 + o.userData.k, cy = (e.g.userData.h || 2) * 0.6; o.position.set(e.g.position.x + Math.cos(a) * o.userData.r, cy + Math.sin(tt * 3 + o.userData.k) * 0.15, e.g.position.z + Math.sin(a) * o.userData.r); o.rotation.y = tt * 3; });
+      if (k === 'm' || e.dead) continue;
+      const ud = e.g.userData;
+      if (!e.stopped) { ud.head.rotation.z = Math.sin(tt * 1.5 + e.seed) * 0.05; ud.head.position.y = 1.5 + Math.sin(tt * 2.4 + e.seed) * 0.012; ud.cape.rotation.x = 0.2 + Math.sin(tt * 2 + e.seed) * 0.07; if (ud.orb) ud.orb.rotation.y = tt * 3; }
+      const r = ud.ring; if (r.material.opacity) { r.rotation.z = tt * 1.5; const s = 1 + Math.sin(tt * 5) * 0.08; r.scale.set(s, s, s); }
+    }
     dust.rotation.y = tt * 0.02;
-    // カメラ
     const portrait = innerWidth / innerHeight < 0.8;
-    if (mode === 'battle') { want.set(Math.sin(tt * 0.15) * 1.2, portrait ? 10.5 : 6.4, portrait ? -15.5 : -11.8); look.set(0, portrait ? 0.6 : 0.9, portrait ? -0.4 : 0.4); }
-    else { want.set(Math.sin(tt * 0.2) * 1.5, 3.4, 9.5); look.set(0, 1.6, 0); }
-    if (camMode !== mode) { camMode = mode; cam.position.copy(want); } else cam.position.lerp(want, 0.05);
+    const ox = portrait ? 0 : -1.7;   // 横長の画面では、右の技ボタンに隠れないよう舞台を左へ寄せる
+    if (mode === 'battle') { want.set(ox + Math.sin(tt * 0.15) * 1.0, (portrait ? 15.0 : 6.6) - zoom * 0.8, (portrait ? -23.0 : -12.6) + zoom * 2.2); look.set(ox, portrait ? -2.4 : 1.1, portrait ? -0.4 : 0.4); }   // 縦長の画面では、下の UI に隠れないよう舞台を上へ寄せる
+    else { want.set(Math.sin(tt * 0.2) * 1.5, 3.8, 11.5); look.set(0, 2.0, 0); }
+    zoom *= 0.94;
+    if (camMode !== mode) { camMode = mode; cam.position.copy(want); } else cam.position.lerp(want, 0.08);
     if (shake > 0.002) { cam.position.x += (Math.random() - 0.5) * shake; cam.position.y += (Math.random() - 0.5) * shake; shake *= 0.86; }
     cam.lookAt(look);
     renderer.render(scene, cam);
@@ -751,6 +966,7 @@ const scene3d = (() => {
   return api;
 })();
 
+setTab('guest');
 show('title');
 connect();
 </script>

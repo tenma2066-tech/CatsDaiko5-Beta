@@ -26,9 +26,9 @@ function smart(s) {
     return [0, tgt];
   }
   if (can(3, tgt)) return [3, tgt];
-  if (u.key === 'kagari' && can(2) && !E.has(u, 'atkUp')) return [2, null];
-  if (can(1, tgt) && !(u.key === 'touka' && E.has(m, 'slow'))) return [1, tgt];
-  if (can(2, tgt) && !(u.key === 'touka' && E.has(m, 'poison')) && !(u.key === 'raiga' && E.has(m, 'atkDown'))) return [2, tgt];
+  if (u.key === 'kagari' && can(1) && !E.has(u, 'atkUp')) return [1, null];
+  if (can(2, tgt) && !(u.key === 'touka' && E.has(m, 'poison'))) return [2, tgt];
+  if (u.key !== 'kagari' && can(1, tgt) && !(u.key === 'touka' && E.has(m, 'slow')) && !(u.key === 'raiga' && E.has(m, 'atkDown'))) return [1, tgt];
   return [0, tgt];
 }
 function play(quest, seed, policy) {
@@ -99,7 +99,31 @@ t('自分の最大体力ぶん回復・攻撃力ぶん味方回復', () => {
   sh.hp = 100; s.turn = 'h4'; s.phase = 'input';
   let r = E.act(s, 'h4', 2, null); assert.strictEqual(r.events.find((e) => e.t === 'heal').v, Math.round(sh.maxHp * 0.3));
   ka.hp = 100; s.turn = 'h1'; s.phase = 'input'; mi.st = [];
-  r = E.act(s, 'h1', 1, 'h0'); assert.strictEqual(r.events.find((e) => e.t === 'heal' && e.u === 'h0').v, Math.round(mi.atk * 2.0));
+  r = E.act(s, 'h1', 1, 'h0'); assert.strictEqual(r.events.find((e) => e.t === 'heal' && e.u === 'h0').v, Math.round(mi.atk * 1.8 * 1.2));
+});
+t('動作の種類は 通常攻撃・アビリティ・必殺技・奥義 の順で、セットと条件は選べない', () => {
+  const d = E.defs();
+  for (const k of d.party) {
+    assert.deepStrictEqual(d.hunters[k].skills.map((x) => x.kind), ['normal', 'ability', 'special', 'ultimate']);
+    assert.ok(d.hunters[k].set.name && d.hunters[k].cond.name);
+  }
+});
+t('条件アビリティ: 不屈は1度だけ耐える／逆境は半分以下で攻撃力上昇', () => {
+  const s = E.createBattle('hibashiri', 1, 5); const m = E.monster(s), sh = E.unit(s, 'h4'), ka = E.unit(s, 'h0');
+  sh.hp = 5; s.turn = 'h0'; s.phase = 'input';
+  // モンスターの単体攻撃をシオンに向ける
+  sh.st = [{ id: 'taunt', turns: 9 }]; m.gauge = 999; for (const u of E.hunters(s)) u.gauge = 0; m.cds = m.cds.map((_, i) => (i === 0 ? 0 : 9));
+  s.turn = null; let ev = E.start(s);
+  assert.ok(ev.some((e) => e.t === 'cond' && e.u === 'h4')); assert.strictEqual(sh.hp >= 1, true);
+  assert.strictEqual(sh.condLeft, 0);
+  const s2 = E.createBattle('hibashiri', 1, 5); const k2 = E.unit(s2, 'h0'), m2 = E.monster(s2);
+  k2.hp = Math.round(k2.maxHp * 0.52); k2.st = [{ id: 'taunt', turns: 9 }]; m2.gauge = 999; for (const u of E.hunters(s2)) u.gauge = 0; m2.cds = m2.cds.map((_, i) => (i === 0 ? 0 : 9));
+  ev = E.start(s2); assert.ok(ev.some((e) => e.t === 'cond' && e.u === 'h0')); assert.ok(E.has(k2, 'atkUp'));
+});
+t('条件アビリティ: 部位を壊すとトウカが追い撃ちする', () => {
+  const s = E.createBattle('hibashiri', 1, 5); E.start(s); const m = E.monster(s); m.parts[0].hp = 1; m.st = [];
+  const r = E.act(s, s.turn, 0, 'p0'); const i = r.events.findIndex((e) => e.t === 'cond' && e.u === 'h2');
+  assert.ok(i >= 0); assert.ok(r.events.slice(i).some((e) => e.t === 'dmg' && e.src === 'h2'));
 });
 t('部位を壊すと停止して防御が下がる', () => {
   const s = E.createBattle('hibashiri', 1, 5); E.start(s); const m = E.monster(s);
@@ -130,7 +154,7 @@ t('予告した大技は次のターンに来る', () => {
 t('ブラウザへ送る形に、内部の数値（種など）が入らない', () => {
   const s = E.createBattle('raizen', 2, 9); E.start(s); const v = E.view(s);
   assert.strictEqual(v.seed, undefined); assert.strictEqual(v.units[0].atk, undefined);
-  assert.ok(v.order.length > 0); assert.ok(E.defs().hunters.kagari.skills.length === 4);
+  assert.ok(v.order.length > 0); assert.ok(E.defs().hunters.kagari.skills.length === 4); assert.strictEqual(v.units[0].condLeft, undefined);
 });
 
 console.log('\n--- バランス（自動対戦 各200戦） ---');

@@ -36,60 +36,75 @@ const STATUS = {
 };
 const ATK_UP = 1.3, ATK_DOWN = 0.7, SLOW = 0.6, DEF_DOWN = 0.7;
 
-/* ---------- ハンター（5色・役割ちがい） ---------- */
-// 技: type / target(enemy|ally|self|allies) / power(攻撃力の倍率) / cd(使ったあと待つターン) / burst(奥義)
+/* ---------- ハンター（5色・役割ちがい） ----------
+ * 動作の種類:
+ *   選べるもの … normal(通常攻撃) / ability(アビリティ) / special(必殺技) / ultimate(奥義)
+ *   選べないもの … set(セットアビリティ＝いつも効いている) / cond(条件アビリティ＝条件を満たすと自動で発動)
+ * 技: type / target(enemy|ally|self|allies) / power(攻撃力の倍率) / cd(使ったあと待つターン)
+ */
 const HUNTERS = {
   kagari: {
     name: 'カガリ', el: 'red', role: '物理アタッカー', hp: 1050, atk: 165, def: 55, res: 40, spd: 108,
+    set: { name: '闘志', desc: '会心が出やすい（会心率 +15%）。' },
+    cond: { name: '逆境', desc: '体力が半分以下になると、攻撃力上昇（3ターン）。1回の狩りで1度だけ。' },
     skills: [
-      { name: '斬撃', type: 'phys', target: 'enemy', power: 1.0, cd: 0, desc: '敵に物理ダメージ。' },
-      { name: '烈火斬', type: 'phys', target: 'enemy', power: 2.3, cd: 2, desc: '敵に大きな物理ダメージ。' },
-      { name: '鼓舞の炎', type: 'guard', target: 'self', power: 0, cd: 3, fx: [{ st: 'atkUp', turns: 3 }], quick: true,
+      { kind: 'normal', name: '斬撃', type: 'phys', target: 'enemy', power: 1.0, cd: 0, desc: '敵に物理ダメージ。' },
+      { kind: 'ability', name: '鼓舞の炎', type: 'guard', target: 'self', power: 0, cd: 3, fx: [{ st: 'atkUp', turns: 3 }], quick: true,
         desc: '自分の攻撃力を上げる（3ターン）。すぐもう一度動ける。' },
-      { name: '紅蓮乱舞', type: 'phys', target: 'enemy', power: 4.4, burst: true, desc: '【奥義】敵に特大の物理ダメージ。' },
+      { kind: 'special', name: '烈火斬', type: 'phys', target: 'enemy', power: 2.5, cd: 3, desc: '敵に大きな物理ダメージ。' },
+      { kind: 'ultimate', name: '紅蓮乱舞', type: 'phys', target: 'enemy', power: 4.4, burst: true, desc: '敵に特大の物理ダメージ。' },
     ],
   },
   minamo: {
     name: 'ミナモ', el: 'blue', role: '回復・治療', hp: 950, atk: 120, def: 45, res: 70, spd: 112,
+    set: { name: '水の加護', desc: '自分の回復の量が 20% 増える。' },
+    cond: { name: '救いの手', desc: '味方の体力が 30% を切ると、すぐに回復する。1回の狩りで2度まで。' },
     skills: [
-      { name: '水弾', type: 'spec', target: 'enemy', power: 0.9, cd: 0, desc: '敵に特殊ダメージ。' },
-      { name: '癒しの雫', type: 'heal', target: 'ally', power: 0, cd: 1, heal: { atkPct: 2.0 }, desc: '味方1人を、自分の攻撃力の200%ぶん回復。' },
-      { name: '清めの水', type: 'heal', target: 'allies', power: 0, cd: 3, heal: { atkPct: 0.7 }, cleanse: true,
+      { kind: 'normal', name: '水弾', type: 'spec', target: 'enemy', power: 0.9, cd: 0, desc: '敵に特殊ダメージ。' },
+      { kind: 'ability', name: '癒しの雫', type: 'heal', target: 'ally', power: 0, cd: 1, heal: { atkPct: 1.8 }, desc: '味方1人を、自分の攻撃力の180%ぶん回復。' },
+      { kind: 'special', name: '清めの水', type: 'heal', target: 'allies', power: 0, cd: 3, heal: { atkPct: 0.7 }, cleanse: true,
         desc: '味方全員の妨害を治し、攻撃力の70%ぶん回復。' },
-      { name: '慈雨', type: 'heal', target: 'allies', power: 0, burst: true, heal: { atkPct: 1.6 }, cleanse: true, revive: 0.3,
-        fx: [{ st: 'immune', turns: 2 }], desc: '【奥義】味方全員を大きく回復し、倒れた味方を起こす。妨害無効（2ターン）。' },
+      { kind: 'ultimate', name: '慈雨', type: 'heal', target: 'allies', power: 0, burst: true, heal: { atkPct: 1.5 }, cleanse: true, revive: 0.3,
+        fx: [{ st: 'immune', turns: 2 }], desc: '味方全員を大きく回復し、倒れた味方を起こす。妨害無効（2ターン）。' },
     ],
   },
   touka: {
     name: 'トウカ', el: 'green', role: '妨害', hp: 980, atk: 135, def: 50, res: 55, spd: 122,
+    set: { name: '狩人の目', desc: '妨害がかかっている敵へのダメージが 20% 増える。' },
+    cond: { name: '追い撃ち', desc: 'だれかが部位を壊すと、すぐに追加で攻撃する。' },
     skills: [
-      { name: '早撃ち', type: 'phys', target: 'enemy', power: 0.95, cd: 0, desc: '敵に物理ダメージ。' },
-      { name: '絡み蔦', type: 'debuff', target: 'enemy', power: 0.8, cd: 2, fx: [{ st: 'slow', turns: 3 }], desc: '敵を鈍足にする（3ターン）。' },
-      { name: '毒牙の矢', type: 'debuff', target: 'enemy', power: 0.8, cd: 2, fx: [{ st: 'poison', turns: 3 }], desc: '敵を毒にする（3ターン・最大体力の割合ダメージ）。' },
-      { name: '茨の檻', type: 'debuff', target: 'enemy', power: 2.4, burst: true, fx: [{ st: 'stop', turns: 1 }], desc: '【奥義】敵にダメージを与え、停止させる。' },
+      { kind: 'normal', name: '早撃ち', type: 'phys', target: 'enemy', power: 0.95, cd: 0, desc: '敵に物理ダメージ。' },
+      { kind: 'ability', name: '絡み蔦', type: 'debuff', target: 'enemy', power: 0.8, cd: 2, fx: [{ st: 'slow', turns: 3 }], desc: '敵を鈍足にする（3ターン）。' },
+      { kind: 'special', name: '毒牙の矢', type: 'debuff', target: 'enemy', power: 1.3, cd: 3, fx: [{ st: 'poison', turns: 3 }], desc: '敵にダメージを与え、毒にする（3ターン・最大体力の割合ダメージ）。' },
+      { kind: 'ultimate', name: '茨の檻', type: 'debuff', target: 'enemy', power: 2.4, burst: true, fx: [{ st: 'stop', turns: 1 }], desc: '敵にダメージを与え、停止させる。' },
     ],
   },
   raiga: {
     name: 'ライガ', el: 'yellow', role: '特殊アタッカー', hp: 900, atk: 170, def: 40, res: 60, spd: 116,
+    set: { name: '帯電', desc: '特殊攻撃のダメージが 12% 増える。' },
+    cond: { name: '連鎖雷', desc: '会心が出ると、次の自分の番が早く回ってくる。' },
     skills: [
-      { name: '雷撃', type: 'spec', target: 'enemy', power: 1.0, cd: 0, desc: '敵に特殊ダメージ。' },
-      { name: '雷槍', type: 'spec', target: 'enemy', power: 2.2, cd: 2, desc: '敵に大きな特殊ダメージ。' },
-      { name: '萎縮の雷', type: 'debuff', target: 'enemy', power: 0.9, cd: 3, fx: [{ st: 'atkDown', turns: 3 }], desc: '敵の攻撃力を下げる（3ターン）。' },
-      { name: '雷帝招来', type: 'spec', target: 'enemy', power: 4.2, burst: true, desc: '【奥義】敵に特大の特殊ダメージ。' },
+      { kind: 'normal', name: '雷撃', type: 'spec', target: 'enemy', power: 1.0, cd: 0, desc: '敵に特殊ダメージ。' },
+      { kind: 'ability', name: '萎縮の雷', type: 'debuff', target: 'enemy', power: 0.9, cd: 3, fx: [{ st: 'atkDown', turns: 3 }], desc: '敵の攻撃力を下げる（3ターン）。' },
+      { kind: 'special', name: '雷槍', type: 'spec', target: 'enemy', power: 2.4, cd: 3, desc: '敵に大きな特殊ダメージ。' },
+      { kind: 'ultimate', name: '雷帝招来', type: 'spec', target: 'enemy', power: 4.2, burst: true, desc: '敵に特大の特殊ダメージ。' },
     ],
   },
   shion: {
     name: 'シオン', el: 'purple', role: '防御', hp: 1450, atk: 110, def: 95, res: 80, spd: 98,
+    set: { name: '鉄壁', desc: '受けるダメージが 10% 減る。' },
+    cond: { name: '不屈', desc: '倒れるダメージを受けても、体力1で耐える。1回の狩りで1度だけ。' },
     skills: [
-      { name: '盾打ち', type: 'phys', target: 'enemy', power: 0.9, cd: 0, desc: '敵に物理ダメージ。' },
-      { name: '守護の構え', type: 'guard', target: 'self', power: 0, cd: 2, fx: [{ st: 'taunt', turns: 2 }, { st: 'guard', turns: 2, val: 0.55 }],
+      { kind: 'normal', name: '盾打ち', type: 'phys', target: 'enemy', power: 0.9, cd: 0, desc: '敵に物理ダメージ。' },
+      { kind: 'ability', name: '守護の構え', type: 'guard', target: 'self', power: 0, cd: 2, fx: [{ st: 'taunt', turns: 2 }, { st: 'guard', turns: 2, val: 0.55 }],
         desc: '敵の単体攻撃を自分に引きつけ、受けるダメージを減らす（2ターン）。' },
-      { name: '生命の鼓動', type: 'heal', target: 'self', power: 0, cd: 3, heal: { maxHpPct: 0.3 }, desc: '自分の最大体力の30%を回復。' },
-      { name: '不落の陣', type: 'guard', target: 'allies', power: 0, burst: true, fx: [{ st: 'guard', turns: 2, val: 0.6 }],
-        desc: '【奥義】味方全員の受けるダメージを減らす（2ターン）。' },
+      { kind: 'special', name: '生命の鼓動', type: 'heal', target: 'self', power: 0, cd: 3, heal: { maxHpPct: 0.3 }, desc: '自分の最大体力の30%を回復。' },
+      { kind: 'ultimate', name: '不落の陣', type: 'guard', target: 'allies', power: 0, burst: true, fx: [{ st: 'guard', turns: 2, val: 0.6 }],
+        desc: '味方全員の受けるダメージを減らす（2ターン）。' },
     ],
   },
 };
+const KIND_NAME = { normal: '通常攻撃', ability: 'アビリティ', special: '必殺技', ultimate: '奥義', set: 'セットアビリティ', cond: '条件アビリティ' };
 const PARTY = ['kagari', 'minamo', 'touka', 'raiga', 'shion'];
 
 /* ---------- モンスター ---------- */
@@ -148,7 +163,8 @@ function createBattle(questKey, nPlayers, seed) {
   const units = PARTY.map((key, i) => {
     const h = HUNTERS[key];
     return { id: 'h' + i, side: 'h', key, name: h.name, el: h.el, role: h.role, maxHp: h.hp, hp: h.hp,
-             atk: h.atk, def: h.def, res: h.res, spd: h.spd, gauge: 0, burst: 0, cds: [0, 0, 0, 0], st: [], owner: i % n };
+             atk: h.atk, def: h.def, res: h.res, spd: h.spd, gauge: 0, burst: 0, cds: [0, 0, 0, 0], st: [], owner: i % n,
+             condLeft: key === 'minamo' ? 2 : 1, haste: 0 };
   });
   units.push({ id: 'm', side: 'm', key: questKey, name: q.name, el: q.el, shape: q.shape, maxHp: q.hp, hp: q.hp,
                atk: q.atk, def: q.def, res: q.res, spd: q.spd, gauge: 0, cds: q.skills.map(() => 0), st: [],
@@ -226,17 +242,39 @@ function cleanse(tgt, ev) {
 /* ---------- ダメージ・回復 ---------- */
 function dealDamage(s, src, tgt, sk, ev, partId) {
   if (!alive(tgt)) return 0;
-  const crit = rnd(s) < 0.1;
+  const crit = rnd(s) < (src.key === 'kagari' ? 0.25 : 0.1);                       // セット: 闘志
   const em = elemMul(src.el, tgt.el);
   let v = effAtk(src) * sk.power * (100 / (100 + effDef(tgt, sk.type))) * em * (0.95 + rnd(s) * 0.1) * (crit ? 1.5 : 1);
+  if (src.key === 'raiga' && sk.type === 'spec') v *= 1.12;                         // セット: 帯電
+  if (src.key === 'touka' && tgt.st.some((x) => STATUS[x.id].kind === 'debuff')) v *= 1.2;   // セット: 狩人の目
+  if (tgt.key === 'shion') v *= 0.9;                                                // セット: 鉄壁
   const g = has(tgt, 'guard');
   if (g) v *= g.val == null ? 0.6 : g.val;
   v = Math.max(1, Math.round(v));
+  const before = tgt.hp;
   tgt.hp = Math.max(0, tgt.hp - v);
-  const e = { t: 'dmg', u: tgt.id, src: src.id, v, crit, em: em > 1 ? 'adv' : em < 1 ? 'dis' : null };
+  let endure = false;
+  if (tgt.key === 'shion' && tgt.hp === 0 && tgt.condLeft > 0) { tgt.condLeft--; tgt.hp = 1; endure = true; }   // 条件: 不屈
+  const e = { t: 'dmg', u: tgt.id, src: src.id, v: before - tgt.hp, crit, em: em > 1 ? 'adv' : em < 1 ? 'dis' : null, ty: sk.type };
+  if (g) e.guard = true;
   if (partId) e.part = partId;
   ev.push(e);
-  if (tgt.side === 'h') tgt.burst = Math.min(100, tgt.burst + 10);
+  if (endure) ev.push({ t: 'cond', u: tgt.id, name: HUNTERS.shion.cond.name });
+  if (crit && src.key === 'raiga') { src.haste = 400; ev.push({ t: 'cond', u: src.id, name: HUNTERS.raiga.cond.name }); }   // 条件: 連鎖雷
+  if (tgt.side === 'h') {
+    tgt.burst = Math.min(100, tgt.burst + 10);
+    if (alive(tgt)) {
+      if (tgt.key === 'kagari' && tgt.condLeft > 0 && tgt.hp <= tgt.maxHp * 0.5) {   // 条件: 逆境
+        tgt.condLeft--; ev.push({ t: 'cond', u: tgt.id, name: HUNTERS.kagari.cond.name });
+        addStatus(s, tgt, tgt, { st: 'atkUp', turns: 3 }, ev);
+      }
+      const mi = hunters(s).find((x) => x.key === 'minamo');
+      if (mi && alive(mi) && mi.condLeft > 0 && tgt.hp < tgt.maxHp * 0.3) {           // 条件: 救いの手
+        mi.condLeft--; ev.push({ t: 'cond', u: mi.id, name: HUNTERS.minamo.cond.name });
+        heal(tgt, effAtk(mi) * 1.2 * 1.2, ev);
+      }
+    }
+  }
   if (tgt.side === 'm') {
     if (partId) {
       const p = tgt.parts.find((x) => x.id === partId);
@@ -244,19 +282,26 @@ function dealDamage(s, src, tgt, sk, ev, partId) {
         p.hp = Math.max(0, p.hp - v);
         if (p.hp === 0) {
           p.broken = true;
-          ev.push({ t: 'break', part: p.id, name: p.name });
+          ev.push({ t: 'break', part: p.id, name: p.name, by: src.id });
           if (alive(tgt)) {
             addStatus(s, src, tgt, { st: 'defDown', turns: 99 }, ev, true);
             tgt.st = tgt.st.filter((x) => x.id !== 'stopResist');
             addStatus(s, src, tgt, { st: 'stop', turns: 1 }, ev, true);
             tgt.charging = -1;   // 予告していた大技も止まる
+            const to = hunters(s).find((x) => x.key === 'touka');
+            if (to && alive(to) && !s.chasing) {                                      // 条件: 追い撃ち
+              s.chasing = true;
+              ev.push({ t: 'cond', u: to.id, name: HUNTERS.touka.cond.name });
+              dealDamage(s, to, tgt, { power: 1.5, type: 'phys' }, ev, null);
+              s.chasing = false;
+            }
           }
         }
       }
     }
     if (!tgt.rage && alive(tgt) && tgt.hp <= tgt.maxHp * 0.5) { tgt.rage = true; ev.push({ t: 'rage', u: tgt.id }); }
   }
-  if (!alive(tgt)) { tgt.st = []; tgt.gauge = 0; ev.push({ t: 'ko', u: tgt.id }); }
+  if (!alive(tgt) && !ev.some((x) => x.t === 'ko' && x.u === tgt.id && x._n === s.turns)) { tgt.st = []; tgt.gauge = 0; ev.push({ t: 'ko', u: tgt.id, _n: s.turns }); }
   return v;
 }
 
@@ -289,13 +334,13 @@ function useSkill(s, u, si, targetId, ev) {
       targets = t ? [t] : [];
     }
   }
-  ev.push({ t: 'skill', u: u.id, si, name: sk.name, type: sk.type, burst: !!sk.burst,
+  ev.push({ t: 'skill', u: u.id, si, name: sk.name, type: sk.type, kind: sk.kind || 'normal', burst: !!sk.burst,
             targets: targets.map((x) => x.id), part: partId });
   if (sk.revive) for (const t of targets) if (!alive(t)) { t.hp = Math.round(t.maxHp * sk.revive); t.gauge = 0; ev.push({ t: 'revive', u: t.id, v: t.hp }); }
   for (const t of targets) {
     if (sk.power > 0) for (let h = 0; h < (sk.hits || 1); h++) dealDamage(s, u, t, sk, ev, partId);
     if (sk.cleanse) cleanse(t, ev);
-    if (sk.heal) heal(t, (sk.heal.atkPct ? effAtk(u) * sk.heal.atkPct : 0) + (sk.heal.maxHpPct ? t.maxHp * sk.heal.maxHpPct : 0), ev);
+    if (sk.heal) heal(t, ((sk.heal.atkPct ? effAtk(u) * sk.heal.atkPct : 0) + (sk.heal.maxHpPct ? t.maxHp * sk.heal.maxHpPct : 0)) * (u.key === 'minamo' ? 1.2 : 1), ev);   // セット: 水の加護
     if (sk.fx) for (const fx of sk.fx) addStatus(s, u, t, fx, ev);
   }
   if (u.side === 'h') {
@@ -311,7 +356,8 @@ function endTurn(s, u, quick) {
   if (alive(u)) {
     for (const x of u.st) x.turns--;
     u.st = u.st.filter((x) => x.turns > 0);
-    u.gauge = quick ? 1000 : 0;   // quick の技は、すぐもう一度動ける
+    u.gauge = quick ? 1000 : (u.haste || 0);   // quick の技は、すぐもう一度動ける。連鎖雷は次の番が早まる
+    u.haste = 0;
   }
   s.turns++;
 }
@@ -421,15 +467,15 @@ function view(s) {
 }
 
 function defs() {
-  const pick = (sk) => ({ name: sk.name, type: sk.type, target: sk.target, cd: sk.cd || 0, burst: !!sk.burst, desc: sk.desc || '' });
+  const pick = (sk) => ({ kind: sk.kind, name: sk.name, type: sk.type, target: sk.target, cd: sk.cd || 0, burst: !!sk.burst, desc: sk.desc || '' });
   const h = {};
-  for (const k of PARTY) h[k] = { name: HUNTERS[k].name, el: HUNTERS[k].el, role: HUNTERS[k].role, skills: HUNTERS[k].skills.map(pick) };
+  for (const k of PARTY) h[k] = { name: HUNTERS[k].name, el: HUNTERS[k].el, role: HUNTERS[k].role, set: HUNTERS[k].set, cond: HUNTERS[k].cond, skills: HUNTERS[k].skills.map(pick) };
   const q = {};
   for (const k of Object.keys(QUESTS)) q[k] = { name: QUESTS[k].name, title: QUESTS[k].title, star: QUESTS[k].star, el: QUESTS[k].el, shape: QUESTS[k].shape };
   const st = {};
   for (const k of Object.keys(STATUS)) st[k] = STATUS[k];
-  return { hunters: h, quests: q, status: st, elName: EL_NAME, party: PARTY };
+  return { hunters: h, quests: q, status: st, elName: EL_NAME, party: PARTY, kindName: KIND_NAME };
 }
 
-module.exports = { ELEMENTS, EL_NAME, HUNTERS, QUESTS, PARTY, STATUS, elemMul, createBattle, start, act, autoAct, canUse,
+module.exports = { KIND_NAME, ELEMENTS, EL_NAME, HUNTERS, QUESTS, PARTY, STATUS, elemMul, createBattle, start, act, autoAct, canUse,
                    view, defs, timeline, unit, monster, hunters, has, effSpd, effAtk, skillsOf, addStatus, rnd };
