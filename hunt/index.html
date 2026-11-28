@@ -396,6 +396,156 @@ select.sel{width:100%;height:42px;background:#0a0f22;color:var(--ink);border:1px
 #hLead{padding:10px 30px 10px 14px;background:linear-gradient(90deg,rgba(8,12,26,.85),rgba(8,12,26,0));border-left:3px solid var(--gold)}
 #hTop{background:linear-gradient(180deg,rgba(5,8,18,.9),rgba(5,8,18,.45) 70%,transparent)}
 @media (max-width:760px){ #hud:before{height:260px} }
+
+/* ===================== 段階5: ホーム・ステージ確認・編成・ガチャ演出・戦いの見やすさ ===================== */
+/* ---- ホーム ---- */
+#hTop{gap:8px;padding:max(10px,env(safe-area-inset-top)) 12px 18px}
+#hPlate{display:flex;align-items:center;gap:10px;padding:5px 22px 5px 6px;background:linear-gradient(90deg,rgba(10,14,30,.92),rgba(26,33,60,.82));clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%);border-left:3px solid var(--gold);text-align:left;min-width:0}
+#hPlate .fc{width:44px;height:44px;line-height:44px;font-size:18px}
+#hTop .who{font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42vw}#hTop .tag{font-size:10px;color:var(--gold2);white-space:nowrap}
+.hPill{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:18px;background:rgba(8,12,26,.85);outline:1px solid rgba(217,191,134,.5);font-size:12px;color:var(--ink);white-space:nowrap;font-family:var(--serif)}
+.hPill.gift{background:linear-gradient(180deg,#fff6dc,#c9a65f);color:#2b2410;font-weight:700;animation:rdy .8s infinite alternate;--c:#f6e7c1}
+.hPill.gift b{display:inline-block;width:18px;height:18px;line-height:18px;border-radius:50%;background:#c43b33;color:#fff;font-size:12px;text-align:center}
+#hLead{left:max(16px,env(safe-area-inset-left));bottom:max(22px,env(safe-area-inset-bottom));max-width:min(430px,46vw);padding:12px 36px 12px 16px;background:linear-gradient(90deg,rgba(8,12,26,.9),rgba(8,12,26,.55) 70%,rgba(8,12,26,0));border-left:3px solid var(--gold)}
+#hLead .nm{font-size:34px;letter-spacing:.2em}#hLead .rl{display:flex;align-items:center;gap:6px;font-size:12px}
+#hLead .ln{font-size:11px;color:var(--dim);margin-top:4px;line-height:1.6}
+#hSide{position:absolute;right:max(14px,env(safe-area-inset-right));top:calc(max(10px,env(safe-area-inset-top)) + 74px);width:min(300px,40vw);display:grid;gap:10px}
+#hBanner{position:relative;display:block;text-align:left;padding:12px 14px 12px;min-height:118px;clip-path:var(--cut);background:radial-gradient(120% 140% at 90% 20%,color-mix(in srgb,var(--c) 75%,#fff) 0%,var(--c) 26%,#141a36 72%);overflow:hidden;transition:transform .12s}
+#hBanner:hover{transform:translateY(-2px)}
+#hBanner:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(115deg,transparent 0 20px,rgba(255,255,255,.06) 20px 22px)}
+#hBanner .sb{display:inline-block;font-size:9px;letter-spacing:.24em;padding:1px 8px;background:rgba(0,0,0,.5);color:var(--gold2)}
+#hBanner .nm{display:block;font-family:var(--serif);font-size:20px;letter-spacing:.14em;margin:5px 0 2px;text-shadow:0 2px 8px rgba(0,0,0,.7)}
+#hBanner .ds{display:block;font-size:10px;max-width:62%;line-height:1.5;text-shadow:0 1px 4px #000}
+#hBanner .fs{position:absolute;right:8px;bottom:8px;display:flex}#hBanner .fs .fc{width:50px;height:50px;margin-left:-10px;outline-color:#fff}
+#hBanner .go{position:absolute;left:14px;bottom:8px;font-size:11px;color:var(--gold2);font-family:var(--serif);z-index:1}
+#hParty{padding:9px 12px 11px;background:linear-gradient(180deg,rgba(24,31,58,.92),rgba(10,14,30,.92));clip-path:var(--cut);outline:1px solid rgba(217,191,134,.35);outline-offset:-1px}
+#hParty .t{display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:.14em;color:var(--gold);font-family:var(--serif);margin-bottom:8px}
+#hParty .t button{color:var(--gold2);font-size:12px;padding:4px 2px 4px 12px}
+#hParty .fs{display:flex;gap:7px;justify-content:space-between}
+#hParty .fs .fc{width:44px;height:44px;line-height:44px;font-size:17px;transition:transform .12s}
+#hParty .fs .fc.on{transform:translateY(-4px) scale(1.08);outline:2px solid #fff;box-shadow:0 0 12px var(--c)}
+#hParty .fs .fc.empty{background:rgba(8,12,26,.7);outline:1px dashed var(--gold3);color:var(--gold)}
+#hDock{position:absolute;right:max(14px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));display:flex;align-items:flex-end;gap:9px}
+.hd2{position:relative;width:66px;height:66px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);background:linear-gradient(180deg,#f6e7c1,#8f7743);font-family:var(--serif);font-size:11px;letter-spacing:.08em;transition:transform .1s,filter .12s;isolation:isolate}
+.hd2:before{content:"";position:absolute;inset:1.5px;clip-path:inherit;background:linear-gradient(180deg,#2c3663,#141a36);z-index:-1}
+.hd2 svg{width:26px;height:26px;fill:var(--c,var(--gold2));filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))}
+.hd2:hover{filter:brightness(1.2);transform:translateY(-3px)}.hd2:active{transform:scale(.95)}
+.hd2 .bd{position:absolute;right:2px;top:2px;min-width:18px;height:18px;line-height:18px;border-radius:9px;font-size:10px;padding:0 5px;background:#c43b33;color:#fff;font-family:var(--sans)}
+.hGo{position:relative;width:168px;height:86px;margin-left:6px;clip-path:polygon(22px 0,100% 0,100% calc(100% - 22px),calc(100% - 22px) 100%,0 100%,0 22px);background:linear-gradient(180deg,#fffbe9 0%,#ecd49a 40%,#b98d3e 60%,#e9cf93 100%);color:#2b2410;font-family:var(--serif);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:transform .1s,filter .12s;overflow:hidden;filter:drop-shadow(0 6px 16px rgba(0,0,0,.5))}
+.hGo small{font-size:10px;letter-spacing:.5em;text-indent:.5em;opacity:.75}.hGo b{font-size:30px;letter-spacing:.3em;text-indent:.3em;font-weight:700;text-shadow:0 1px 0 rgba(255,255,255,.6)}
+.hGo:after{content:"";position:absolute;top:0;bottom:0;left:-60%;width:40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.7),transparent);transform:skewX(-20deg);animation:sweep 2.8s infinite}
+@keyframes sweep{0%,55%{left:-60%}100%{left:130%}}
+.hGo:hover{filter:brightness(1.08) drop-shadow(0 6px 16px rgba(0,0,0,.5));transform:translateY(-3px)}.hGo:active{transform:scale(.96)}
+/* ---- ステージの確認 ---- */
+#stageInfo .box{width:min(520px,100%);text-align:left}
+#stageInfo .siN{font-family:var(--serif);font-size:26px;letter-spacing:.14em;margin:8px 0 0;text-align:center}
+#stageInfo .siS{color:var(--gold2);letter-spacing:.2em;text-align:center;margin-bottom:10px}
+.siRow{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid rgba(217,191,134,.18);font-size:13px;flex-wrap:wrap}
+.siRow .lb{flex:none;width:86px;font-size:11px;color:var(--gold);font-family:var(--serif);letter-spacing:.08em}
+.siE{display:flex;flex-wrap:wrap;gap:8px}.siE .en{display:flex;align-items:center;gap:7px}.siE .fc{width:38px;height:38px;line-height:38px}.siE b{display:block;font-weight:500;font-size:13px}.siE small{display:block;font-size:10px;color:var(--c)}
+.siP{display:flex;gap:6px}.siP .fc{width:36px;height:36px;line-height:36px;font-size:14px}
+.btn.big{min-height:56px;font-size:18px}
+/* ---- 編成（タップで入れる・外す） ---- */
+.dkHead{display:flex;align-items:baseline;gap:10px;justify-content:center;font-size:12px;color:var(--dim)}
+.dkHead b{font-family:var(--serif);font-size:22px;color:var(--gold2);font-weight:500;letter-spacing:.08em}
+.slots .cc .rm{position:absolute;right:-4px;top:-6px;width:22px;height:22px;line-height:22px;border-radius:50%;background:#c43b33;color:#fff;font-size:12px;text-align:center;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.slots .cc.sel{transform:none;outline:0;filter:none}
+.slots.shake{animation:shk .35s}@keyframes shk{20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+.dkHow{margin:12px 0 8px;padding:8px 12px;background:rgba(8,12,26,.72);border-left:3px solid var(--gold);font-size:12px;line-height:1.7}.dkHow b{color:var(--gold2)}
+.cc .inf,.dkHow .inf{display:inline-block;width:22px;height:22px;line-height:22px;border-radius:50%;background:rgba(8,12,26,.85);border:1px solid var(--gold);color:var(--gold2);font-size:12px;text-align:center;font-family:var(--serif);font-style:italic}
+.cc .inf{position:absolute;right:3px;top:3px;z-index:2}
+.cc.picked{outline:3px solid #ffe27a;outline-offset:-1px;filter:drop-shadow(0 0 8px rgba(255,226,122,.8))}
+.cc.picked .bdg{top:auto;bottom:38%;background:linear-gradient(180deg,#fff6dc,#c9a65f);color:#2b2410;border:0;font-weight:700;font-size:11px;padding:2px 10px}
+.cc.dim>.in{filter:brightness(.55) saturate(.6)}
+.dkFoot{padding:10px 0 2px;display:flex;justify-content:center}.dkFoot .btn{width:min(420px,100%);min-height:50px}
+/* ---- ガチャの演出 ---- */
+#gRes{--g:#6fb8ff;background:radial-gradient(circle at 50% 45%,#231a44,#05060e 78%);overflow:hidden}
+#gRes[data-r=SR]{--g:#ffd36e}#gRes[data-r=UR]{--g:#ff8ad8}
+#gSummon,#gSplash,#gList{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:16px}
+#gSkipAll{position:absolute;right:14px;top:max(14px,env(safe-area-inset-top));z-index:5}
+.gcirc{position:absolute;left:50%;top:62%;width:min(86vw,560px);aspect-ratio:1;transform:translate(-50%,-50%) rotateX(66deg) scale(0);transition:transform 1s cubic-bezier(.2,.9,.2,1)}
+#gRes.p1 .gcirc{transform:translate(-50%,-50%) rotateX(66deg) scale(1)}
+.gcirc i{position:absolute;inset:0;border-radius:50%;border:3px solid var(--g);box-shadow:0 0 30px var(--g),inset 0 0 40px var(--g);animation:spin 7s linear infinite;transition:border-color .4s,box-shadow .4s}
+.gcirc i:nth-child(2){inset:12%;border:8px dotted var(--g);animation-duration:4s;animation-direction:reverse;box-shadow:none}
+.gcirc i:nth-child(3){inset:27%;border:2px dashed #fff;animation-duration:2.4s;box-shadow:0 0 50px var(--g),inset 0 0 60px var(--g)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.gbeam{position:absolute;left:50%;bottom:38%;top:-10%;width:6px;transform:translateX(-50%);background:linear-gradient(90deg,transparent,var(--g) 30%,#fff 50%,var(--g) 70%,transparent);opacity:0;transition:width .6s cubic-bezier(.2,.9,.2,1),opacity .4s;filter:blur(2px)}
+#gRes.p1 .gbeam{opacity:.7;width:26px}#gRes.p2 .gbeam{opacity:1;width:min(46vw,260px)}#gRes.p3 .gbeam{width:300vw;transition-duration:.35s}
+#gRes[data-r=UR].p2 .gbeam,#gRes[data-r=UR].p2 .gcirc,#gRes[data-r=UR].p2 .gorb{animation:hue 1.2s linear infinite}
+@keyframes hue{to{filter:hue-rotate(360deg)}}
+.gorb{position:absolute;left:50%;top:62%;width:70px;height:70px;border-radius:50%;transform:translate(-50%,-50%);background:radial-gradient(circle,#fff,var(--g) 45%,transparent 72%);box-shadow:0 0 60px 20px var(--g);opacity:0;transition:top 1.2s cubic-bezier(.3,0,.2,1),opacity .4s,transform .5s}
+#gRes.p1 .gorb{opacity:1;top:40%}#gRes.p2 .gorb{transform:translate(-50%,-50%) scale(2.1)}#gRes.p2{animation:gshake .4s 2}
+@keyframes gshake{25%{transform:translate(4px,-3px)}50%{transform:translate(-4px,3px)}75%{transform:translate(3px,2px)}}
+#gStars span{position:absolute;width:2px;height:90px;background:linear-gradient(180deg,transparent,#fff);transform:rotate(38deg);opacity:0;animation:met 1.1s linear infinite}
+@keyframes met{0%{opacity:0;translate:120px -160px}20%{opacity:1}100%{opacity:0;translate:-160px 220px}}
+#gTx{position:absolute;left:0;right:0;bottom:14%;text-align:center;font-family:var(--serif);font-size:18px;letter-spacing:.4em;text-indent:.4em;color:#fff;text-shadow:0 0 14px var(--g)}
+#gSplash{cursor:pointer;--c:#fff}
+#gSplash .rays{position:absolute;left:50%;top:44%;width:190vmax;height:190vmax;transform:translate(-50%,-50%);background:repeating-conic-gradient(from 0deg,color-mix(in srgb,var(--c) 55%,transparent) 0 6deg,transparent 6deg 16deg);animation:spin 26s linear infinite;-webkit-mask:radial-gradient(circle,#000 0,transparent 62%);mask:radial-gradient(circle,#000 0,transparent 62%)}
+#gSplash img{position:relative;height:min(58vh,520px);filter:drop-shadow(0 0 26px var(--c)) drop-shadow(0 10px 20px rgba(0,0,0,.6));animation:spin0 .7s cubic-bezier(.2,1.5,.3,1)}
+@keyframes spin0{0%{transform:scale(.2) translateY(60px);opacity:0}100%{transform:none;opacity:1}}
+#gSplash .inf{position:relative;text-align:center;animation:spin0 .6s .15s backwards}
+#gSplash .rar{font-size:20px;padding:1px 14px}
+#gSplash .nm{font-family:var(--serif);font-size:44px;letter-spacing:.24em;text-indent:.24em;font-weight:700;color:#fff;text-shadow:0 0 22px var(--c),0 3px 0 rgba(0,0,0,.6)}
+#gSplash .rl{font-size:13px;color:var(--gold2);letter-spacing:.1em}
+#gSplash .tg{display:inline-block;margin-top:6px;padding:1px 16px;font-family:var(--serif);font-weight:700;background:linear-gradient(90deg,#ffe27a,#ff8a3c);color:#3a1a00;letter-spacing:.2em}
+#gSplash .tap{position:absolute;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));text-align:center;font-size:12px;color:var(--dim);animation:warn .8s infinite alternate}
+.gc.UR.open .f,.gc.SR.open .f{animation:cardpop .5s}
+@keyframes cardpop{0%{filter:brightness(4)}100%{filter:none}}
+/* ---- 戦い: だれが何をしたか ---- */
+#cap{position:absolute;left:50%;top:calc(max(10px,env(safe-area-inset-top)) + 124px);transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:7px 26px 7px 10px;background:linear-gradient(90deg,color-mix(in srgb,var(--c) 55%,#0a0f22),rgba(10,15,34,.95) 45%);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 50%,calc(100% - 16px) 100%,0 100%);border-left:4px solid var(--c);white-space:nowrap;max-width:96vw;animation:capin .25s cubic-bezier(.2,.9,.2,1);z-index:2;pointer-events:none}
+@keyframes capin{from{opacity:0;transform:translateX(-50%) translateX(-40px)}}
+#cap .fc{width:40px;height:40px;line-height:40px;font-size:16px}
+#cap small{display:block;font-size:10px;color:var(--gold2);letter-spacing:.08em}#cap b{display:block;font-family:var(--serif);font-size:19px;letter-spacing:.12em;font-weight:500}
+#cap .ar{color:var(--gold2);font-size:13px}#cap .tg{display:flex;gap:4px}#cap .tg .fc{width:32px;height:32px;line-height:32px;font-size:13px}
+#hint{display:flex;gap:6px;align-items:center;justify-content:center}
+.stp{padding:3px 14px;font-size:11px;font-family:var(--serif);background:rgba(8,12,26,.82);color:var(--dim);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.stp.on{background:linear-gradient(180deg,#fff6dc,#c9a65f);color:#2b2410;font-weight:700;text-shadow:none}.stp.done{color:#9fe6b4}
+#intro{position:fixed;left:0;right:0;top:34%;z-index:23;text-align:center;pointer-events:none;opacity:0;padding:16px 0;background:linear-gradient(90deg,transparent,rgba(5,8,18,.88) 22%,rgba(5,8,18,.88) 78%,transparent)}
+#intro.go{animation:intro 1.9s ease-out forwards}
+@keyframes intro{0%{opacity:0;transform:scaleY(.2)}12%{opacity:1;transform:none}82%{opacity:1}100%{opacity:0}}
+#intro .a{font-size:11px;letter-spacing:.5em;color:var(--gold)}#intro .b{font-family:var(--serif);font-size:36px;letter-spacing:.24em;text-indent:.24em;color:#fff;text-shadow:0 0 18px rgba(246,231,193,.7)}#intro .c{font-size:13px;color:var(--gold2);letter-spacing:.14em;margin-top:4px}
+#tut .box{width:min(480px,100%);text-align:left}
+.tl{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid rgba(217,191,134,.18);font-size:13px;line-height:1.65}
+.tl i{flex:none;width:26px;height:26px;line-height:26px;text-align:center;font-style:normal;font-family:var(--serif);background:linear-gradient(180deg,#fff6dc,#c9a65f);color:#2b2410;border-radius:50%;font-weight:700}
+.tl b{color:var(--gold2)}.tl .sq{display:inline-block;width:12px;height:12px;vertical-align:-1px;margin:0 3px;border:1px solid #fff}
+#logList{max-height:34vh;overflow:auto;text-align:left;font-size:12px;line-height:1.8;margin-top:8px;padding:8px 10px;background:rgba(8,12,26,.6)}
+/* ---- 体力バー ---- */
+.mb{width:66px}
+.mb .n{font-size:10px;margin-bottom:1px}
+.mb .b{position:relative;height:7px;background:#0b0d1c;outline:1.5px solid rgba(8,10,24,.95);box-shadow:0 0 0 2.5px rgba(255,255,255,.28),0 2px 4px rgba(0,0,0,.6);border-radius:4px;overflow:hidden}
+.mb .b u{position:absolute;inset:0 auto 0 0;background:#fff;transition:width .5s .35s}
+.mb .b i{position:absolute;inset:0 auto 0 0;display:block;height:auto;background:linear-gradient(180deg,#ffb199,#ff5a4a 60%,#c4322a);transition:width .18s}
+.mb.h{width:52px}.mb.h .b{height:6px}.mb.h .b i{background:linear-gradient(180deg,#d6ffc4,#57d38a 60%,#2f9a5e)}
+.mb.low .b i{background:linear-gradient(180deg,#ffe9a8,#ffb23a 60%,#d9761a)}
+.mb .e{position:absolute;left:-8px;bottom:-1px;width:9px;height:9px;transform:rotate(45deg);background:var(--c);outline:1.5px solid #fff;z-index:1}
+.mb.m .n{padding-left:6px}
+.mb.now .b{box-shadow:0 0 0 2.5px #fff6dc,0 0 10px #fff6dc}
+.mb.hit{animation:mbhit .3s}@keyframes mbhit{30%{transform:translate(-50%,-100%) translateX(-5px) scale(1.12)}60%{transform:translate(-50%,-100%) translateX(4px)}}
+.bar>u{position:absolute;inset:0 auto 0 0;width:100%;background:#fff;opacity:.9;transition:width .55s .3s}
+.bar{border-radius:2px}#focus .bar{height:12px}
+.float{font-size:30px;letter-spacing:.02em;animation-name:fl2;-webkit-text-stroke:1.2px rgba(20,10,30,.8);text-shadow:0 3px 0 rgba(20,10,30,.7),0 0 12px rgba(0,0,0,.6)}
+@keyframes fl2{0%{opacity:0;transform:translate(-50%,-20%) scale(2.2)}12%{opacity:1;transform:translate(-50%,-70%) scale(.92)}22%{transform:translate(-50%,-78%) scale(1.08)}32%{transform:translate(-50%,-80%) scale(1)}78%{opacity:1;transform:translate(-50%,-105%)}100%{opacity:0;transform:translate(-50%,-150%)}}
+.float.crit{animation-name:flc}.float.adv{color:#ffd27a;font-size:36px}
+@media (max-width:760px){
+  #hPlate .fc{width:38px;height:38px;line-height:38px}#hTop .who{font-size:15px;max-width:30vw}.hPill{height:34px;padding:0 11px;font-size:11px}
+  #hSide{left:10px;right:10px;top:auto;bottom:calc(max(10px,env(safe-area-inset-bottom)) + 96px);width:auto;grid-template-columns:1fr 1fr;gap:8px;align-items:stretch}
+  #hBanner{min-height:0;padding:9px 10px 30px}#hBanner .nm{font-size:15px}#hBanner .ds{display:none}#hBanner .fs .fc{width:36px;height:36px}
+  #hParty{padding:8px 8px 9px}#hParty .fs{gap:3px}#hParty .fs .fc{width:27px;height:27px;line-height:27px;font-size:11px}
+  #hLead{left:10px;bottom:calc(max(10px,env(safe-area-inset-bottom)) + 214px);max-width:86vw;padding:8px 26px 8px 12px}#hLead .nm{font-size:24px}#hLead .ln{display:none}
+  #hDock{left:10px;right:10px;bottom:max(10px,env(safe-area-inset-bottom));gap:5px;justify-content:space-between}
+  .hd2{width:auto;flex:1;height:60px;font-size:10px}.hd2 svg{width:23px;height:23px}
+  .hGo{flex:1.9;width:auto;height:74px;margin-left:2px}.hGo b{font-size:23px}
+  #stageInfo{align-items:flex-end;padding:0}#stageInfo .box{width:100%}#stageInfo .siN{font-size:21px}
+  #stageInfo .row .btn{padding:0 6px;font-size:12px;letter-spacing:.04em}
+  #cap{top:calc(max(10px,env(safe-area-inset-top)) + 136px);padding:5px 20px 5px 7px;gap:7px}#cap .fc{width:32px;height:32px;line-height:32px}#cap b{font-size:15px}#cap .tg .fc{width:26px;height:26px;line-height:26px}
+  #intro .b{font-size:24px}
+  #gSplash .nm{font-size:32px}#gSplash img{height:46vh}
+  .dkHow{font-size:11px}
+}
+@media (max-width:760px){ #tools .btn{padding:0 9px} #focus{width:calc(100% - 262px);min-width:96px} }
+#gSplash img{-webkit-mask-image:linear-gradient(#000 80%,transparent);mask-image:linear-gradient(#000 80%,transparent)}
+#hBanner .go{left:auto;right:12px;top:10px;bottom:auto}
+.cc.picked .bdg{top:auto;bottom:21px;left:50%}.cc.picked .rl{display:none}
 </style>
 </head>
 <body>
@@ -425,25 +575,36 @@ select.sel{width:100%;height:42px;background:#0a0f22;color:var(--ink);border:1px
 
 <!-- ホーム -->
 <div id="home" class="screen hidden">
-  <div id="hTop"><div><div class="who" id="hWho"></div><div class="tag" id="hTag"></div></div><div class="sp"></div>
-    <button id="hDaily" class="btn sm pri hidden">ログインボーナス</button><span class="stone" id="hStones"></span><button id="hOut" class="btn sm">ログアウト</button></div>
-  <div id="hLead"><div class="rl" id="hLeadR"></div><div class="nm" id="hLeadN"></div></div>
-  <div id="hMenu">
-    <button class="hm" id="mStage" style="--c:#6fd58a"><div class="ic"><span>出</span></div><div><div class="tt">出撃</div><div class="ds">ステージを選んで ひとりで狩る</div></div></button>
-    <button class="hm" id="mCoop" style="--c:#5cb2ff"><div class="ic"><span>協</span></div><div><div class="tt">協力プレイ</div><div class="ds">仲間と部屋を作って狩る</div></div></button>
-    <button class="hm" id="mDeck" style="--c:#f6d256"><div class="ic"><span>編</span></div><div><div class="tt">編成</div><div class="ds">連れていく5人を選ぶ</div></div></button>
-    <button class="hm" id="mGacha" style="--c:#ff8ad8"><div class="ic"><span>祈</span></div><div><div class="tt">ガチャ</div><div class="ds">彩石で新しい仲間を呼ぶ</div></div></button>
-    <button class="hm" id="mChars" style="--c:#bb90ff"><div class="ic"><span>図</span></div><div><div class="tt">キャラ</div><div class="ds">仲間の能力と技を見る</div></div></button>
-    <button class="hm" id="mAch" style="--c:#d9bf86"><div class="ic"><span>績</span></div><div><div class="tt">実績</div><div class="ds">報酬を受け取る</div></div></button>
+  <div id="hTop">
+    <div id="hPlate"><i class="fc" id="hFace"></i><div style="min-width:0"><div class="who" id="hWho"></div><div class="tag" id="hTag"></div></div></div>
+    <div class="sp"></div>
+    <button id="hDaily" class="hPill gift hidden"><b>!</b>ログインボーナス</button>
+    <span class="hPill" id="hStoneP"><span class="stone" id="hStones"></span></span>
+    <button id="hOut" class="hPill">ログアウト</button>
+  </div>
+  <div id="hLead"><div class="rl" id="hLeadR"></div><div class="nm" id="hLeadN"></div><div class="ln" id="hLine"></div></div>
+  <div id="hSide">
+    <button id="hBanner"><span class="sb">PICK UP ガチャ</span><span class="nm" id="hBnN"></span><span class="ds" id="hBnD"></span><span class="fs" id="hBnF"></span><span class="go">ガチャへ ▶</span></button>
+    <div id="hParty"><div class="t"><span>出撃メンバー</span><button id="hEdit">編成 ▶</button></div><div class="fs" id="hFaces"></div></div>
+  </div>
+  <div id="hDock">
+    <button class="hd2" id="mDeck" style="--c:#f6d256"><svg viewBox="0 0 24 24"><path d="M5 3h10a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm13 3h1a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H9v-2h9z"/></svg><span>編成</span></button>
+    <button class="hd2" id="mGacha" style="--c:#ff8ad8"><svg viewBox="0 0 24 24"><path d="M12 1l2.4 7.2L22 11l-7.6 2.6L12 23l-2.4-9.4L2 11l7.6-2.8z"/></svg><span>ガチャ</span></button>
+    <button class="hd2" id="mChars" style="--c:#bb90ff"><svg viewBox="0 0 24 24"><path d="M4 3h7v18H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm9 0h7a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-7zm2 4v2h4V7zm0 4v2h4v-2z"/></svg><span>キャラ</span></button>
+    <button class="hd2" id="mAch" style="--c:#f6e7c1"><svg viewBox="0 0 24 24"><path d="M6 3h12v2h3v3a4 4 0 0 1-4 4h-.4A5 5 0 0 1 13 14.9V18h3v3H8v-3h3v-3.1A5 5 0 0 1 7.4 12H7a4 4 0 0 1-4-4V5h3zM5 7v1a2 2 0 0 0 1 1.7V7zm13 0v2.7A2 2 0 0 0 19 8V7z"/></svg><span>実績</span></button>
+    <button class="hd2" id="mCoop" style="--c:#5cb2ff"><svg viewBox="0 0 24 24"><path d="M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM1.5 20c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5zm14.3 0c0-1.9-.6-3.6-1.7-5 .6-.3 1.2-.4 1.9-.4 3 0 5.5 2.4 5.5 5.4z"/></svg><span>協力</span></button>
+    <button id="mStage" class="hGo"><small>QUEST</small><b>出撃</b></button>
   </div>
 </div>
 
 <!-- ステージ -->
 <div id="stages" class="sub hidden"><div class="hd"><button class="back" data-back><i>◀</i></button><h2>出撃</h2><span class="stone" data-stones></span></div>
-  <div class="bd"><div class="world">◆ 第一章　始まりの草原 ◆</div><div class="stages" id="stList"></div>
-  <div class="world">◆ 特別討伐 ◆</div><div class="stages" id="exList"></div>
-  <div id="stageInfo" class="panel hidden"><div class="in" style="padding:14px 16px"><div id="siBody"></div><div class="row" style="margin-top:10px"><button class="btn" id="siCoop">みんなで狩る</button><button class="btn pri" id="siGo"><i class="gem"></i>出撃<i class="gem"></i></button></div></div></div>
-  </div></div>
+  <div class="bd"><div class="dkHow" style="margin-top:0">遊びたい<b>ステージをタップ</b>してください。敵や報酬の確認と「出撃」ボタンが出ます。</div>
+  <div class="world">◆ 第一章　始まりの草原 ◆</div><div class="stages" id="stList"></div>
+  <div class="world">◆ 特別討伐 ◆</div><div class="stages" id="exList"></div></div></div>
+<div id="stageInfo" class="over hidden"><div class="box panel"><div class="in"><div id="siBody"></div>
+  <div class="stack"><button class="btn pri big" id="siGo"><i class="gem"></i>このメンバーで出撃<i class="gem"></i></button>
+  <div class="row"><button class="btn" id="siX">もどる</button><button class="btn" id="siDeck">編成を変える</button><button class="btn" id="siCoop">みんなで狩る</button></div></div></div></div></div>
 
 <!-- 協力プレイ -->
 <div id="coop" class="sub hidden"><div class="hd"><button class="back" data-back><i>◀</i></button><h2>協力プレイ</h2></div>
@@ -471,14 +632,13 @@ select.sel{width:100%;height:42px;background:#0a0f22;color:var(--ink);border:1px
 </div>
 
 <!-- 編成 -->
-<div id="deck" class="sub hidden"><div class="hd"><button class="back" data-back><i>◀</i></button><h2>編成</h2><span class="note" style="margin:0">自動で保存</span><button class="btn sm pri" id="dkAuto">おすすめ</button></div>
+<div id="deck" class="sub hidden"><div class="hd"><button class="back" data-back><i>◀</i></button><h2>編成</h2><button class="btn sm" id="dkClear">全員はずす</button><button class="btn sm pri" id="dkAuto">おすすめ</button></div>
   <div class="bd"><div class="dkTop">
-    <div class="orn">◆ 出撃メンバー（上の枠をタップして選ぶ）◆</div>
-    <div class="slots" id="dkSlots"></div><div id="dkSum"></div>
-    <div id="dkInfo"><div class="in"></div></div>
-  </div>
-  <div class="orn" style="margin-top:12px">◆ 持っているキャラ ◆</div><div id="dkStep"></div>
-  <div class="filters" id="dkFilter"></div><div class="grid" id="dkGrid"></div></div></div>
+    <div class="dkHead"><b id="dkCount"></b><span>いま連れていくメンバー（最大5人）</span></div>
+    <div class="slots" id="dkSlots"></div><div id="dkSum"></div></div>
+  <div class="dkHow">下の<b>キャラをタップ</b>するとメンバーに入ります。<b>もう一度タップ</b>すると外れます。右上の <span class="inf">i</span> で能力を見られます。</div>
+  <div class="filters" id="dkFilter"></div><div class="grid" id="dkGrid"></div></div>
+  <div class="dkFoot"><button class="btn pri" id="dkDone"><i class="gem"></i>この編成で決定<i class="gem"></i></button></div></div>
 
 <!-- キャラ -->
 <div id="chars" class="sub hidden"><div class="hd"><button class="back" data-back><i>◀</i></button><h2>キャラ</h2><span id="chCount" class="note" style="margin:0"></span></div>
@@ -492,15 +652,21 @@ select.sel{width:100%;height:42px;background:#0a0f22;color:var(--ink);border:1px
     <div class="gbtns"><button class="btn" id="g1"></button><button class="btn pri" id="g10"></button></div>
     <div class="note" id="gNote" style="margin:0"></div>
   </div></div>
-<div id="gRes" class="hidden"><div class="orn" style="width:min(600px,100%)">◆ 召喚の結果 ◆</div><div id="gCards"></div><div class="row" style="width:min(420px,100%);margin-top:16px"><button class="btn" id="gSkip">すべてめくる</button><button class="btn pri" id="gOk">OK</button></div></div>
+<div id="gRes" class="hidden">
+  <div id="gSummon"><div class="gbeam"></div><div class="gcirc"><i></i><i></i><i></i></div><div class="gorb"></div><div id="gStars"></div><div id="gTx"></div></div>
+  <div id="gSplash" class="hidden"><div class="rays"></div><img id="gSpImg" alt=""><div class="inf"><span class="rar" id="gSpR"></span><div class="nm" id="gSpN"></div><div class="rl" id="gSpL"></div><div class="tg" id="gSpT"></div></div><div class="tap">タップで次へ</div></div>
+  <div id="gList" class="hidden"><div class="orn" style="width:min(600px,100%)">◆ 召喚の結果 ◆</div><div id="gCards"></div><div class="row" style="width:min(420px,100%);margin-top:16px"><button class="btn" id="gSkip">すべてめくる</button><button class="btn pri" id="gOk">OK</button></div></div>
+  <button id="gSkipAll" class="btn sm">スキップ</button>
+</div>
 <div id="gFlash"></div>
 
 <!-- 戦い -->
 <div id="hud" class="hidden">
   <div id="turnBox" class="panel"><div class="in"><div class="em" id="tbEm"><span id="tbG"></span></div><div style="min-width:0;flex:1"><div class="t1">NOW TURN</div><div class="t2" id="tbName"></div><div class="t3" id="tbWho"></div><div id="order"></div></div></div></div>
-  <div id="focus" class="panel"><div class="in"><div class="nm" id="fcName"></div><div class="meta" id="fcMeta"></div><div class="bar"><i id="fcHp"></i></div><div class="hpn" id="fcHpN"></div><div id="parts"></div></div></div>
-  <div id="tools"><div id="time">--</div><button id="bAuto" class="btn sm">AUTO</button><button id="bSpeed" class="btn sm">×1</button><button id="bMenu" class="btn sm">MENU</button></div>
+  <div id="focus" class="panel"><div class="in"><div class="nm" id="fcName"></div><div class="meta" id="fcMeta"></div><div class="bar"><u id="fcGh"></u><i id="fcHp"></i></div><div class="hpn" id="fcHpN"></div><div id="parts"></div></div></div>
+  <div id="tools"><div id="time">--</div><button id="bAuto" class="btn sm">AUTO</button><button id="bSpeed" class="btn sm">×1</button><button id="bHelp" class="btn sm">？</button><button id="bMenu" class="btn sm">MENU</button></div>
   <div id="warn" class="hidden"></div>
+  <div id="cap" class="hidden"></div>
   <div id="log"></div><div id="hint"></div>
   <div id="desc" class="panel hidden"><div class="in"><div class="nm" id="descName"></div><div class="tx" id="descText"></div><div class="how" id="descHow"></div><div id="descBtns"></div></div></div>
   <button id="moveOk" class="btn pri hidden">ここへ移動する</button>
@@ -508,6 +674,7 @@ select.sel{width:100%;height:42px;background:#0a0f22;color:var(--ink);border:1px
   <div id="party"></div>
   <div id="skills"></div>
 </div>
+<div id="intro"><div class="a"></div><div class="b"></div><div class="c"></div></div>
 <div id="letter"></div><div id="cineT"><div class="k"></div><div class="n"></div><div class="w"></div></div>
 <div id="tband"><span></span></div><div id="banner"></div><div id="flash"></div>
 
@@ -520,9 +687,16 @@ select.sel{width:100%;height:42px;background:#0a0f22;color:var(--ink);border:1px
   <div id="achList"></div><div class="stack"><button id="bAchClose" class="btn pri">とじる</button></div>
 </div></div></div>
 <div id="menu" class="over hidden"><div class="box panel"><div class="in">
-  <div class="orn">◆ メニュー ◆</div><div class="stack"><button id="mQuit" class="btn">狩りをやめる</button><button id="mClose" class="btn pri">とじる</button></div>
+  <div class="orn">◆ メニュー ◆</div><div class="note" style="margin:8px 0 0;text-align:left">これまでの流れ</div><div id="logList"></div><div class="stack"><button id="mQuit" class="btn">狩りをやめる</button><button id="mClose" class="btn pri">とじる</button></div>
 </div></div></div>
 <div id="rates" class="over hidden"><div class="box panel"><div class="in" id="rtBody" style="text-align:left"></div></div></div>
+<div id="tut" class="over hidden"><div class="box panel"><div class="in"><div class="orn">◆ あそびかた ◆</div>
+ <div class="tl" style="border:0;margin-top:6px"><i>1</i><div>左上に<b>いまの番</b>のキャラが出ます。自分の番になったら操作します。</div></div>
+ <div class="tl"><i>2</i><div><span class="sq" style="background:#4aa8ff"></span><b>青いマス</b>をタップすると移動できます（1ターンに1回。動かなくてもOK）。</div></div>
+ <div class="tl"><i>3</i><div>下の<b>技</b>をえらぶと、<span class="sq" style="background:#ff9a3c"></span>届く範囲と、ねらえる相手のボタンが出ます。ボタンか相手をタップすると攻撃します。</div></div>
+ <div class="tl"><i>4</i><div><span class="sq" style="background:#ff2d2d"></span><b>赤く光るマス</b>は敵の大技の予告です。次の番までに外へ動けばよけられます。</div></div>
+ <div class="tl"><i>5</i><div>敵をすべて倒すと勝ち。<b>AUTO</b> を押すと自動で戦います。右上の「？」でいつでも見直せます。</div></div>
+ <div class="stack"><button class="btn pri" id="tutOk">わかった</button></div></div></div></div>
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -593,7 +767,7 @@ function onMsg(m) {
       break;
     case 'state':
       timeOff = m.now - Date.now(); st = m.state;
-      if ($('hud').classList.contains('hidden')) { show('hud'); disp = {}; queue = []; sel = { si: -1, part: null, focus: null, pv: null }; }
+      if ($('hud').classList.contains('hidden')) { show('hud'); disp = {}; queue = []; sel = { si: -1, part: null, focus: null, pv: null }; queue.push({ t: '_intro' }); }
       if (!Object.keys(disp).length) { syncDisp(); if (m.events.length) rewindDisp(m.events); }
       scene3d.build(st);
       for (const e of m.events) queue.push(e);
@@ -613,16 +787,14 @@ function refreshScreens() {
   if (!defs) return;
   const n = acct ? acct.stones.toLocaleString() : '—';
   for (const el of document.querySelectorAll('[data-stones]')) el.textContent = n;
-  $('hStones').textContent = n; $('hStones').classList.toggle('hidden', !acct);
+  $('hStones').textContent = n; $('hStoneP').classList.toggle('hidden', !acct);
   $('hWho').textContent = acct ? acct.name : ($('name').value.trim() || 'ゲスト');
   $('hTag').textContent = acct ? `勝利 ${acct.wins} ／ キャラ ${Object.keys(acct.chars).length}人` : 'ゲスト（R のキャラのみ・記録なし）';
   $('hDaily').classList.toggle('hidden', !(acct && acct.daily));
   $('hOut').textContent = acct ? 'ログアウト' : 'タイトルへ';
   const ready = acct ? acct.achievements.filter((x) => x.state === 'ready').length : 0;
   setBadge($('mAch'), ready ? ready : '');
-  const lead = defs.chars[myDeck()[0]];
-  if (lead) { $('hLeadN').textContent = lead.name; $('hLeadR').innerHTML = `<span class="rar ${lead.rarity}">${lead.rarity}</span> ${defs.elName[lead.el]}・${lead.role}`; }
-  if (!$('home').classList.contains('hidden')) scene3d.showcase(myDeck()[0]);
+  if (!$('home').classList.contains('hidden')) drawHome();
   if (!$('achv').classList.contains('hidden')) drawAch();
   if (!$('stages').classList.contains('hidden')) drawStages();
   if (!$('gacha').classList.contains('hidden')) drawGachaScreen();
@@ -664,9 +836,32 @@ function show(id) {
   if (id !== 'hud') { $('result').classList.add('hidden'); $('bars').innerHTML = ''; document.body.classList.remove('cine'); }
   $('cDetail').classList.add('hidden');
   scene3d.setMode(id === 'hud' ? 'battle' : id === 'title' ? 'title' : 'home');
-  if (id === 'home') scene3d.showcase(myDeck()[0]);
+  $('stageInfo').classList.add('hidden');
+  if (id === 'home' && defs) drawHome();
 }
 function goHome() { show('home'); refreshScreens(); }
+/* ホーム: いま見せているキャラ・出撃メンバーの顔・おすすめのガチャ */
+let homeKey = null;
+function drawHome() {
+  if (!defs) return;
+  const dk = myDeck(), C = defs.chars; if (!dk.includes(homeKey)) homeKey = dk[0];
+  const c = C[homeKey]; if (!c) return;
+  const face = (el, k) => { el.style.setProperty('--c', EL[C[k].el]); faceInto(el, { key: k, name: C[k].name, side: 'h' }); };
+  $('hLeadN').textContent = c.name; $('hLeadR').innerHTML = `<span class="rar ${c.rarity}">${c.rarity}</span><span class="chip" style="--c:${EL[c.el]}">${defs.elName[c.el]}</span><span>${c.role}</span>`; $('hLine').textContent = `${c.set.name} … ${c.set.desc}`;
+  face($('hFace'), dk[0]);
+  const fs = $('hFaces'); fs.innerHTML = '';
+  for (let i = 0; i < 5; i++) {
+    const k = dk[i], b = document.createElement('button'); b.className = 'fc' + (k ? (k === homeKey ? ' on' : '') : ' empty');
+    if (k) { face(b, k); b.onclick = () => { homeKey = k; drawHome(); }; } else { b.textContent = '＋'; b.onclick = () => $('mDeck').click(); }
+    fs.appendChild(b);
+  }
+  const bs = defs.gacha.banners.filter((b) => b.upUR.length), bn = bs[Math.floor(Date.now() / 864e5) % bs.length], hb = $('hBanner');
+  hb.style.setProperty('--c', bn.color); $('hBnN').textContent = bn.name; $('hBnD').textContent = bn.desc;
+  const bf = $('hBnF'); bf.innerHTML = ''; for (const k of bn.upUR) { const i = document.createElement('i'); i.className = 'fc'; face(i, k); bf.appendChild(i); }
+  hb.onclick = () => { bnSel = bn.id; $('mGacha').click(); };
+  scene3d.showcase(homeKey);
+}
+$('hEdit').onclick = () => $('mDeck').click();
 for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => goHome();
 let toastT = 0;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2800); }
@@ -732,16 +927,16 @@ function drawChars() {
 }
 
 /* ---------------- 編成 ----------------
-   上の5つの枠から1つ選び、下のキャラをタップするとその枠に入る。変えるたびに自動で保存する。 */
-let dkF = 'すべて', dkWork = [], dkSlot = 0, dkPick = null;
-$('mDeck').onclick = () => { dkWork = myDeck().slice(0, 5); dkSlot = 0; dkPick = dkWork[0] || null; show('deck'); drawDeck(); };
+   キャラをタップ → 入る。もう一度タップ → 外れる。変えるたびに自動で保存する。 */
+let dkF = 'すべて', dkWork = [];
+$('mDeck').onclick = () => { dkWork = myDeck().slice(0, 5); show('deck'); drawDeck(); };
 function dkSave() { if (!dkWork.length) return; send({ t: 'deck', keys: dkWork }); if (!acct) { guestDeck = dkWork.slice(); store.set('hunt_gdeck', JSON.stringify(guestDeck)); } }
-function dkPlace(k) {
+function dkToggle(k) {
   const j = dkWork.indexOf(k);
-  if (dkSlot >= dkWork.length) { if (j >= 0) dkSlot = j; else { dkWork.push(k); dkSlot = Math.min(dkWork.length, 4); } }
-  else if (j >= 0) { const t = dkWork[dkSlot]; dkWork[dkSlot] = k; dkWork[j] = t; }
-  else { dkWork[dkSlot] = k; if (dkWork.length < 5) dkSlot = dkWork.length; }
-  dkPick = k; dkSave(); drawDeck();
+  if (j >= 0) { if (dkWork.length === 1) return toast('メンバーは1人以上必要です'); dkWork.splice(j, 1); }
+  else if (dkWork.length >= 5) { toast('5人いっぱいです。先にだれかをタップして外してください'); const s = $('dkSlots'); s.classList.remove('shake'); void s.offsetWidth; s.classList.add('shake'); return; }
+  else dkWork.push(k);
+  dkSave(); drawDeck(); scene3d.showcase(k);
 }
 function dkAuto() {
   const own = owned(), ord = { UR: 0, SR: 1, R: 2 }, C = defs.chars;
@@ -749,51 +944,38 @@ function dkAuto() {
   const pick = [], take = (f) => { const k = ks.find((x) => !pick.includes(x) && f(C[x])); if (k) pick.push(k); };
   take((c) => /アタッカー/.test(c.role)); take((c) => c.role === '回復・治療'); take((c) => c.role === '防御'); take((c) => /アタッカー/.test(c.role)); take((c) => c.role === '妨害');
   while (pick.length < 5) { const k = ks.find((x) => !pick.includes(x)); if (!k) break; pick.push(k); }
-  dkWork = pick; dkSlot = 0; dkPick = pick[0]; dkSave(); drawDeck(); toast('おすすめの5人を入れました');
+  dkWork = pick; dkSave(); drawDeck(); toast('おすすめの5人を入れました');
 }
 $('dkAuto').onclick = dkAuto;
+$('dkClear').onclick = () => { if (dkWork.length <= 1) return; dkWork = dkWork.slice(0, 1); dkSave(); drawDeck(); toast('1人目だけ残して外しました'); };
+$('dkDone').onclick = () => { toast('この編成で保存しました'); goHome(); };
 function drawDeck() {
   const own = owned(), C = defs.chars;
-  if (dkSlot > dkWork.length) dkSlot = dkWork.length; if (dkSlot > 4) dkSlot = 4;
+  $('dkCount').textContent = `${dkWork.length} / 5 人`;
   const slots = $('dkSlots'); slots.innerHTML = '';
   for (let i = 0; i < 5; i++) {
-    const k = dkWork[i], on = i === dkSlot || (!k && dkSlot >= dkWork.length && i === dkWork.length);
-    const d = k ? charCard(k, { dup: own[k] && own[k].dup }) : emptyCard(i === dkWork.length ? '＋ 空き' : '空き');
-    d.classList.toggle('sel', on);
-    const no = document.createElement('span'); no.className = 'no'; no.textContent = i === 0 ? '1 リーダー' : i + 1; d.appendChild(no);
-    d.onclick = () => { dkSlot = k ? i : dkWork.length; if (k) dkPick = k; drawDeck(); };
+    const k = dkWork[i], d = k ? charCard(k, { dup: own[k] && own[k].dup }) : emptyCard('＋');
+    if (k) { const no = document.createElement('span'); no.className = 'no'; no.textContent = i === 0 ? '1 リーダー' : i + 1; d.appendChild(no); const rm = document.createElement('span'); rm.className = 'rm'; rm.textContent = '✕'; d.appendChild(rm); d.onclick = () => dkToggle(k); }
+    else d.onclick = () => toast('下のキャラをタップすると、ここに入ります');
     slots.appendChild(d);
   }
-  // チームの内訳
   const els = {}, roles = {}; for (const k of dkWork) { els[C[k].el] = (els[C[k].el] || 0) + 1; const r = ROLE_S[C[k].role]; roles[r] = (roles[r] || 0) + 1; }
   const warn = []; if (!roles['回復']) warn.push('回復役がいません'); if (!roles['防御']) warn.push('守り役がいません'); if (dkWork.length < 5) warn.push(`あと ${5 - dkWork.length} 人入れられます`);
   $('dkSum').innerHTML = `<span class="sm1">属性</span>` + ['red', 'green', 'blue', 'yellow', 'purple'].map((e) => `<span class="chip" style="--c:${EL[e]};opacity:${els[e] ? 1 : 0.3}">${defs.elName[e]} ${els[e] || 0}</span>`).join('') +
     `<span class="sm1">役わり</span>` + ['物理', '特殊', '回復', '防御', '妨害'].map((r) => `<span class="chip" style="opacity:${roles[r] ? 1 : 0.3}">${r} ${roles[r] || 0}</span>`).join('') +
     (warn.length ? `<div class="wr">⚠ ${warn.join('　／　')}</div>` : '<div class="okk">✓ バランスのよい編成です</div>');
-  // 選んでいるキャラの説明
-  const info = $('dkInfo').firstElementChild, k = dkPick && C[dkPick] ? dkPick : null;
-  if (k) {
-    const c = C[k], j = dkWork.indexOf(k), n0 = c.skills[0];
-    info.innerHTML = `<i class="fc" style="--c:${EL[c.el]}"></i><div class="tx"><div class="n1"><span class="rar ${c.rarity}">${c.rarity}</span> <b></b> <span class="chip" style="--c:${EL[c.el]}">${defs.elName[c.el]}</span><span class="chip">${c.role}</span></div>
-      <div class="n2">体力 ${c.hp}・攻撃 ${c.atk}・速さ ${c.spd}・移動 ${c.mov}マス・射程 ${n0.range}マス</div><div class="n3"></div></div><div class="bt"></div>`;
-    faceInto(info.querySelector('.fc'), { key: k, name: c.name, side: 'h' }); info.querySelector('b').textContent = c.name; info.querySelector('.n3').textContent = `${c.set.name}: ${c.set.desc}`;
-    const bt = info.querySelector('.bt'), mk = (t, f, cls) => { const b = document.createElement('button'); b.className = 'btn sm ' + (cls || ''); b.textContent = t; b.onclick = f; bt.appendChild(b); };
-    if (j >= 0) { if (dkWork.length > 1) mk('はずす', () => { dkWork.splice(j, 1); dkSlot = dkWork.length; dkPick = null; dkSave(); drawDeck(); }); }
-    else mk(dkSlot < dkWork.length ? `${dkSlot + 1}番と入れ替え` : '編成に入れる', () => dkPlace(k), 'pri');
-    mk('くわしく', () => showDetail(k));
-  } else info.innerHTML = '<div class="tx"><div class="n2">キャラをタップすると、ここに説明が出ます。</div></div>';
-  $('dkStep').innerHTML = dkSlot < dkWork.length ? `<b>${dkSlot + 1}番の枠</b>を選んでいます。下のキャラをタップすると入れ替わります。` : dkWork.length < 5 ? `<b>空いている枠</b>に入れます。下のキャラをタップしてください。` : '';
   filterBar($('dkFilter'), dkF, (f) => { dkF = f; drawDeck(); });
-  const g = $('dkGrid'); g.innerHTML = '';
+  const g = $('dkGrid'); g.innerHTML = ''; const full = dkWork.length >= 5;
   for (const key of sortedKeys(dkF)) {
     if (!own[key]) continue;
     const j = dkWork.indexOf(key);
-    const d = charCard(key, { cls: (j >= 0 ? 'used ' : '') + (key === dkPick ? 'sel' : ''), dup: own[key].dup, badge: j >= 0 ? `編成中 ${j + 1}` : '' });
-    d.onclick = () => dkPlace(key);
+    const d = charCard(key, { cls: j >= 0 ? 'picked' : full ? 'dim' : '', dup: own[key].dup, badge: j >= 0 ? `✓ ${j + 1}番` : '' });
+    const inf = document.createElement('span'); inf.className = 'inf'; inf.textContent = 'i'; inf.onclick = (e) => { e.stopPropagation(); showDetail(key); }; d.appendChild(inf);
+    const dp = d.querySelector('.dp'); if (dp) { dp.style.right = 'auto'; dp.style.left = '34px'; }
+    d.onclick = () => dkToggle(key);
     g.appendChild(d);
   }
   if (!acct) { const n = document.createElement('div'); n.className = 'note'; n.style.gridColumn = '1/-1'; n.textContent = 'ゲストは R のキャラだけ使えます。ログインするとガチャで SR・UR の仲間を増やせます。'; g.appendChild(n); }
-  scene3d.showcase(dkPick || dkWork[0] || myDeck()[0]);
 }
 
 /* ---------------- ステージ ---------------- */
@@ -819,17 +1001,27 @@ function drawStages() {
 }
 function drawStageInfo() {
   const box = $('stageInfo');
-  if (!siKey) { box.classList.add('hidden'); return; }
-  const s = defs.stages[siKey], cl = acct && acct.stages[siKey];
+  if (!siKey || $('stages').classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  const s = defs.stages[siKey], cl = acct && acct.stages[siKey], C = defs.chars, E = defs.enemies;
   box.classList.remove('hidden');
   const ens = s.enemies.reduce((a, e) => (a[e] = (a[e] || 0) + 1, a), {});
-  $('siBody').innerHTML = `<div class="orn">◆ ${s.no} ◆</div><div style="font-family:var(--serif);font-size:22px;letter-spacing:.14em;margin:6px 0" id="siN"></div>
-    <div style="display:flex;flex-wrap:wrap;gap:5px">${Object.entries(ens).map(([k, n]) => `<span class="chip" style="--c:${EL[defs.enemies[k].el]}">${defs.enemies[k].name}${n > 1 ? ' ×' + n : ''}${defs.enemies[k].boss ? '（ボス）' : ''}</span>`).join('')}</div>
-    <div class="note">${acct ? (cl && cl.clears ? `クリア ${cl.clears} 回・最短 ${cl.best} ターン。報酬 <span class="stone">${s.again}</span>` : `はじめてのクリア報酬 <span class="stone">${s.first}</span>`) : 'ゲストは報酬なしで遊べます。'}</div>`;
-  $('siN').textContent = s.name;
+  const BEAT = { green: 'red', blue: 'green', red: 'blue', purple: 'yellow', yellow: 'purple' };
+  const good = [...new Set(Object.keys(ens).map((k) => BEAT[E[k].el]))];
+  $('siBody').innerHTML = `<div class="orn">◆ ${s.no}${s.boss ? '　BOSS' : ''} ◆</div><div class="siN"></div><div class="siS">${'★'.repeat(s.star)}</div>
+    <div class="siRow"><span class="lb">勝つには</span>敵をすべて倒す</div>
+    <div class="siRow"><span class="lb">出てくる敵</span><div class="siE">${Object.entries(ens).map(([k, n]) => `<span class="en" style="--c:${EL[E[k].el]}"><i class="fc" data-e="${k}"></i><span><b>${E[k].name}${n > 1 ? ' ×' + n : ''}</b><small>${defs.elName[E[k].el]}属性${E[k].boss ? '・ボス' : ''}</small></span></span>`).join('')}</div></div>
+    <div class="siRow"><span class="lb">有利な属性</span>${good.map((e) => `<span class="chip" style="--c:${EL[e]}">${defs.elName[e]}</span>`).join('')}<span style="font-size:11px;color:var(--dim)">のキャラはダメージ 1.3倍</span></div>
+    <div class="siRow"><span class="lb">出撃メンバー</span><div class="siP"></div></div>
+    <div class="siRow"><span class="lb">報酬</span><span>${acct ? (cl && cl.clears ? `<span class="stone">${s.again}</span>（クリア ${cl.clears} 回・最短 ${cl.best} ターン）` : `はじめてのクリアで <span class="stone">${s.first}</span>`) : 'ゲストは報酬なし（ログインするともらえます）'}</span></div>`;
+  box.querySelector('.siN').textContent = s.name;
+  for (const f of box.querySelectorAll('.siE .fc')) faceInto(f, { key: f.dataset.e, name: E[f.dataset.e].name, side: 'm' });
+  const sp = box.querySelector('.siP'); for (const k of myDeck()) { const i = document.createElement('i'); i.className = 'fc'; i.style.setProperty('--c', EL[C[k].el]); faceInto(i, { key: k, name: C[k].name, side: 'h' }); sp.appendChild(i); }
 }
+$('siX').onclick = () => { siKey = null; drawStageInfo(); };
+$('siDeck').onclick = () => { siKey = null; $('mDeck').click(); };
+$('stageInfo').onclick = (e) => { if (e.target.id === 'stageInfo') { siKey = null; drawStageInfo(); } };
 $('siGo').onclick = () => { if (siKey) send({ t: 'solo', stage: siKey }); };
-$('siCoop').onclick = () => { if (siKey) { show('coop'); drawCoop(siKey); } };
+$('siCoop').onclick = () => { const k = siKey; if (k) { siKey = null; show('coop'); drawCoop(k); } };
 
 /* ---------------- 協力プレイ ---------------- */
 $('mCoop').onclick = () => { show('coop'); drawCoop(); };
@@ -906,24 +1098,48 @@ function drawRates(b) {
 $('g1').onclick = () => send({ t: 'gacha', banner: bnSel, count: 1 });
 $('g10').onclick = () => send({ t: 'gacha', banner: bnSel, count: 10 });
 let gTimers = [];
+const RV = { R: 0, SR: 1, UR: 2 };
+function gFlashNow() { const f = $('gFlash'); f.style.transition = 'none'; f.style.opacity = 1; void f.offsetWidth; f.style.transition = 'opacity .9s'; f.style.opacity = 0; }
+/* 召喚（光の色が最高レアで変わる）→ UR と新しい SR は1人ずつ大きく見せる → 結果の一覧 */
 function showGacha(m) {
-  const box = $('gCards'); box.innerHTML = ''; gTimers.forEach(clearTimeout); gTimers = [];
-  const best = m.results.reduce((a, r) => (({ R: 0, SR: 1, UR: 2 })[r.rarity] > ({ R: 0, SR: 1, UR: 2 })[a.rarity] ? r : a), m.results[0]);
-  $('gRes').classList.remove('hidden');
-  m.results.forEach((r, i) => {
-    const g = document.createElement('div'); g.className = 'gc ' + r.rarity + (m.results.length === 1 ? ' one' : '');
-    g.innerHTML = '<div class="b"></div><div class="f"></div><div class="tg"></div>';
-    g.querySelector('.f').appendChild(charCard(r.key));
-    const tg = g.querySelector('.tg'); tg.textContent = r.isNew ? 'NEW!' : r.refund ? `彩石 +${r.refund}` : `重ね +${r.dup}`; if (r.isNew) tg.classList.add('new');
-    g.onclick = () => flip(g, r);
-    box.appendChild(g);
-    gTimers.push(setTimeout(() => flip(g, r), 700 + i * 260));
-  });
-  if (best.rarity === 'UR') gTimers.push(setTimeout(() => { const f = $('gFlash'); f.style.transition = 'none'; f.style.opacity = 1; void f.offsetWidth; f.style.transition = 'opacity 1.2s'; f.style.opacity = 0; }, 700 + m.results.findIndex((r) => r === best) * 260));
-  $('gOk').onclick = () => { $('gRes').classList.add('hidden'); drawGachaScreen(); scene3d.showcase(best.key); if (m.unlocked && m.unlocked.length) toast(`実績「${m.unlocked[0]}」を達成！`); };
-  $('gSkip').onclick = () => { gTimers.forEach(clearTimeout); for (const g of box.children) g.classList.add('open'); };
+  gTimers.forEach(clearTimeout); gTimers = [];
+  const R = $('gRes'), later = (ms, f) => gTimers.push(setTimeout(f, ms)), C = defs.chars;
+  const best = m.results.reduce((a, r) => (RV[r.rarity] > RV[a.rarity] ? r : a), m.results[0]);
+  const splash = m.results.filter((r) => r.rarity === 'UR' || (r.rarity === 'SR' && r.isNew));
+  R.className = ''; R.dataset.r = 'R';
+  $('gSummon').classList.remove('hidden'); $('gSplash').classList.add('hidden'); $('gList').classList.add('hidden'); $('gSkipAll').classList.remove('hidden');
+  $('gTx').textContent = '彩石に祈りを…';
+  const stars = $('gStars'); stars.innerHTML = ''; for (let i = 0; i < 18; i++) { const sp = document.createElement('span'); sp.style.left = Math.random() * 100 + '%'; sp.style.top = Math.random() * 70 + '%'; sp.style.animationDelay = Math.random() * 1.1 + 's'; stars.appendChild(sp); }
+  void R.offsetWidth; R.classList.add('p1');
+  const list = (fast) => {
+    $('gSummon').classList.add('hidden'); $('gSplash').classList.add('hidden'); $('gSkipAll').classList.add('hidden'); $('gList').classList.remove('hidden');
+    const box = $('gCards'); box.innerHTML = '';
+    m.results.forEach((r, i) => {
+      const g = document.createElement('div'); g.className = 'gc ' + r.rarity + (m.results.length === 1 ? ' one' : '') + (fast ? ' open' : '');
+      g.innerHTML = '<div class="b"></div><div class="f"></div><div class="tg"></div>';
+      g.querySelector('.f').appendChild(charCard(r.key));
+      const tg = g.querySelector('.tg'); tg.textContent = r.isNew ? 'NEW!' : r.refund ? `彩石 +${r.refund}` : `重ね +${r.dup}`; if (r.isNew) tg.classList.add('new');
+      g.onclick = () => g.classList.add('open');
+      box.appendChild(g);
+      if (!fast) later(250 + i * 150, () => g.classList.add('open'));
+    });
+  };
+  const next = () => {
+    const r = splash.shift(); if (!r) return list(false);
+    const c = C[r.key], S = $('gSplash'); $('gSummon').classList.add('hidden'); S.classList.add('hidden'); void S.offsetWidth; S.classList.remove('hidden');
+    S.style.setProperty('--c', EL[c.el]); $('gSpImg').src = PT[r.key] || ''; $('gSpImg').style.visibility = PT[r.key] ? 'visible' : 'hidden';
+    $('gSpR').className = 'rar ' + c.rarity; $('gSpR').textContent = c.rarity; $('gSpN').textContent = c.name; $('gSpL').textContent = `${defs.elName[c.el]}属性・${c.role}`;
+    $('gSpT').textContent = r.isNew ? 'NEW!' : r.refund ? `彩石 +${r.refund}` : `重ね +${r.dup}`;
+    gFlashNow(); scene3d.showcase(r.key);
+  };
+  $('gSplash').onclick = next;
+  later(1300, () => { R.dataset.r = best.rarity; R.classList.add('p2'); $('gTx').textContent = best.rarity === 'UR' ? '虹色の光…！！' : best.rarity === 'SR' ? '金色の光！' : '光が集まる…'; if (best.rarity !== 'R') gFlashNow(); });
+  later(2550, () => { R.classList.add('p3'); gFlashNow(); });
+  later(2900, next);
+  $('gSkipAll').onclick = () => { gTimers.forEach(clearTimeout); gTimers = []; splash.length = 0; list(true); };
+  $('gSkip').onclick = () => { gTimers.forEach(clearTimeout); gTimers = []; for (const g of $('gCards').children) g.classList.add('open'); };
+  $('gOk').onclick = () => { gTimers.forEach(clearTimeout); R.classList.add('hidden'); drawGachaScreen(); scene3d.showcase(best.key); if (m.unlocked && m.unlocked.length) toast(`実績「${m.unlocked[0]}」を達成！`); };
 }
-function flip(g) { g.classList.add('open'); }
 
 /* =====================================================================
    戦い
@@ -970,7 +1186,7 @@ function drawHud() {
     $('fcName').textContent = f.name + (f.boss ? '　BOSS' : '');
     $('fcMeta').innerHTML = `<span class="chip" style="--c:${EL[f.el]}">${defs.elName[f.el]}属性</span>` + (f.rage ? '<span class="chip" style="--c:#ff7a6b">怒り</span>' : '') + stChips(f);
     const hp = disp[f.id] == null ? f.hp : disp[f.id];
-    $('fcHp').style.width = Math.max(0, hp / f.maxHp * 100) + '%';
+    $('fcHp').style.width = $('fcGh').style.width = Math.max(0, hp / f.maxHp * 100) + '%';
     $('fcHpN').textContent = `${Math.max(0, Math.round(hp)).toLocaleString()} / ${f.maxHp.toLocaleString()}`;
     const ps = $('parts'); ps.innerHTML = '';
     if (f.parts && f.parts.length) {
@@ -1051,7 +1267,7 @@ function drawSkills() {
       if (!list.length) { const n = document.createElement('div'); n.className = 'note'; n.style.margin = '0'; n.textContent = st.moved ? '射程の中に相手がいません。' : '射程の中に相手がいません。先に青いマスへ動いて近づきましょう。'; bt.appendChild(n); }
     }
   }
-  $('hint').textContent = pend ? 'もう一度同じマスをタップで移動' : st.moved ? '技を選ぶか、待機' : sel.si >= 0 ? '' : '青いマスをタップで移動 → 技を選ぶ';
+  $('hint').innerHTML = `<span class="stp ${st.moved ? 'done' : sel.si >= 0 ? '' : 'on'}">${st.moved ? '✓ 移動ずみ' : '① 青いマスへ移動'}</span><span class="stp ${st.moved || sel.si >= 0 ? 'on' : ''}">② 技をえらんで相手をタップ</span>` + (pend ? '<span class="stp on">同じマスをもう一度タップ</span>' : '');
   $('moveOk').classList.toggle('hidden', !pend);
 }
 function clearSel() { pend = null; $('moveOk').classList.add('hidden'); sel.si = -1; sel.pv = null; $('desc').classList.add('hidden'); $('skills').innerHTML = ''; $('passive').innerHTML = ''; scene3d.overlay({}); }
@@ -1111,7 +1327,7 @@ function onBoard(hit, touch) {
 }
 $('bAuto').onclick = () => { send({ t: 'auto', on: !amAuto() }); };
 $('bSpeed').onclick = () => { speed = speed === 1 ? 2 : 1; store.set('hunt_speed', String(speed)); drawSkills(); };
-$('bMenu').onclick = () => $('menu').classList.remove('hidden');
+$('bMenu').onclick = () => { const l = $('logList'); l.innerHTML = ''; for (const t of LOG.slice(-25)) { const d = document.createElement('div'); d.textContent = t; l.appendChild(d); } $('menu').classList.remove('hidden'); l.scrollTop = 1e6; };
 $('mClose').onclick = () => $('menu').classList.add('hidden');
 $('mQuit').onclick = () => { $('menu').classList.add('hidden'); wantHome = true; send({ t: 'leave' }); };
 $('bHome').onclick = () => { wantHome = true; send({ t: 'leave' }); };
@@ -1123,19 +1339,20 @@ setInterval(() => {
   t.textContent = left; t.classList.toggle('hot', left <= 10);
 }, 250);
 
-/* 頭の上の小さな体力バー */
+/* 頭の上の体力バー（減った分が白く残って、あとから縮む） */
 function drawBars() {
   const box = $('bars');
   if (!st || $('hud').classList.contains('hidden') || document.body.classList.contains('cine')) { if (box.childElementCount) box.innerHTML = ''; return; }
+  const turn = playing ? showTurn : st.turn;
   for (const u of st.units) {
     let d = $('mb_' + u.id);
     const hp = disp[u.id] == null ? u.hp : disp[u.id];
     const p = scene3d.screenPos(u.id, true);
     if (!p || hp <= 0) { if (d) d.remove(); continue; }
-    if (!d) { d = document.createElement('div'); d.id = 'mb_' + u.id; d.className = 'mb ' + u.side; d.innerHTML = '<div class="n"></div><div class="b"><i></i></div>'; box.appendChild(d); }
-    d.classList.toggle('foc', sel.focus === u.id);
-    d.firstChild.textContent = u.side === 'm' ? u.name : '';
-    d.lastChild.firstChild.style.width = Math.max(0, hp / u.maxHp * 100) + '%';
+    if (!d) { d = document.createElement('div'); d.id = 'mb_' + u.id; d.className = 'mb ' + u.side; d.style.setProperty('--c', EL[u.el]); d.innerHTML = '<div class="n"></div><div class="b"><u></u><i></i></div><span class="e"></span>'; d.firstChild.textContent = u.side === 'm' ? u.name : ''; d._w = -1; box.appendChild(d); }
+    const w = Math.max(0, Math.round(hp / u.maxHp * 1000) / 10);
+    if (d._w !== w) { const b = d.children[1], first = d._w < 0; if (first) b.firstChild.style.transition = 'none'; b.firstChild.style.width = b.lastChild.style.width = w + '%'; if (first) { void b.offsetWidth; b.firstChild.style.transition = ''; } d._w = w; d.classList.toggle('low', u.side === 'h' && w < 35); }
+    const now = turn === u.id; if (d._n !== now) { d._n = now; d.classList.toggle('now', now); }
     d.style.left = p.x + 'px'; d.style.top = p.y + 'px';
   }
 }
@@ -1151,7 +1368,27 @@ function float(id, text, cls, dy) {
 function banner(text, color, small) { const b = $('banner'); b.innerHTML = (small ? '<small></small>' : '') + '<span></span>'; if (small) b.firstChild.textContent = small; b.lastChild.textContent = text; b.style.setProperty('--c', color || '#fff'); b.style.animationDuration = .95 / speed + 's'; b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
 function turnBand(u) { const b = $('tband'); b.style.setProperty('--c', u.side === 'm' ? '#c0281f' : EL[u.el]); b.firstChild.textContent = `${u.name} のターン！！`; b.style.animationDuration = .78 / speed + 's'; b.classList.remove('go'); void b.offsetWidth; b.classList.add('go'); }
 function flash(color, strength) { const f = $('flash'); f.style.background = color || '#fff'; f.style.transition = 'none'; f.style.opacity = strength || 0.7; void f.offsetWidth; f.style.transition = 'opacity .35s'; f.style.opacity = 0; }
-function log(text) { const l = $('log'); l.textContent = text; l.style.opacity = text ? 1 : 0; }
+const LOG = [];
+function log(text) { if (text) { LOG.push(text); if (LOG.length > 60) LOG.shift(); } const l = $('log'); l.textContent = text; l.style.opacity = text ? 1 : 0; }
+/* だれが・何を・だれに を、顔つきで出す */
+let capT = 0;
+function caption(u, name, kind, tids) {
+  const c = $('cap'); c.className = ''; c.style.setProperty('--c', u.side === 'm' ? '#ff4a3c' : EL[u.el]);
+  c.innerHTML = '<i class="fc"></i><div><small></small><b></b></div>';
+  faceInto(c.firstChild, u); c.querySelector('small').textContent = (u.side === 'm' ? '敵 ' : '') + u.name + (kind ? '・' + kind : ''); c.querySelector('b').textContent = name;
+  const us = [...new Set(tids || [])].filter((t) => t !== u.id).map(U).filter(Boolean).slice(0, 5);
+  if (us.length) { const a = document.createElement('span'); a.className = 'ar'; a.textContent = '▶'; c.appendChild(a); const tg = document.createElement('div'); tg.className = 'tg'; for (const t of us) { const f = document.createElement('i'); f.className = 'fc'; f.style.setProperty('--c', t.side === 'm' ? '#ff4a3c' : EL[t.el]); faceInto(f, t); tg.appendChild(f); } c.appendChild(tg); }
+  clearTimeout(capT); capT = setTimeout(() => c.classList.add('hidden'), 2000 / speed);
+}
+function intro() {
+  const s = defs.stages[st.stage], el = $('intro'); LOG.length = 0;
+  el.children[0].textContent = s.no + (s.boss ? '　BOSS' : ''); el.children[1].textContent = s.name; el.children[2].textContent = '勝利条件：敵をすべて倒す';
+  el.style.animationDuration = 1.9 / speed + 's'; el.classList.remove('go'); void el.offsetWidth; el.classList.add('go');
+  if (!store.get('hunt_tut')) setTimeout(() => { if (!$('hud').classList.contains('hidden')) $('tut').classList.remove('hidden'); }, 1900 / speed);
+  return 1900;
+}
+$('bHelp').onclick = () => $('tut').classList.remove('hidden');
+$('tutOk').onclick = () => { store.set('hunt_tut', '1'); $('tut').classList.add('hidden'); };
 const nameOf = (id) => { const u = U(id); return u ? u.name : ''; };
 
 function pump() {
@@ -1164,6 +1401,7 @@ function pump() {
 }
 function playEvent(e) {
   switch (e.t) {
+    case '_intro': return intro();
     case '_sync': st = e.state; showTurn = st.turn; syncDisp(); scene3d.sync(st); drawHud(); if (st.phase === 'over') showResult(); return 0;
     case 'turn': {
       const u = U(e.u); showTurn = e.u; scene3d.focus(e.u);
@@ -1176,19 +1414,21 @@ function playEvent(e) {
     case 'wait': { const u = U(e.u); if (u && u.side === 'h') float(e.u, '待機', 'txt'); return 260; }
     case 'skill': {
       const u = U(e.u); if (!u) return 0;
-      const col = u.side === 'm' ? '#ff6f61' : EL[u.el];
-      log(`${u.name} の ${e.name}`);
+      const col = u.side === 'm' ? '#ff6f61' : EL[u.el], kn = u.side === 'h' ? defs.kindName[e.kind] || '' : e.kind === 'special' ? '大技' : '';
+      const tn = [...new Set((e.targets || []).filter((t) => t !== e.u).map(nameOf).filter(Boolean))];
+      log(`${u.name} の「${e.name}」` + (tn.length ? ` → ${tn.join('・')}` : ''));
+      caption(u, e.name, kn, e.targets);
       if (u.side === 'h' && (e.kind === 'special' || e.kind === 'ultimate')) return scene3d.cine(e.u, e.center || e.targets[0], e.kind, col, e.name, defs.kindName[e.kind]);
       if (u.side === 'm' && e.kind === 'special') return scene3d.cine(e.u, e.targets[0], 'boss', '#ff4a3c', e.name, '大技');
-      banner(e.name, col, u.side === 'h' ? defs.kindName[e.kind] || '' : null);
-      scene3d.attack(e.u, e.targets, e.type, e.kind, e.tiles);
-      return 640;
+      scene3d.act(e.u, e.targets); scene3d.attack(e.u, e.targets, e.type, e.kind, e.tiles);
+      return u.side === 'm' ? 900 : 740;
     }
     case 'dmg': {
       disp[e.u] = Math.max(0, (disp[e.u] || 0) - e.v);
       if (e.part) disp[e.part] = Math.max(0, (disp[e.part] || 0) - e.v);
       const src = U(e.src);
       scene3d.impact(e.u, { type: e.ty, crit: e.crit, guard: e.guard, color: src ? EL[src.el] : '#fff', big: e.v > 300 });
+      { const mb = $('mb_' + e.u); if (mb) { mb.classList.remove('hit'); void mb.offsetWidth; mb.classList.add('hit'); } }
       if (e.crit) flash('#fff6d8', 0.55);
       float(e.u, e.v.toLocaleString(), e.crit ? 'crit' : e.em === 'adv' ? 'adv' : e.em === 'dis' ? 'dis' : '');
       if (e.em === 'adv') setTimeout(() => float(e.u, '有利！', 'txt', -32), 100);
@@ -1249,7 +1489,7 @@ const scene3d = (() => {
   sun.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048); Object.assign(sun.shadow.camera, { left: -17, right: 17, top: 17, bottom: -17, far: 70 }); sun.shadow.bias = -0.0006; scene.add(sun); scene.add(sun.target);
   const grad = new T.DataTexture(new Uint8Array([105, 175, 232, 255]), 4, 1, T.LuminanceFormat); grad.minFilter = grad.magFilter = T.NearestFilter; grad.needsUpdate = true;
   const mat = (c, o) => new T.MeshToonMaterial(Object.assign({ color: c, gradientMap: grad }, o || {}));
-  const gradSkin = new T.DataTexture(new Uint8Array([205, 238, 255]), 3, 1, T.LuminanceFormat); gradSkin.minFilter = gradSkin.magFilter = T.NearestFilter; gradSkin.needsUpdate = true;
+  const gradSkin = new T.DataTexture(new Uint8Array([232, 248, 255]), 3, 1, T.LuminanceFormat); gradSkin.minFilter = gradSkin.magFilter = T.NearestFilter; gradSkin.needsUpdate = true;
   const glowMat = (c, k) => new T.MeshToonMaterial({ color: c, gradientMap: grad, emissive: c, emissiveIntensity: (k == null ? 0.85 : k) * 0.42 });
   // ふちどり: 裏面を法線の向きに少しふくらませて描く（太さがそろう）
   const mkLine = (w) => { const m = new T.MeshBasicMaterial({ color: 0x271b30, side: T.BackSide }); m.onBeforeCompile = (sh) => { sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = position + normalize(normal) * ' + w.toFixed(4) + ';'); }; m.customProgramCacheKey = () => 'line' + w; return m; };
@@ -1376,37 +1616,69 @@ const scene3d = (() => {
      look（engine.js）: weapon / hair / hairC / eyeC / outfit / c1 / c2 / acc[] / eye / mouth
      顔は 2D の絵（Canvas）を頭の前面に貼る。髪は先細りの房を組み合わせる。 */
   const SKIN = 0xffe6d4, HS = 1.18;
-  function faceTex(L) {
-    const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
-    const eyeC = new T.Color(L.eyeC || '#4aa8ff'), css = (col) => '#' + col.getHexString(), brow = css(darken(new T.Color(L.hairC || '#554433'), 0.45));
-    const st = L.eye || 'round', ry = st === 'sharp' ? 27 : st === 'gentle' ? 30 : 33, rx = 25, ey = 132;
-    for (const sx of [-1, 1]) { const bx = 128 + sx * 80, g = x.createRadialGradient(bx, 176, 2, bx, 176, 26); g.addColorStop(0, 'rgba(255,110,125,.5)'); g.addColorStop(1, 'rgba(255,110,125,0)'); x.fillStyle = g; x.fillRect(bx - 28, 148, 56, 56); }
-    for (const sx of [-1, 1]) {
-      const cx = 128 + sx * 62, tilt = st === 'sharp' ? -0.15 : st === 'gentle' ? 0.12 : 0;
-      x.save(); x.translate(cx, ey); x.scale(sx, 1); x.rotate(tilt);   // 外側が +x
-      x.beginPath(); x.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); x.fillStyle = '#fff'; x.fill(); x.save(); x.clip();
-      const sh = x.createLinearGradient(0, -ry, 0, ry * 0.3); sh.addColorStop(0, 'rgba(80,70,120,.5)'); sh.addColorStop(1, 'rgba(80,70,120,0)'); x.fillStyle = sh; x.fillRect(-rx, -ry, rx * 2, ry * 2);
-      const ig = x.createLinearGradient(0, -ry, 0, ry); ig.addColorStop(0, css(darken(eyeC, 0.62))); ig.addColorStop(0.5, css(eyeC)); ig.addColorStop(1, css(lighten(eyeC, 0.6)));
-      x.beginPath(); x.ellipse(-2, 3, rx * 0.76, ry * 0.88, 0, 0, Math.PI * 2); x.fillStyle = ig; x.fill(); x.lineWidth = 3; x.strokeStyle = css(darken(eyeC, 0.72)); x.stroke();
-      x.beginPath(); x.ellipse(-2, 1, rx * 0.3, ry * 0.4, 0, 0, Math.PI * 2); x.fillStyle = css(darken(eyeC, 0.86)); x.fill();
-      x.beginPath(); x.ellipse(-2, ry * 0.55, rx * 0.44, ry * 0.2, 0, 0, Math.PI * 2); x.fillStyle = 'rgba(255,255,255,.4)'; x.fill();
-      x.restore();
-      x.strokeStyle = '#2a1c2c'; x.lineCap = 'round'; x.lineWidth = 7; x.beginPath(); x.moveTo(-rx - 2, -ry * 0.35); x.quadraticCurveTo(0, -ry * 1.34, rx + 4, -ry * 0.3); x.stroke();
-      x.lineWidth = 4; x.beginPath(); x.moveTo(rx + 3, -ry * 0.34); x.lineTo(rx + 11, -ry * 0.66); x.stroke();
-      x.lineWidth = 2.5; x.beginPath(); x.moveTo(rx * 0.15, ry + 1); x.quadraticCurveTo(rx * 0.75, ry * 0.95, rx + 1, ry * 0.5); x.stroke();
-      x.lineWidth = 2; x.strokeStyle = 'rgba(130,70,70,.55)'; x.beginPath(); x.moveTo(-rx * 0.6, -ry * 1.34); x.quadraticCurveTo(4, -ry * 1.62, rx, -ry * 0.98); x.stroke();
-      x.restore();
-      x.fillStyle = '#fff'; x.beginPath(); x.ellipse(cx - 9, ey - ry * 0.4, 7.5, 9.5, 0.3, 0, Math.PI * 2); x.fill(); x.beginPath(); x.arc(cx + 8, ey + ry * 0.42, 3.6, 0, Math.PI * 2); x.fill();
-      x.save(); x.translate(cx, ey - ry - 22); x.scale(sx, 1); x.rotate(st === 'sharp' ? -0.2 : st === 'gentle' ? 0.14 : 0.02);
-      x.strokeStyle = brow; x.lineWidth = 5; x.lineCap = 'round'; x.beginPath(); x.moveTo(-20, 3); x.quadraticCurveTo(0, -5, 22, 0); x.stroke(); x.restore();
+  /* 頭の形: 球の下半分をしぼって、あごのある輪郭にする（顔の絵を貼る面にも同じ変形をかける） */
+  function shapeHead(geo, R) {
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const t = Math.max(0, -y / R);
+      if (t > 0) { x *= 1 - 0.33 * Math.pow(t, 1.6); z *= z > 0 ? 1 - 0.2 * Math.pow(t, 1.8) : 1 - 0.2 * t; y *= 1.04; }
+      const ch = Math.exp(-Math.pow((y / R + 0.3) / 0.2, 2)); x *= 1 + 0.03 * ch;   // ほおのふくらみ
+      p.setXYZ(i, x, y, z);
     }
-    x.fillStyle = 'rgba(190,105,95,.6)'; x.beginPath(); x.ellipse(128, 170, 2.6, 1.7, 0, 0, Math.PI * 2); x.fill();
-    const m = L.mouth || 'smile'; x.strokeStyle = '#a8483e'; x.fillStyle = '#a8483e'; x.lineWidth = 3; x.lineCap = 'round';
-    if (m === 'smile') { x.beginPath(); x.moveTo(115, 195); x.quadraticCurveTo(128, 208, 141, 195); x.stroke(); }
-    else if (m === 'grin') { x.beginPath(); x.moveTo(111, 193); x.quadraticCurveTo(128, 218, 145, 193); x.closePath(); x.fillStyle = '#8f2f33'; x.fill(); x.stroke(); x.fillStyle = '#fff'; x.beginPath(); x.moveTo(116, 195); x.lineTo(140, 195); x.lineTo(136, 199); x.lineTo(120, 199); x.closePath(); x.fill(); }
-    else if (m === 'calm') { x.beginPath(); x.moveTo(119, 198); x.quadraticCurveTo(128, 201, 137, 198); x.stroke(); }
-    else { x.beginPath(); x.ellipse(128, 198, 4.5, 3.5, 0, 0, Math.PI * 2); x.fill(); }
-    return new T.CanvasTexture(c);
+    geo.computeVertexNormals(); return geo;
+  }
+  /* 顔の絵。目は 白目・虹彩のグラデーション・瞳・映りこみ・まつげ を重ねて描く */
+  function faceTex(L) {
+    const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d'); x.scale(2, 2);
+    const eyeC = new T.Color(L.eyeC || '#4aa8ff'), css = (col) => '#' + col.getHexString(), hairC = new T.Color(L.hairC || '#554433'), brow = css(darken(hairC, 0.5)), lash = css(darken(hairC, 0.82));
+    const st = L.eye || 'round', cute = st !== 'sharp';
+    const ry = st === 'sharp' ? 28 : st === 'gentle' ? 35 : 39, rx = st === 'sharp' ? 32 : 30, ey = st === 'sharp' ? 137 : 136, tilt = st === 'sharp' ? -0.17 : st === 'gentle' ? 0.13 : 0;
+    // 前髪の影
+    { const g = x.createLinearGradient(0, 34, 0, 104); g.addColorStop(0, 'rgba(206,120,112,.42)'); g.addColorStop(1, 'rgba(206,120,112,0)'); x.fillStyle = g; x.fillRect(0, 0, 256, 110); }
+    // ほお
+    for (const sx of [-1, 1]) {
+      const bx = 128 + sx * 82, by = 178, g = x.createRadialGradient(bx, by, 2, bx, by, 27); g.addColorStop(0, 'rgba(255,105,125,' + (cute ? 0.6 : 0.32) + ')'); g.addColorStop(1, 'rgba(255,105,125,0)'); x.fillStyle = g; x.fillRect(bx - 30, by - 28, 60, 56);
+      if (cute) { x.strokeStyle = 'rgba(255,90,115,.6)'; x.lineWidth = 1.6; x.lineCap = 'round'; for (let i = -1; i <= 1; i++) { x.beginPath(); x.moveTo(bx + i * 7 - 2, by + 5); x.lineTo(bx + i * 7 + 3, by - 4); x.stroke(); } }
+    }
+    for (const sx of [-1, 1]) {
+      const cx = 128 + sx * 62;
+      x.save(); x.translate(cx, ey); x.scale(sx, 1); x.rotate(tilt);   // ここからは外側が +x
+      // 白目
+      x.beginPath(); x.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); x.fillStyle = '#fffdfb'; x.fill(); x.save(); x.clip();
+      { const sh = x.createLinearGradient(0, -ry, 0, ry * 0.35); sh.addColorStop(0, 'rgba(70,60,120,.6)'); sh.addColorStop(1, 'rgba(70,60,120,0)'); x.fillStyle = sh; x.fillRect(-rx, -ry, rx * 2, ry * 2); }
+      // 虹彩
+      const ix = -2, iy = 3, irx = rx * 0.8, iry = ry * 0.9;
+      { const g = x.createRadialGradient(ix, iy + iry * 0.35, 1, ix, iy, iry * 1.05); g.addColorStop(0, css(lighten(eyeC, 0.7))); g.addColorStop(0.45, css(eyeC)); g.addColorStop(1, css(darken(eyeC, 0.55))); x.beginPath(); x.ellipse(ix, iy, irx, iry, 0, 0, Math.PI * 2); x.fillStyle = g; x.fill(); x.save(); x.clip(); }
+      { const g = x.createLinearGradient(0, iy - iry, 0, iy + iry * 0.25); g.addColorStop(0, 'rgba(12,6,34,.82)'); g.addColorStop(1, 'rgba(12,6,34,0)'); x.fillStyle = g; x.fillRect(-rx, -ry, rx * 2, ry * 2); }
+      x.beginPath(); x.ellipse(ix, iy, irx * 0.36, iry * 0.44, 0, 0, Math.PI * 2); x.fillStyle = css(darken(eyeC, 0.88)); x.fill();
+      x.lineWidth = 1.6; x.strokeStyle = css(lighten(eyeC, 0.45)); x.globalAlpha = 0.7; x.beginPath(); x.ellipse(ix, iy, irx * 0.56, iry * 0.62, 0, 0.15 * Math.PI, 0.85 * Math.PI); x.stroke(); x.globalAlpha = 1;
+      x.beginPath(); x.ellipse(ix, iy + iry * 0.62, irx * 0.62, iry * 0.24, 0, 0, Math.PI * 2); x.fillStyle = 'rgba(255,255,255,.5)'; x.fill();
+      x.fillStyle = 'rgba(255,255,255,.85)'; for (const [dx, dy, r] of [[-irx * 0.42, iry * 0.42, 2.2], [-irx * 0.18, iry * 0.6, 1.4], [irx * 0.36, iry * 0.5, 1.7]]) { x.beginPath(); x.arc(ix + dx, iy + dy, r, 0, 7); x.fill(); }
+      x.restore(); x.lineWidth = 2.6; x.strokeStyle = css(darken(eyeC, 0.78)); x.beginPath(); x.ellipse(ix, iy, irx, iry, 0, 0, Math.PI * 2); x.stroke();
+      x.restore();
+      // 上まつげ（太く、外へ流す）
+      x.fillStyle = lash; x.beginPath(); x.moveTo(-rx - 4, -ry * 0.22); x.quadraticCurveTo(-rx * 0.2, -ry * 1.5, rx + 5, -ry * 0.42); x.lineTo(rx + 15, -ry * (st === 'sharp' ? 1.0 : 0.78)); x.quadraticCurveTo(rx * 0.5, -ry * 1.02, 0, -ry * 1.06); x.quadraticCurveTo(-rx * 0.7, -ry * 0.98, -rx - 4, -ry * 0.22); x.fill();
+      x.strokeStyle = lash; x.lineCap = 'round';
+      if (cute) { x.lineWidth = 2.6; for (const [a, b, c2, d] of [[rx * 0.72, -ry * 0.95, rx * 0.98, -ry * 1.3], [rx * 0.3, -ry * 1.1, rx * 0.42, -ry * 1.42]]) { x.beginPath(); x.moveTo(a, b); x.lineTo(c2, d); x.stroke(); } }
+      x.lineWidth = 2.4; x.beginPath(); x.moveTo(rx * 0.1, ry + 1); x.quadraticCurveTo(rx * 0.78, ry * 0.98, rx + 2, ry * 0.42); x.stroke();
+      x.lineWidth = 1.8; x.strokeStyle = 'rgba(140,70,75,.6)'; x.beginPath(); x.moveTo(-rx * 0.7, -ry * 1.36); x.quadraticCurveTo(2, -ry * 1.74, rx * 0.95, -ry * 1.12); x.stroke();
+      x.restore();
+      // 映りこみ（左右で同じ向き）
+      x.fillStyle = '#fff'; x.beginPath(); x.ellipse(cx - 10, ey - ry * 0.42, 8, 10.5, 0.35, 0, Math.PI * 2); x.fill(); x.beginPath(); x.arc(cx + 9, ey + ry * 0.3, 3.8, 0, Math.PI * 2); x.fill(); x.beginPath(); x.arc(cx - 15, ey - ry * 0.02, 2, 0, 7); x.fill();
+      // まゆ
+      x.save(); x.translate(cx, ey - ry - (st === 'sharp' ? 15 : 19)); x.scale(sx, 1); x.rotate(st === 'sharp' ? -0.26 : st === 'gentle' ? 0.16 : 0.03);
+      x.fillStyle = brow; x.beginPath(); x.moveTo(-21, 3); x.quadraticCurveTo(-2, -7, 23, -1); x.quadraticCurveTo(0, -2.5, -21, 5.5); x.fill(); x.restore();
+    }
+    // 鼻
+    x.fillStyle = 'rgba(196,105,96,.55)'; x.beginPath(); x.ellipse(129, 172, 2.4, 1.6, 0, 0, Math.PI * 2); x.fill();
+    // 口
+    const m = L.mouth || 'smile'; x.strokeStyle = '#9a3d36'; x.lineWidth = 2.8; x.lineCap = 'round'; x.lineJoin = 'round';
+    if (m === 'smile') { x.beginPath(); x.moveTo(114, 196); x.quadraticCurveTo(121, 204, 128, 199); x.quadraticCurveTo(135, 204, 142, 196); x.stroke(); }
+    else if (m === 'grin') { x.beginPath(); x.moveTo(110, 193); x.quadraticCurveTo(128, 220, 146, 193); x.closePath(); x.fillStyle = '#8f2c34'; x.fill(); x.stroke(); x.fillStyle = '#ff9aa0'; x.beginPath(); x.ellipse(128, 208, 8, 4, 0, 0, Math.PI * 2); x.fill(); x.fillStyle = '#fff'; x.beginPath(); x.moveTo(115, 194.5); x.lineTo(141, 194.5); x.lineTo(138, 198); x.lineTo(118, 198); x.closePath(); x.fill(); x.beginPath(); x.moveTo(136, 197); x.lineTo(139.5, 204); x.lineTo(142, 196); x.closePath(); x.fill(); }
+    else if (m === 'calm') { x.beginPath(); x.moveTo(119, 198); x.quadraticCurveTo(128, 202, 137, 198); x.stroke(); x.lineWidth = 1.4; x.strokeStyle = 'rgba(154,61,54,.5)'; x.beginPath(); x.moveTo(124, 205); x.lineTo(132, 205); x.stroke(); }
+    else { x.beginPath(); x.ellipse(128, 199, 4.6, 3.8, 0, 0, Math.PI * 2); x.fillStyle = '#8f2c34'; x.fill(); x.stroke(); }
+    const tex = new T.CanvasTexture(c); tex.anisotropy = 4; return tex;
   }
   /* 武器。握るところが原点、上（+y）へ伸びる。r = 右手、l = 左手に持つもの。lUp = 左腕を前に上げる */
   function weaponOf(wp, M) {
@@ -1495,8 +1767,8 @@ const scene3d = (() => {
     ud.orb = wp.r.userData.orb || (wp.l && wp.l.userData.orb) || null;
     // 頭
     const head = new T.Group(); head.position.set(0, 1.44, 0); g.add(head);
-    add(head, sph(0.29, 28, 20), M.skin, null, null, [1, 0.97, 0.95]);
-    const tex = faceTex(L), fp = new T.Mesh(new T.SphereGeometry(0.2935, 20, 14, Math.PI / 2 - 0.7, 1.4, 0.95, 1.4), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })); fp.scale.set(1, 0.97, 0.95); fp.renderOrder = 1; head.add(fp); ud.tex = tex;
+    add(head, shapeHead(sph(0.29, 32, 24), 0.29), M.skin, null, null, [1, 0.97, 0.95]);
+    const tex = faceTex(L), fp = new T.Mesh(shapeHead(new T.SphereGeometry(0.2935, 28, 20, Math.PI / 2 - 0.7, 1.4, 0.95, 1.4), 0.2935), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })); fp.scale.set(1, 0.97, 0.95); fp.renderOrder = 1; head.add(fp); ud.tex = tex;
     if (has('elf')) for (const sx of [-1, 1]) add(head, cone(0.045, 0.24, 6), M.skin, [sx * 0.33, 0.02, -0.02], [0, 0, -sx * 1.25], [1, 1, 0.5]);
     else for (const sx of [-1, 1]) add(head, sph(0.05, 8, 6), M.skin, [sx * 0.275, -0.03, 0], null, [0.5, 1, 0.8], true);
     // 髪: 頭のてっぺん・前髪・横髪は共通。うしろは髪型ごと
@@ -1505,6 +1777,8 @@ const scene3d = (() => {
     const shine = new T.Mesh(new T.SphereGeometry(0.316, 26, 6, 0, Math.PI * 2, 0.5, 0.2), new T.MeshBasicMaterial({ color: lighten(hc, 0.5), transparent: true, opacity: 0.5, depthWrite: false })); shine.position.set(0, 0.012, -0.022); shine.rotation.x = -0.4; head.add(shine);
     const bangs = hs === 'spiky' || hs === 'messy' ? [-0.21, -0.11, 0, 0.1, 0.2] : [-0.22, -0.14, -0.05, 0.05, 0.14, 0.22];
     bangs.forEach((bx, i) => { const dy = (i % 2 ? 0.035 : 0) + Math.abs(bx) * 0.12, z = 0.285 - Math.abs(bx) * 0.28; add(head, tube([[bx * 0.55, 0.275, 0.1], [bx * 0.95, 0.2, z - 0.03], [bx * 1.08, 0.045 + dy, z]], 0.082, 0.012, 0.42, 6, 6), M.hair); });
+    for (const sx of [-1, 1]) add(head, tube([[sx * 0.225, 0.12, 0.19], [sx * 0.262, -0.04, 0.19], [sx * 0.232, -0.2, 0.2]], 0.036, 0.005, 0.5, 6, 5), M.hair);   // もみあげ
+    for (let i = 0; i < 3; i++) add(head, tube([[(i - 1) * 0.07, 0.3, -0.04], [(i - 1) * 0.1, 0.345, 0.07], [(i - 1) * 0.13, 0.27, 0.2]], 0.06, 0.012, 0.5, 6, 5), M.hair);   // つむじのふくらみ
     if (hs !== 'short' && hs !== 'spiky') for (const sx of [-1, 1]) add(head, tube([[sx * 0.2, 0.2, 0.12], [sx * 0.285, 0.02, 0.1], [sx * 0.275, -0.22, 0.12], [sx * 0.25, -0.34, 0.14]], 0.07, 0.014, 0.5), M.hair);
     else for (const sx of [-1, 1]) add(head, tube([[sx * 0.2, 0.2, 0.1], [sx * 0.29, 0.04, 0.08], [sx * 0.3, -0.1, 0.1]], 0.07, 0.014, 0.5), M.hair);
     if (hs !== 'long') add(head, sph(0.27, 16, 12), M.hair, [0, -0.07, -0.08], null, [1.04, 0.92, 0.9]);
@@ -1643,7 +1917,7 @@ const scene3d = (() => {
   }
 
   /* ---------- 顔写真（カードや戦いの画面で使う）。3D のモデルを小さく描いて画像にする ---------- */
-  const PW = 256, PH = 320, pRT = new T.WebGLRenderTarget(PW, PH), pCam = new T.PerspectiveCamera(24, PW / PH, 0.1, 80), pScene = new T.Scene();
+  const PW = 384, PH = 480, pRT = new T.WebGLRenderTarget(PW, PH), pCam = new T.PerspectiveCamera(24, PW / PH, 0.1, 80), pScene = new T.Scene();
   pScene.add(new T.HemisphereLight(0xffffff, 0xb8a898, 0.5)); { const l = new T.DirectionalLight(0xfff4e0, 0.6); l.position.set(-2.5, 3, 5); pScene.add(l); }
   const pCv = document.createElement('canvas'); pCv.width = PW; pCv.height = PH; const pCx = pCv.getContext('2d'), pBuf = new Uint8Array(PW * PH * 4);
   function snap(model, enemy) {
@@ -1724,6 +1998,7 @@ const scene3d = (() => {
       g.position.copy(wpos(u.x, u.z, u.size)); board.add(g);
       g.traverse((o) => { o.userData.uid = u.id; });
       ents[u.id] = { g, dead: false, aura: [], side: u.side, seed: Math.random() * 6, size: u.size || 1 };
+      { const ms = new Set(); g.traverse((o) => { if (o.material && o.material.emissive) ms.add(o.material); }); ents[u.id].mats = [...ms].map((m) => ({ m, c: m.emissive.clone(), i: m.emissiveIntensity })); }
     }
     for (const u of state.units) { const e = ents[u.id]; const foe = state.units.filter((x) => x.side !== u.side && x.hp > 0); if (foe.length) faceToward(e, wpos(foe[0].x, foe[0].z, foe[0].size)); else e.g.rotation.y = u.side === 'h' ? 0 : Math.PI; }
   }
@@ -1737,7 +2012,7 @@ const scene3d = (() => {
     const geo = new T.BufferGeometry(), arr = new Float32Array(n * 3), vel = [];
     for (let i = 0; i < n; i++) { const v = new T.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(sp * (0.4 + Math.random() * 0.8)); v.y += up || 0; vel.push(v); }
     geo.setAttribute('position', new T.BufferAttribute(arr, 3));
-    const m = new T.PointsMaterial({ color, size: size || 0.22, transparent: true, blending: T.AdditiveBlending, depthWrite: false }), pts = new T.Points(geo, m); scene.add(pts);
+    const m = new T.PointsMaterial({ color, size: (size || 0.22) * 1.9, map: softTex, transparent: true, blending: T.AdditiveBlending, depthWrite: false }), pts = new T.Points(geo, m); scene.add(pts);
     tween(life, (x) => { const ts = x * life / 1000; for (let i = 0; i < n; i++) { arr[i * 3] = p.x + vel[i].x * ts; arr[i * 3 + 1] = p.y + vel[i].y * ts - 2.2 * ts * ts * (up ? 0 : 1); arr[i * 3 + 2] = p.z + vel[i].z * ts; } geo.attributes.position.needsUpdate = true; m.opacity = 1 - x * x; }, () => { scene.remove(pts); geo.dispose(); });
   }
   function shock(p, color, r1, ms, flat) {
@@ -1917,6 +2192,8 @@ const scene3d = (() => {
     impact(id, o) {
       const e = ents[id]; if (!e) return; const p = center(id), col = new T.Color(o.color).getHex(), big = o.crit || o.big;
       shake = Math.max(shake, o.crit ? 0.4 : 0.15);
+      e.flash = 1; if (big) freeze = Math.max(freeze, o.crit ? 90 : 55);   // 白く光らせて、一瞬だけ時間を止める
+      { const fs = new T.Sprite(new T.SpriteMaterial({ map: softTex, color: 0xffffff, blending: T.AdditiveBlending, depthWrite: false, transparent: true })); fs.position.copy(p); scene.add(fs); tween(190, (x) => { fs.scale.setScalar((big ? 4.6 : 2.6) * (0.4 + out(x))); fs.material.opacity = 1 - x; }, () => scene.remove(fs)); }
       if (o.type === 'phys') { slash(p, col, big); burst(p, 0xfff1c9, big ? 36 : 16, big ? 6 : 4, 420, 0.18); }
       else { shock(p, col, big ? 3.6 : 2.2, 420); burst(p, col, big ? 40 : 20, big ? 6 : 4, 520, 0.22); }
       if (o.crit) { star(p, 0xffe27a, 1.2); burst(p, 0xffe27a, 44, 8, 620, 0.26); shock(p, 0xffffff, 4.4, 380); zoom = Math.max(zoom, 0.6); }
@@ -1957,6 +2234,8 @@ const scene3d = (() => {
       const step = () => { const j = jobs.shift(); if (!j) return; try { PT[(j[1] ? 'e:' : '') + j[0]] = snap(j[1] ? buildEnemy(j[0], []) : buildHunter(j[0]), j[1]); } catch (e) {} each(jobs.length); setTimeout(step, 12); };
       step();
     },
+    /* 行動のあいだ、カメラを「撃つ人と相手のまんなか」に寄せる */
+    act(uid, tids) { const a = ents[uid]; if (!a) return; const p = a.g.position.clone(); let n = 1; for (const t of tids || []) if (ents[t] && t !== uid) { p.add(ents[t].g.position); n++; } p.multiplyScalar(1 / n); act = { p, until: performance.now() + 1300 / speed }; },
     pick(cx, cy) {
       if (mode !== 'battle') return null;
       const ndc = new T.Vector2(cx / innerWidth * 2 - 1, -(cy / innerHeight) * 2 + 1), rc = new T.Raycaster(); rc.setFromCamera(ndc, cam);
@@ -1992,14 +2271,15 @@ const scene3d = (() => {
   canvas.addEventListener('pointercancel', (e) => up(e, false));
   canvas.addEventListener('wheel', (e) => { if (mode === 'battle') { zk = Math.max(0.55, Math.min(1.35, zk * (e.deltaY > 0 ? 1.08 : 0.93))); e.preventDefault(); } }, { passive: false });
 
-  const look = new T.Vector3(0, 0, 0), want = new T.Vector3(), wantLook = new T.Vector3(); let camMode = '';
+  const look = new T.Vector3(0, 0, 0), want = new T.Vector3(), wantLook = new T.Vector3(), WHITE = new T.Color(0xffffff); let camMode = '', freeze = 0, act = null;
   function frame(now) {
     requestAnimationFrame(frame);
     if (document.hidden) return;
-    const dtr = Math.min(50, now - t0); t0 = now; const dt = dtr * speed, tt = now / 1000;
+    const dtr = Math.min(50, now - t0); t0 = now; const tt = now / 1000; let dt = dtr * speed; if (freeze > 0) { freeze -= dtr; dt = 0; }
     for (let i = tweens.length - 1; i >= 0; i--) { const tw = tweens[i]; tw.t += dt; const x = Math.min(1, tw.t / tw.ms); tw.fn(x); if (x >= 1) { tweens.splice(i, 1); if (tw.done) tw.done(); } }
     for (const k of Object.keys(ents)) {
       const e = ents[k], ud = e.g.userData;
+      if (e.flash) { e.flash *= 0.78; const f = e.flash < 0.04 ? 0 : e.flash; for (const o of e.mats) { o.m.emissive.copy(o.c).lerp(WHITE, f); o.m.emissiveIntensity = o.i + (0.95 - o.i) * f; } if (!f) e.flash = 0; }
       e.aura.forEach((o) => { const a = tt * 1.8 + o.userData.k, cy = (ud.h || 2) * 0.62; o.position.set(e.g.position.x + Math.cos(a) * o.userData.r, cy + Math.sin(tt * 3 + o.userData.k) * 0.12, e.g.position.z + Math.sin(a) * o.userData.r); o.rotation.y = tt * 3; });
       if (e.dead) continue;
       if (e.side === 'm') {
@@ -2034,10 +2314,10 @@ const scene3d = (() => {
     const fov = mode === 'battle' && portrait && !cineCam ? 58 : 40; if (cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix(); }
     if (cineCam) { want.copy(cineCam.pos); wantLook.copy(cineCam.look); }
     else if (mode === 'battle') {
-      const fe = ents[focusId], fp = fe ? fe.g.position : new T.Vector3();
-      const fx = fp.x * (portrait ? 0.8 : 0.35) + pan.x, fz = (portrait ? fp.z * 0.8 - 3.6 : fp.z * 0.25) + pan.z;
-      if (portrait) { wantLook.set(fx, 0, 1.6 + fz); want.set(fx, (21 - zoom * 2) * zk, 1.6 + fz - (14.6 + zoom * 2) * zk); }
-      else { wantLook.set(fx - 1.2, 0, 1.0 + fz); want.set(fx - 1.2, (15.5 - zoom * 1.5) * zk, 1.0 + fz - (16.5 - zoom * 2) * zk); }
+      const fe = ents[focusId], ac = act && now < act.until ? act : null, fp = ac ? ac.p : fe ? fe.g.position : new T.Vector3(), zq = zk * (ac && !portrait ? 0.86 : 1);
+      const fx = fp.x * (portrait ? 0.8 : ac ? 0.62 : 0.35) + pan.x, fz = (portrait ? fp.z * 0.8 - 3.6 : fp.z * (ac ? 0.5 : 0.25)) + pan.z;
+      if (portrait) { wantLook.set(fx, 0, 1.6 + fz); want.set(fx, (21 - zoom * 2) * zq, 1.6 + fz - (14.6 + zoom * 2) * zq); }
+      else { wantLook.set(fx - 1.2, 0, 1.0 + fz); want.set(fx - 1.2, (15.5 - zoom * 1.5) * zq, 1.0 + fz - (16.5 - zoom * 2) * zq); }
     } else if (mode === 'title') { want.set(Math.sin(tt * 0.08) * 12, 5.5, -24); wantLook.set(0, 4.5, 6); }
     else if (portrait) { want.set(0, 3.3, -12); wantLook.set(0, 1.3, 0); }
     else { want.set(-2.5, 3.0, -9.6); wantLook.set(-2.5, 2.35, 0); }
