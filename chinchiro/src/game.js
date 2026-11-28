@@ -148,9 +148,10 @@ function loop(now) {
 
 // ================= UI helpers =================
 const G = { mode: null, players: [], parent: 0, turn: -1, round: 0, maxRounds: 0 };
+const shortName = n => String(n).replace(/^[^ァ-ヶ]{1,5}?(?:な|の|れ)(?=[ァ-ヶ])/, '');   // 「慎重なタケ」→「タケ」
 function renderSeats() {
   $('#seats').innerHTML = G.players.map((p, i) => `<div class="seat ${G.turn === i ? 'turn' : ''} ${p.out ? 'out' : ''}" id="seat${i}">
-    <div class="sn">${G.parent === i && G.mode !== 'tut' ? '<i class="oya">親</i>' : ''}${p.name}</div>
+    <div class="sn">${G.parent === i && G.mode !== 'tut' ? '<i class="oya">親</i>' : ''}${innerWidth < 520 ? shortName(p.name) : p.name}</div>
     <div class="sc">${p.label || (p.bank ? '胴元' : fmt(p.chips))}</div>
     <div class="sb">${p.bet ? '賭 ' + fmt(p.bet) + ' ' : ''}${p.res ? `<span class="rr">${p.res.name}</span>` : ''}</div></div>`).join('');
 }
@@ -203,16 +204,17 @@ function waitBet(min, max, def, cap) {
 }
 function waitThrow(tryIdx, hint) {
   ctrl(`<div class="throw"><div class="tries">${[0, 1, 2].map(i => `<i class="${i < tryIdx ? 'used' : i === tryIdx ? 'now' : ''}"></i>`).join('')}<span>${tryIdx + 1}投目（最大3投）</span></div>
-   <div class="gauge"><b id="gfill"></b><em></em></div>
-   <button class="btn shu" id="throwBtn">長押しで握って、離して振る</button>
-   <p class="hint">${hint || 'ゲージ右端の赤は強すぎ注意。茶碗の上を指で上へ払っても投げられる'}</p></div>`);
+   <div class="gauge"><b id="gfill"></b><em></em><span class="gl">弱</span><span class="gr">強すぎ</span></div>
+   <button class="btn shu" id="throwBtn"><span class="tb1">振る</span><span class="tb2">押しているあいだ力がたまる → 離すと投げる</span></button>
+   <p class="hint">${hint || '赤い所で離すと丼の外に出やすい。丼を上へ払っても投げられる'}</p></div>`);
   return guard(new Promise(res => {
     const btn = $('#throwBtn'), fill = $('#gfill'); let t0 = 0, raf = 0, hold = false, p = 0, fin = false;
     const tick = () => { const t = (performance.now() - t0) / 1000; p = (1 - Math.cos(t * Math.PI / .9)) / 2; fill.style.width = (p * 100).toFixed(1) + '%'; fill.classList.toggle('hot', p > .82); SC.jig = .4 + p * .8; raf = requestAnimationFrame(tick); };
     const down = e => { e.preventDefault(); SND.init(); if (hold) return; hold = true; t0 = performance.now(); try { e.pointerId !== undefined && btn.setPointerCapture(e.pointerId); } catch (x) { } tick(); };
-    const up = () => { if (!hold) return; hold = false; cancelAnimationFrame(raf); done({ power: p, aim: rnd(-.35, .35) }); };
+    const up = () => { if (!hold) return; hold = false; cancelAnimationFrame(raf); try { navigator.vibrate && navigator.vibrate(12); } catch (x) { } done({ power: p, aim: rnd(-.35, .35) }); };
     const kd = e => { if (e.code === 'Space' && !e.repeat) down(e); }, ku = e => { if (e.code === 'Space') up(); };
     btn.addEventListener('pointerdown', down); btn.addEventListener('pointerup', up); btn.addEventListener('pointercancel', up);
+    btn.addEventListener('contextmenu', e => e.preventDefault());   // スマホの長押しメニューを出さない
     addEventListener('keydown', kd); addEventListener('keyup', ku);
     SC.swipe = (power, aim) => done({ power, aim });
     function done(v) { if (fin) return; fin = true; SC.swipe = null; SC.jig = 0; removeEventListener('keydown', kd); removeEventListener('keyup', ku); ctrl(''); res(v); }

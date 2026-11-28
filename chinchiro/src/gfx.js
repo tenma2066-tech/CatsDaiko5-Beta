@@ -245,9 +245,11 @@ void main(){
   }
   function setView(v) {
     const g = cam.goal, b = baseView() * cam.user.zoom;
-    Object.assign(g, { tx: 0, ty: .9, tz: -.2, az: cam.user.az, el: cam.user.el, dist: b });
+    // 縦長の画面（スマホ）: 上の座席札と下の操作盤のあいだに丼が来るよう、見る点を手前へずらし、少し寄る
+    const tall = (W || 1) / (H || 1) < .8, lift = tall ? 2.7 : 0, lx = Math.sin(cam.user.az) * lift, lz = Math.cos(cam.user.az) * lift;
+    Object.assign(g, { tx: lx, ty: .9, tz: -.2 + lz, az: cam.user.az, el: cam.user.el, dist: b * (tall ? .94 : 1) });
     if (v && v.focus) { g.tx = v.focus[0]; g.ty = v.focus[1]; g.tz = v.focus[2]; g.dist = b * (v.k || .55); }
-    if (v && v.hand) { g.ty = 1.6; g.tz = .6; g.dist = b * 1.02; }
+    if (v && v.hand) { g.ty = 1.6; g.tx = lx; g.tz = .6 + lz; g.dist = b * (tall ? .96 : 1.02); }
     if (v && v.title) { g.el = .62; g.ty = -2.6; g.dist = b * .95; }
   }
   return { init, frame, resize, setView, cam, project, get ok() { return ok; }, shake(v) { shake = Math.max(shake, v); }, baseView };

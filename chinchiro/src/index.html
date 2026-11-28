@@ -15,6 +15,7 @@
 :root{color-scheme:dark;--bg:#07080d;--ink:#f1e8d6;--dim:#b9b0a0;--shu:#e0442a;--gold:#f2c14e;--ai:#1b2a5c;--ai2:#2c4290;--panel:rgba(12,14,26,.78);--line:rgba(241,232,214,.16)}
 *{box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.55 "Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",sans-serif;overflow:hidden;overscroll-behavior:none}
+#hud,#cv{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 #cv{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
 #vig{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 45%,rgba(0,0,0,.6) 100%);transition:background .4s}
 #vig.red{background:radial-gradient(ellipse at 50% 45%,transparent 35%,rgba(120,0,0,.55) 100%);animation:pulse 1s infinite}
@@ -62,11 +63,15 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .throw{display:grid;gap:8px}
 .tries{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dim)}
 .tries i{width:12px;height:12px;border-radius:50%;border:1.5px solid var(--dim)}.tries i.used{background:var(--dim)}.tries i.now{background:var(--gold);border-color:var(--gold)}
-.gauge{position:relative;height:14px;border-radius:7px;background:rgba(255,255,255,.08);overflow:hidden}
+.gauge{position:relative;height:20px;border-radius:10px;background:rgba(255,255,255,.08);overflow:hidden}
+.gauge .gl,.gauge .gr{position:absolute;top:0;bottom:0;display:flex;align-items:center;font-size:10.5px;font-weight:700;color:rgba(241,232,214,.6);pointer-events:none}.gauge .gl{left:8px}.gauge .gr{right:6px;color:#ffb3a6}
 .gauge b{position:absolute;inset:0 auto 0 0;width:0;background:linear-gradient(90deg,#6b8cff,#f2c14e);border-radius:7px}
 .gauge b.hot{background:linear-gradient(90deg,#6b8cff,#f2c14e 60%,#e0442a)}
 .gauge em{position:absolute;inset:0 0 0 82%;background:repeating-linear-gradient(45deg,rgba(224,68,42,.35) 0 4px,transparent 4px 8px);border-left:1px solid var(--shu)}
-#throwBtn{width:100%;min-height:62px;font-size:20px;user-select:none;-webkit-user-select:none;touch-action:none}
+#throwBtn{width:100%;min-height:70px;font-size:20px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;line-height:1.15}
+#throwBtn .tb1{font-family:"Dela Gothic One",sans-serif;font-weight:400;font-size:26px;letter-spacing:.3em;text-indent:.3em}
+#throwBtn .tb2{font-size:12px;font-weight:700;opacity:.9;white-space:nowrap}
+#throwBtn:active{transform:scale(.98);filter:brightness(1.1)}
 .hint{margin:0;font-size:12.5px;color:var(--dim);text-align:center}
 .bet .amt{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px}
 .bet .amt b{font-size:28px;font-variant-numeric:tabular-nums}
@@ -127,7 +132,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .qopt{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .svgline{width:100%;height:160px}
 .legend{font-size:12.5px;color:var(--dim)}
-@media(max-width:420px){.modes{gap:8px}.mode{padding:12px;min-height:88px}.mode b{font-size:18px}.sc{font-size:15px}.seat{padding:5px 6px}}
+@media(max-width:420px){.modes{gap:8px}.mode{padding:12px;min-height:88px}.mode b{font-size:18px}.sc{font-size:15px}.seat{padding:5px 6px}.sn{font-size:12.5px;color:var(--ink)}.sb{font-size:11.5px}#ctrl{padding:0 8px 8px}.panel{padding:10px;border-radius:16px}.hint{font-size:12px}.bet .amt b{font-size:24px}.chip{min-height:46px}.btn{min-height:50px}.title h1{font-size:clamp(54px,17vw,90px)}.mode small{font-size:12px}#guide{width:calc(100% - 16px);padding:10px 12px}#guide p{font-size:15px}#guide .btn{min-height:44px;padding:0 18px}}
+@media(max-height:740px) and (max-width:520px){.modes{margin-top:24vh}.mode{min-height:0;padding:10px 12px}.mode small{display:none}.mode.hero small{display:block}#throwBtn{min-height:62px}#throwBtn .tb1{font-size:22px}}
 @media(min-width:900px){#seats{max-width:900px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
