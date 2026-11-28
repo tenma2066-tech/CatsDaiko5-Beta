@@ -93,6 +93,23 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
 .code{font-size:14px;color:var(--mut)}
 .code b{font-family:"Dela Gothic One",sans-serif;font-weight:400;font-size:36px;color:var(--ink);letter-spacing:.12em;margin-left:8px}
 .lob{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:6px}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin-top:14px;border-radius:12px;background:#09110d;border:1px solid var(--line)}
+.tabs button{min-height:40px;border:0;background:transparent;border-radius:9px;backdrop-filter:none;font-weight:700}
+.tabs button[aria-selected="true"]{background:rgba(216,178,100,.16);color:var(--gold2);box-shadow:inset 0 0 0 1px rgba(216,178,100,.45)}
+.row.start{justify-content:flex-start}
+h3 small{font-weight:500;color:var(--mut);margin-left:6px}
+.rooms{list-style:none;padding:0;margin:0;display:grid;gap:6px;max-height:min(40vh,320px);overflow:auto}
+.rooms li{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid transparent}
+.rooms li.open{border-color:rgba(216,178,100,.3)}
+.rooms .ri{flex:1;display:grid;gap:2px}
+.rooms .ri b{font-size:15px}
+.rooms .ri span{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rooms .pill{font-size:12px;padding:2px 9px;border-radius:99px;background:rgba(255,255,255,.08);color:var(--mut);white-space:nowrap}
+.rooms li.open .pill{background:rgba(95,227,154,.16);color:#7fe9ad}
+.rooms button{min-height:38px;padding:0 14px}
+.rooms .empty{justify-content:center;color:var(--mut);font-size:14px;padding:18px}
+.badge{display:inline-block;margin:0 0 10px;padding:3px 10px;border-radius:99px;font-size:12px;background:rgba(255,255,255,.08);color:var(--mut)}
+.badge.pub{background:rgba(95,227,154,.16);color:#7fe9ad}
 .lob li{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04)}
 .lob small{color:var(--mut);margin-left:auto}
 .rank{list-style:none;padding:0;margin:0;display:grid;gap:6px}
@@ -179,7 +196,7 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
     <p class="tag">自由な盤面・最大6人で遊べる3Dオセロ</p>
     <button class="primary big" id="tCpu">CPUと対戦<small id="tCpuSub"></small></button>
     <button class="big" id="tSetup">ルールを決めて対戦<small>盤の形・人数・CPUの強さを選ぶ</small></button>
-    <button class="big" id="tNet">オンライン対戦<small>部屋を作って友達と遊ぶ</small></button>
+    <button class="big" id="tNet">オンライン対戦<small>フリールーム・友達と遊ぶ</small></button>
     <button class="ghost" id="tHelp">遊び方</button>
   </div>
 </div>
@@ -209,11 +226,24 @@ select,input{min-height:44px;font-size:16px;border-radius:10px;border:1px solid 
     <p class="note" id="nStatus"></p>
     <div id="nForm">
       <label>名前<input id="nName" maxlength="12" autocomplete="nickname"></label>
-      <div class="row"><button class="primary" id="nCreate">部屋を作る</button></div>
-      <div class="row join"><input id="nCode" placeholder="ルームコード" maxlength="4" aria-label="ルームコード"><button id="nJoin">参加する</button></div>
-      <p class="note">盤面のルールと席は「新しいゲーム」の設定を使います。あなた以外の「人間」の席が友達の参加枠です（参加枠がないときは2人目を自動で参加枠にします）。空いた席には開始時にCPUが入ります。</p>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="free" aria-selected="true">フリールーム</button>
+        <button role="tab" data-tab="friend" aria-selected="false">友達と遊ぶ</button>
+      </div>
+      <div id="tabFree">
+        <div class="row start"><button class="primary" id="nQuick">おまかせで参加</button><button id="nCreatePub">フリールームを作る</button></div>
+        <h3>部屋の一覧 <small id="nCount"></small></h3>
+        <ul class="rooms" id="nRooms"></ul>
+        <p class="note">だれでも入れる公開の部屋です。作るときのルールは「新しいゲーム」の設定を使い、空いた席には開始時にCPUが入ります。</p>
+      </div>
+      <div id="tabFriend" hidden>
+        <div class="row start"><button class="primary" id="nCreate">部屋を作る（コードで招待）</button></div>
+        <div class="row join"><input id="nCode" placeholder="ルームコード" maxlength="4" aria-label="ルームコード"><button id="nJoin">参加する</button></div>
+        <p class="note">一覧には出ない部屋です。表示された4文字のコードを友達に伝えてください。盤面のルールと席は「新しいゲーム」の設定を使い、参加枠がないときは2人目を自動で参加枠にします。</p>
+      </div>
     </div>
     <div id="nLobby" hidden>
+      <p class="badge" id="nPub"></p>
       <div class="code">ルームコード<b id="nRoomCode"></b></div>
       <ul class="lob" id="nSeats"></ul>
       <p class="note" id="nWait"></p>
@@ -883,11 +913,13 @@ function showResult() {
 /* ---------- sheets ---------- */
 let confirmRes = null;
 function openSheet(id) {
+  if (id !== 'net') lobby(false);
   for (const s of document.querySelectorAll('.sheet')) s.hidden = s.id !== id;
   const f = $('#' + id).querySelector('button.primary, button');
   if (f && matchMedia('(pointer:fine)').matches) f.focus({ preventScroll: true });
 }
 function closeSheets() {
+  lobby(false);
   for (const s of document.querySelectorAll('.sheet')) s.hidden = true;
   if (confirmRes) { const r = confirmRes; confirmRes = null; r(false); }
   if (idle) $('#title').hidden = false; // 対局前なら、閉じたらタイトルに戻る
@@ -1007,12 +1039,18 @@ canvas.addEventListener('pointerleave', () => { hover.visible = false; });
 addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheets(); if ((e.key === ' ' || e.key === 'Enter') && busy) skipping = true; });
 
 /* ---------- online ---------- */
-let ws = null, room = null, mySeat = -1, myToken = store.get('uo_token', null), pumping = false;
+let ws = null, room = null, mySeat = -1, myToken = store.get('uo_token', null), pumping = false, lobbyOn = false;
 const netQueue = [];
 $('#nName').value = store.get('uo_name', '');
 const myName = () => ($('#nName').value.trim() || 'プレイヤー').slice(0, 12);
 function setNet(msg) { $('#nStatus').textContent = msg; }
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+// フリールーム一覧の購読（オンライン画面を開いていて、まだ部屋に入っていないときだけ）
+function lobby(on) {
+  if (on === lobbyOn) return;
+  if (on && (!ws || ws.readyState !== 1)) return;
+  lobbyOn = on; send({ t: 'lobby', on });
+}
 function connect() {
   if (ws && ws.readyState === 1) return Promise.resolve();
   if (!/^https?:$/.test(location.protocol)) return Promise.reject(new Error('no server'));
@@ -1023,7 +1061,7 @@ function connect() {
     s.onopen = () => { opened = true; send({ t: 'hello', token: myToken, name: myName() }); res(); };
     s.onerror = () => { if (!opened) rej(new Error('ws')); };
     s.onclose = () => {
-      ws = null;
+      ws = null; lobbyOn = false;
       if (!opened) { rej(new Error('ws')); return; }
       if (room) { toast('接続が切れました。再接続しています…'); setTimeout(() => connect().catch(() => {}), 2000); }
     };
@@ -1032,9 +1070,9 @@ function connect() {
 }
 async function openNet() {
   openSheet('net'); renderLobby();
-  if (ws && ws.readyState === 1) return;
+  if (ws && ws.readyState === 1) { if (!room) lobby(true); return; }
   setNet('サーバーに接続しています…');
-  try { await connect(); setNet('接続しました。'); }
+  try { await connect(); setNet(''); if (!room && !$('#net').hidden) lobby(true); }
   catch (e) { setNet('サーバーに接続できません。オンライン対戦は、同梱の server.js をVPSで動かし、そのURLでこのページを開くと使えます。'); }
 }
 function needWs() { if (!ws || ws.readyState !== 1) { setNet('サーバーに接続していません。'); return false; } store.set('uo_name', myName()); return true; }
@@ -1047,15 +1085,53 @@ $('#nCreate').addEventListener('click', () => {
     if (k > 0) r.seats[k] = { type: 'human' };
   }
   send({ t: 'hello', token: myToken, name: myName() });
-  send({ t: 'create', cfg: r.cfg, seats: r.seats });
+  send({ t: 'create', cfg: r.cfg, seats: r.seats, public: false });
 });
+$('#nCreatePub').addEventListener('click', () => {
+  if (!needWs()) return;
+  const r = readSetup();
+  send({ t: 'hello', token: myToken, name: myName() });
+  send({ t: 'create', cfg: r.cfg, seats: r.seats, public: true });
+});
+$('#nQuick').addEventListener('click', () => {
+  if (!needWs()) return;
+  const r = readSetup();
+  send({ t: 'hello', token: myToken, name: myName() });
+  send({ t: 'quick', cfg: r.cfg, seats: r.seats });
+});
+// 一覧から参加 / 観戦
+$('#nRooms').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-join]'); if (!b || !needWs()) return;
+  send({ t: 'hello', token: myToken, name: myName() });
+  send({ t: 'join', code: b.dataset.join });
+});
+// タブ
+document.querySelector('#net .tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-tab]'); if (!b) return;
+  for (const x of document.querySelectorAll('#net .tabs button')) x.setAttribute('aria-selected', String(x === b));
+  $('#tabFree').hidden = b.dataset.tab !== 'free'; $('#tabFriend').hidden = b.dataset.tab !== 'friend';
+});
+const ruleText = (c) => `${SHAPES[c.shape] || '標準'} ${c.w}×${c.h}・${c.players}人` + (c.walls ? `・壁${c.walls}` : '') + (c.chain ? '・連鎖' : '');
+function renderRooms(list) {
+  const open = list.filter((r) => r.open).length;
+  $('#nCount').textContent = list.length ? `募集中 ${open} / ${list.length}部屋` : '';
+  if (!list.length) { $('#nRooms').innerHTML = '<li class="empty">いまは部屋がありません。「フリールームを作る」か「おまかせで参加」で始めよう</li>'; return; }
+  $('#nRooms').innerHTML = list.map((r) => {
+    const st = r.open ? `募集中 ${r.joined}/${r.humans}` : !r.started ? '満席・開始待ち' : r.over ? '終局' : '対局中';
+    const btn = r.open ? `<button class="primary" data-join="${esc(r.code)}">参加</button>` : `<button data-join="${esc(r.code)}">観戦</button>`;
+    return `<li class="${r.open ? 'open' : ''}"><div class="ri"><b>${esc(ruleText(r.cfg))}</b><span>ホスト ${esc(r.host || '—')}${r.watchers ? '・観戦 ' + r.watchers + '人' : ''}</span></div><span class="pill">${st}</span>${btn}</li>`;
+  }).join('');
+}
 $('#nJoin').addEventListener('click', () => { if (!needWs()) return; send({ t: 'hello', token: myToken, name: myName() }); send({ t: 'join', code: $('#nCode').value.trim().toUpperCase() }); });
 $('#nStart').addEventListener('click', () => send({ t: 'start' }));
 function netLeave() { send({ t: 'leave' }); room = null; mySeat = -1; renderLobby(); }
 $('#nLeave').addEventListener('click', netLeave);
 function renderLobby() {
   $('#nForm').hidden = !!room; $('#nLobby').hidden = !room;
-  if (!room) return;
+  if (!room) { if (!$('#net').hidden) lobby(true); return; }
+  lobby(false);
+  $('#nPub').textContent = room.public ? 'フリールーム（公開中・だれでも参加できます）' : '非公開の部屋（コードを知っている人だけ）';
+  $('#nPub').className = 'badge' + (room.public ? ' pub' : '');
   $('#nRoomCode').textContent = room.code;
   $('#nSeats').innerHTML = room.seats.map((s, k) => {
     const who = s.type === 'cpu' ? 'CPU ' + LEVELS[s.level] : s.open ? '空き（参加待ち）' : s.name;
@@ -1082,6 +1158,7 @@ function onNet(m) {
       break;
     case 'move': netQueue.push(m); pump(); break;
     case 'left': room = null; mySeat = -1; renderLobby(); break;
+    case 'rooms': renderRooms(m.rooms || []); break;
     case 'error': pendingMove = false; toast(m.msg); if (G && mode === 'online') showHints(); break;
   }
 }

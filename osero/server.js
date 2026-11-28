@@ -92,7 +92,7 @@ function members(r) {
 function broadcast(r, o) { for (const p of members(r)) if (p.conn) p.conn.send(o); }
 function publicRoom(r) {
   return {
-    code: r.code, cfg: r.cfg, started: !!r.game, over: !!(r.game && r.game.over),
+    code: r.code, cfg: r.cfg, public: !!r.public, started: !!r.game, over: !!(r.game && r.game.over),
     host: r.seats.findIndex((s) => s.token === r.host),
     seats: r.seats.map((s) => {
       const p = s.token && players.get(s.token);
@@ -103,6 +103,63 @@ function publicRoom(r) {
 function sendRoom(r) {
   const pub = publicRoom(r);
   for (const p of members(r)) if (p.conn) p.conn.send({ t: 'room', room: pub, you: r.seats.findIndex((s) => s.token === p.token) });
+  if (r.public) notifyLobby();
+}
+
+/* ---------- free rooms (public lobby) ---------- */
+const MAX_ROOMS = 300;
+const lobbyWatch = new Set(); // conns looking at the free-room list
+let lobbyTimer = null;
+const isOpen = (r) => !r.game && r.seats.some((s) => s.type === 'human' && !s.token);
+const hostOnline = (r) => { const h = players.get(r.host); return !!(h && h.conn); };
+// 一覧に出すのは、開始前ならホストが接続中、対局中ならだれかが接続中の公開部屋だけ（抜け殻の部屋を出さない）
+const listable = (r) => r.public && r.host && (r.game ? members(r).some((p) => p.conn) : hostOnline(r));
+function roomSummary(r) {
+  const host = players.get(r.host), humans = r.seats.filter((s) => s.type === 'human');
+  return {
+    code: r.code, host: host ? host.name : '',
+    cfg: { shape: r.cfg.shape, w: r.cfg.w, h: r.cfg.h, players: r.cfg.players, walls: r.cfg.walls, chain: !!r.cfg.chain },
+    joined: humans.filter((s) => s.token).length, humans: humans.length,
+    open: isOpen(r), started: !!r.game, over: !!(r.game && r.game.over), watchers: r.watchers.size
+  };
+}
+function listRooms() {
+  return [...rooms.values()].filter(listable)
+    .sort((a, b) => (isOpen(b) - isOpen(a)) || (b.created - a.created))
+    .slice(0, 50).map(roomSummary);
+}
+function notifyLobby() {
+  if (lobbyTimer || !lobbyWatch.size) return;
+  lobbyTimer = setTimeout(() => {
+    lobbyTimer = null;
+    const list = listRooms();
+    for (const c of lobbyWatch) c.send({ t: 'rooms', rooms: list });
+  }, 250);
+}
+// keep at least one seat (besides the host's) open for humans, so others can actually join
+function ensureGuestSeat(seats) {
+  if (seats.filter((s) => s.type === 'human').length >= 2) return;
+  const host = seats.findIndex((s) => s.type === 'human');
+  const k = seats.findIndex((s, i) => i !== host && s.type !== 'human');
+  if (k >= 0) seats[k] = { type: 'human', level: 0, token: null };
+}
+function createRoom(p, cfgIn, defsIn, isPublic) {
+  if (rooms.size >= MAX_ROOMS) return p.conn && p.conn.send({ t: 'error', msg: 'いまは部屋がいっぱいです。少し待ってから試してください' });
+  leaveRoom(p);
+  const cfg = E.sanitize(cfgIn);
+  delete cfg.seed;
+  const defs = Array.isArray(defsIn) ? defsIn : [];
+  const seats = [];
+  for (let k = 0; k < cfg.players; k++) {
+    const d = defs[k] || {};
+    seats.push(d.type === 'cpu' ? { type: 'cpu', level: Math.max(1, Math.min(4, d.level | 0 || 2)), token: null } : { type: 'human', level: 0, token: null });
+  }
+  if (!seats.some((s) => s.type === 'human')) seats[0] = { type: 'human', level: 0, token: null };
+  if (isPublic) ensureGuestSeat(seats);
+  seats.find((s) => s.type === 'human').token = p.token;
+  const room = { code: newCode(), cfg, seats, host: p.token, game: null, watchers: new Set(), cpuTimer: null, active: Date.now(), created: Date.now(), public: !!isPublic };
+  rooms.set(room.code, room); p.room = room.code;
+  sendRoom(room);
 }
 function leaveRoom(p) {
   const r = p.room && rooms.get(p.room);
@@ -114,7 +171,7 @@ function leaveRoom(p) {
     if (r.game) { s.type = 'cpu'; s.level = 2; } // the game goes on with a CPU in that seat
   }
   if (r.host === p.token) { const next = r.seats.find((s) => s.token); r.host = next ? next.token : null; }
-  if (!r.host) { clearTimeout(r.cpuTimer); rooms.delete(r.code); return; }
+  if (!r.host) { clearTimeout(r.cpuTimer); rooms.delete(r.code); if (r.public) notifyLobby(); return; }
   sendRoom(r);
   scheduleCpu(r, 800);
 }
@@ -162,21 +219,20 @@ function handle(c, m) {
   if (!p) return c.send({ t: 'error', msg: '先に接続してください' });
   const r = p.room && rooms.get(p.room);
   switch (m.t) {
-    case 'create': {
+    case 'create': createRoom(p, m.cfg, m.seats, !!m.public); return;
+    case 'lobby': {
+      if (m.on) { lobbyWatch.add(c); c.send({ t: 'rooms', rooms: listRooms() }); } else lobbyWatch.delete(c);
+      return;
+    }
+    case 'quick': {
+      // 募集中のフリールームのうち、いちばん長く待っている部屋に入る。無ければ自分で公開部屋を作る
+      if (r && r.public && isOpen(r)) { sendRoom(r); return; }
+      const t = [...rooms.values()].filter((x) => listable(x) && isOpen(x)).sort((a, b) => a.created - b.created)[0];
+      if (!t) { createRoom(p, m.cfg, m.seats, true); return; }
       leaveRoom(p);
-      const cfg = E.sanitize(m.cfg);
-      delete cfg.seed;
-      const defs = Array.isArray(m.seats) ? m.seats : [];
-      const seats = [];
-      for (let k = 0; k < cfg.players; k++) {
-        const d = defs[k] || {};
-        seats.push(d.type === 'cpu' ? { type: 'cpu', level: Math.max(1, Math.min(4, d.level | 0 || 2)), token: null } : { type: 'human', level: 0, token: null });
-      }
-      if (!seats.some((s) => s.type === 'human')) seats[0] = { type: 'human', level: 0, token: null };
-      seats.find((s) => s.type === 'human').token = p.token;
-      const room = { code: newCode(), cfg, seats, host: p.token, game: null, watchers: new Set(), cpuTimer: null, active: Date.now() };
-      rooms.set(room.code, room); p.room = room.code;
-      sendRoom(room);
+      p.room = t.code;
+      t.seats.find((s) => s.type === 'human' && !s.token).token = p.token;
+      sendRoom(t);
       return;
     }
     case 'join': {
@@ -214,6 +270,7 @@ function handle(c, m) {
   }
 }
 function onClose(c) {
+  lobbyWatch.delete(c);
   const p = c.player;
   if (!p || p.conn !== c) return;
   p.conn = null;
@@ -227,7 +284,7 @@ setInterval(() => {
   for (const r of rooms.values()) {
     const online = members(r).some((p) => p.conn);
     if (online) r.active = t;
-    else if (t - r.active > 15 * 60 * 1000) { clearTimeout(r.cpuTimer); rooms.delete(r.code); }
+    else if (t - r.active > 15 * 60 * 1000) { clearTimeout(r.cpuTimer); rooms.delete(r.code); if (r.public) notifyLobby(); }
   }
   for (const p of players.values()) if (!p.conn && !(p.room && rooms.has(p.room))) players.delete(p.token);
 }, 60 * 1000).unref();
