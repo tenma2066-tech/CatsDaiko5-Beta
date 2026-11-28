@@ -948,36 +948,43 @@ class WorkerCaptcha(unittest.TestCase):
             self.assertEqual(A._tsum_captcha(job, b"PNG"), "")
 
 
+
 class PremiumBoxPlus(unittest.TestCase):
-    """プレミアムBOX+：ガチャの見つけ方と「引けるところまで」の結果"""
+    """プレミアムBOX+（メダルで引く）：メニューの出し方、ガチャの見つけ方、引き方"""
 
     def _core(self):
         return NewMenus._core()
 
-    def _mast(self, rows):
-        return {"retcode": 0, "gachamst": rows}
-
-    def _forge(self, c, rows, results, coins=1_000_000):
-        seen = {"ids": [], "fills": 0}
+    def _forge(self, c, rows, result):
+        seen = {"ids": [], "paytype": None}
 
         class FakeForge:
             def get_mast(self_):
-                return self._mast(rows)
-            def resources(self_, info=None):
-                return {"bcoin": coins}
-            def fill_coins(self_, cap=0):
-                seen["fills"] += 1
-            def complete_box(self_, gid, **kw):
-                seen["ids"].append(gid)
-                return results.pop(0)
+                return {"retcode": 0, "gachamst": rows}
+            def draw_with_medals(self_, gid, paytype, **kw):
+                seen["ids"].append(gid); seen["paytype"] = paytype
+                return dict(result)
         c._GACHA_CACHE.update(ts=0.0, ids=None)
         return FakeForge(), seen
 
-    def test_menu_price_and_kwargs(self):
-        self.assertIn("tsum_premium_plus", T.MENUS)
-        self.assertIn("tsum_premium_plus", pricing.PRICES)
-        with patch.object(T, "_core", fake_core()):
-            self.assertEqual(T._forge_kwargs("tsum_premium_plus", {}), {"gacha_plus": T.DEFAULT_PREMIUM_PLUS_GACHA_ID})
+    def _run(self, c, f, paytype="3"):
+        with patch.dict(os.environ, {"TSUM_PREMIUM_PLUS_PAYTYPE": paytype}):
+            return c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+
+    def test_menu_only_when_paytype_is_set(self):
+        import importlib
+        try:
+            with patch.dict(os.environ, {"TSUM_PREMIUM_PLUS_PAYTYPE": ""}):
+                importlib.reload(T)
+                self.assertNotIn("tsum_premium_plus", T.MENUS)
+            with patch.dict(os.environ, {"TSUM_PREMIUM_PLUS_PAYTYPE": "3"}):
+                importlib.reload(T)
+                self.assertIn("tsum_premium_plus", T.MENUS)
+                self.assertIn("tsum_premium_plus", pricing.PRICES)
+                with patch.object(T, "_core", fake_core()):
+                    self.assertEqual(T._forge_kwargs("tsum_premium_plus", {}), {"gacha_plus": 0})
+        finally:
+            importlib.reload(T)
 
     def test_name_match(self):
         c = self._core()
@@ -985,47 +992,100 @@ class PremiumBoxPlus(unittest.TestCase):
             self.assertTrue(c._is_box_plus_name(name), name)
         self.assertFalse(c._is_box_plus_name("プレミアムBOX"))
 
-    def test_found_by_name_before_type(self):
+    def test_found_by_name_before_type_and_paytype_passed(self):
         c = self._core()
         rows = [{"gachaid": 11, "type": 11, "name": "プレミアムBOX"},
                 {"gachaid": 64, "type": 64, "name": "ハピネスBOX"},
                 {"gachaid": 77, "type": 70, "name": "プレミアムBOX+"}]
-        f, seen = self._forge(c, rows, [{"status": "complete", "draws": 120}])
-        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
-        self.assertEqual(seen["ids"], [77])
+        f, seen = self._forge(c, rows, {"status": "complete", "draws": 120, "medal": 5})
+        res, msg = self._run(c, f)
+        self.assertEqual(seen, {"ids": [77], "paytype": 3})
         self.assertIn("最後まで引きました（120連）", msg)
+        self.assertIn("残りメダル: 5枚", msg)
+
+    def test_no_paytype_does_not_draw(self):
+        c = self._core()
+        f, seen = self._forge(c, [{"gachaid": 64, "type": 64}], {"status": "complete", "draws": 1})
+        res, msg = self._run(c, f, paytype="")
+        self.assertIsNone(res)
+        self.assertEqual(seen["ids"], [])
+        self.assertIn("準備中", msg)
 
     def test_type_fallback_and_not_running(self):
         c = self._core()
         f, seen = self._forge(c, [{"gachaid": 11, "type": 11}, {"gachaid": 64, "type": 64}],
-                              [{"status": "complete", "draws": 10}])
-        c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+                              {"status": "complete", "draws": 10})
+        self._run(c, f)
         self.assertEqual(seen["ids"], [64])
-        f, seen = self._forge(c, [{"gachaid": 11, "type": 11}], [])
-        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        f, seen = self._forge(c, [{"gachaid": 11, "type": 11}], {})
+        res, msg = self._run(c, f)
         self.assertIsNone(res)
         self.assertIn("開催されていない", msg)
 
-    def test_coins_ran_out_is_success_with_count(self):
+    def test_results(self):
         c = self._core()
-        f, _ = self._forge(c, [{"gachaid": 64, "type": 64}], [{"status": "coin_ran_out", "draws": 33, "coin": 0}])
-        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
-        self.assertIsNotNone(res)
-        self.assertIn("コインがなくなるまで引きました（33連）", msg)
+        cases = [({"status": "stopped", "draws": 33, "medal": 2}, True, "メダルで引けるところまで引きました（33連）"),
+                 ({"status": "stopped", "draws": 0, "medal": 2, "resp": "x"}, False, "1回も引けませんでした"),
+                 ({"status": "wrong_currency", "draws": 1}, False, "メダル以外で支払われた"),
+                 ({"status": "already_complete", "draws": 0, "medal": 9}, True, "すでに最後まで")]
+        for result, ok, text in cases:
+            f, _ = self._forge(c, [{"gachaid": 64, "type": 64}], result)
+            res, msg = self._run(c, f)
+            self.assertEqual(res is not None, ok, result)
+            self.assertIn(text, msg)
 
-    def test_refill_adds_up_draws(self):
-        c = self._core()
-        f, seen = self._forge(c, [{"gachaid": 64, "type": 64}],
-                              [{"status": "coin_ran_out", "draws": 100}, {"status": "coin_ran_out", "draws": 100},
-                               {"status": "complete", "draws": 7}], coins=0)
-        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=True)
-        self.assertEqual(res["draws"], 207)
-        self.assertEqual(seen["fills"], 3)
-        self.assertIn("207連", msg)
 
-    def test_nothing_drawn_is_failure(self):
-        c = self._core()
-        f, _ = self._forge(c, [{"gachaid": 64, "type": 64}], [{"status": "insufficient_coin", "have": 0, "need": 30000, "draws": 0}])
-        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
-        self.assertIsNone(res)
-        self.assertIn("コインが足りない", msg)
+class DrawWithMedals(unittest.TestCase):
+    """Forge.draw_with_medals を、メダルで引く偽のガチャ相手に動かす"""
+
+    def _forge(self, medal, cost, stock, coin_cost=0, ruby_cost=0):
+        Forge = NewMenus._core().Forge
+        st = {"medal": medal, "coin": 1000, "ruby": 50, "stock": stock, "calls": 0}
+
+        class Fake:
+            _WALLET_KEYS = Forge._WALLET_KEYS
+            _wallet = Forge.__dict__["_wallet"].__get__(None, Forge)
+            draw_with_medals = Forge.draw_with_medals
+            def _ui(self_):
+                return {"userinfo": {"bmedal": st["medal"], "bcoin": st["coin"], "bruby": st["ruby"], "pruby": 0},
+                        "gachainfo": [{"gachaid": 9, "compflg": 1 if st["stock"] == 0 else 0}]}
+            def get_info(self_):
+                return self_._ui()
+            def gacha_compflg(self_, gid, info=None):
+                return 1 if st["stock"] == 0 else 0
+            def refresh_session(self_):
+                return False
+            def _draw(self_, n):
+                st["calls"] += 1
+                if st["stock"] < n or st["medal"] < cost * n:
+                    return {"retcode": 99}
+                st["stock"] -= n; st["medal"] -= cost * n
+                st["coin"] -= coin_cost * n; st["ruby"] -= ruby_cost * n
+                return dict(retcode=0, **self_._ui())
+            def gacha_multi(self_, gid, paytype):
+                return self_._draw(10)
+            def gacha_single(self_, gid, paytype):
+                return self_._draw(1)
+        return Fake(), st
+
+    def test_until_medals_run_out(self):
+        f, st = self._forge(medal=2500, cost=100, stock=1000)
+        r = f.draw_with_medals(9, 3, log=None)
+        self.assertEqual((r["status"], r["draws"], r["medal"]), ("stopped", 25, 0))
+
+    def test_until_box_is_empty(self):
+        f, st = self._forge(medal=10**6, cost=100, stock=23)
+        r = f.draw_with_medals(9, 3, log=None)
+        self.assertEqual((r["status"], r["draws"]), ("complete", 23))
+
+    def test_stops_after_one_draw_if_coins_were_spent(self):
+        f, st = self._forge(medal=10**6, cost=0, stock=100, coin_cost=10)
+        r = f.draw_with_medals(9, 1, log=None)
+        self.assertEqual(r["status"], "wrong_currency")
+        self.assertEqual(st["calls"], 1)
+
+    def test_stops_after_one_draw_if_rubies_were_spent(self):
+        f, st = self._forge(medal=10**6, cost=100, stock=100, ruby_cost=1)
+        r = f.draw_with_medals(9, 2, log=None)
+        self.assertEqual(r["status"], "wrong_currency")
+        self.assertEqual(st["calls"], 1)

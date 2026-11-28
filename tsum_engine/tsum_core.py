@@ -314,6 +314,7 @@ def _cached_gacha_ids(f, ttl=600):
         return None
     by_type = {}
     plus_by_name = None
+    plus_row = None
     for g in rows:
         if not isinstance(g, dict):
             continue
@@ -328,6 +329,7 @@ def _cached_gacha_ids(f, ttl=600):
             for v in g.values():
                 if isinstance(v, str) and _is_box_plus_name(v):
                     plus_by_name = gid
+                    plus_row = g
                     break
     box_id = by_type.get(41)
     if not box_id and CONFIG.get("box_fallback_premium_box"):
@@ -335,11 +337,23 @@ def _cached_gacha_ids(f, ttl=600):
     plus_type = int(CONFIG.get("premium_box_plus_type", 64))
     ids = {"premium": by_type.get(11), "box": box_id, "has_select_box": bool(by_type.get(41)),
            "premium_plus": plus_by_name or by_type.get(plus_type),
-           "premium_plus_by": "name" if plus_by_name else ("type" if by_type.get(plus_type) else None)}
+           "premium_plus_by": "name" if plus_by_name else ("type" if by_type.get(plus_type) else None),
+           "premium_plus_row": plus_row or next((g for g in rows if isinstance(g, dict)
+                                                 and str(g.get("type")) == str(plus_type)), None)}
     if ids["premium"] or ids["box"] or ids["premium_plus"]:
         _GACHA_CACHE["ids"] = ids
         _GACHA_CACHE["ts"] = now
     return ids
+
+
+def premium_plus_paytype():
+    """プレミアムBOX+（メダルで引く）の支払い方法の番号。設定が無ければ None（＝実行しない）。
+    値はゲームの通信で確かめたものだけを入れる（推測で入れるとコインやルビーで引かれるおそれがある）。"""
+    raw = os.environ.get("TSUM_PREMIUM_PLUS_PAYTYPE") or CONFIG.get("premium_box_plus_paytype")
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_box_plus_name(text):
@@ -728,50 +742,35 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
             return None, "現在プレミアムBOX+が開催されていないため実行できません。"
         if not gacha_plus:
             return None, "プレミアムBOX+の情報をゲームから取得できませんでした。少し待ってからもう一度お試しください。"
+        paytype = premium_plus_paytype()
+        if paytype is None:
+            _dbg(f"[premium_plus] メダル払いの paytype が未設定のため中止 gachaid={gacha_plus} "
+                 f"row={(_GACHA_CACHE.get('ids') or {}).get('premium_plus_row')}")
+            return None, "プレミアムBOX+はまだ準備中です（支払い方法の設定がありません）。"
         if progress:
-            progress.update(act_stage, "プレミアムBOX+を引いています...", force=True)
+            progress.update(act_stage, "プレミアムBOX+をメダルで引いています...", force=True)
 
-        total = 0
-        res = None
-        for _refill_try in range(5):
-            if auto_fill_coins:
-                try:
-                    cur_c = f.resources()["bcoin"]
-                    if cur_c < 300_000:
-                        if progress:
-                            progress.update(act_stage, "ガチャ用コインを補充中 (3000万)...", force=True)
-                        _dbg(f"[premium_plus] コイン不足検知: 現在={cur_c:,} -> 3000万補充")
-                        f.fill_coins(cap=cur_c + 30_000_000)
-                except Exception as _fe:
-                    _dbg(f"[premium_plus] fill_coins例外: {_fe}")
+        def _on_plus_p(drawn, cur_medal, is_single):
+            if progress:
+                mode_str = "単発" if is_single else "10連"
+                progress.update(act_stage, f"プレミアムBOX+引出中 ({mode_str}): {drawn:,}連 (残メダル: {cur_medal:,})")
 
-            def _on_plus_p(drawn, cur_coin, is_single, _base=total):
-                if progress:
-                    mode_str = "単発" if is_single else "10連"
-                    progress.update(act_stage, f"プレミアムBOX+引出中 ({mode_str}): {_base + drawn:,}連 (残コイン: {cur_coin:,})")
-
-            # 単発でも引けるよう、所持コインの下限は単発1回分にする
-            res = f.complete_box(int(gacha_plus), min_coin=30_000, sleep_s=0, log=_dbg, on_progress=_on_plus_p)
-            st = res.get("status")
-            total += int(res.get("draws") or 0)
-            if st in ("coin_ran_out", "insufficient_coin") and auto_fill_coins and _refill_try < 4:
-                _dbg(f"[premium_plus] コイン不足({st})のため補充して再開 (試行{_refill_try+2}/5)")
-                continue
-            break
-
+        res = f.draw_with_medals(int(gacha_plus), paytype, log=_dbg, on_progress=_on_plus_p)
         st = res.get("status") if isinstance(res, dict) else ""
-        _dbg(f"[premium_plus] gachaid={gacha_plus} status={st} total={total} detail={res}")
-        if isinstance(res, dict):
-            res["draws"] = total
+        total = int(res.get("draws") or 0) if isinstance(res, dict) else 0
+        _dbg(f"[premium_plus] gachaid={gacha_plus} paytype={paytype} status={st} detail={res}")
+        left = res.get("medal") if isinstance(res, dict) else None
+        left_s = f"\n残りメダル: {left:,}枚" if isinstance(left, int) else ""
         tail = "\n完了しました。\nまたのご利用をお待ちしております。"
-        if st in ("complete", "already_complete"):
-            if total <= 0:
-                return res, "プレミアムBOX+はすでに最後まで引き終わっています。" + tail
-            return res, f"プレミアムBOX+を最後まで引きました（{total:,}連）" + tail
-        if total > 0 and st in ("coin_ran_out", "insufficient_coin"):
-            return res, f"プレミアムBOX+をコインがなくなるまで引きました（{total:,}連）" + tail
-        if total > 0 and st in ("draw_error", "max_reached"):
-            return res, f"プレミアムBOX+を引けるところまで引きました（{total:,}連。それ以上はサーバーが受け付けませんでした）" + tail
+        if st == "wrong_currency":
+            return None, ("プレミアムBOX+を1回引いたところで、メダル以外で支払われた可能性があるため止めました。"
+                          "お手数ですがゲーム内でコイン・ルビーをお確かめのうえ、お問い合わせください。")
+        if st == "already_complete":
+            return res, "プレミアムBOX+はすでに最後まで引き終わっています。" + left_s + tail
+        if st == "complete":
+            return res, f"プレミアムBOX+を最後まで引きました（{total:,}連）" + left_s + tail
+        if total > 0 and st in ("stopped", "max_reached"):
+            return res, f"プレミアムBOX+をメダルで引けるところまで引きました（{total:,}連）" + left_s + tail
         if total > 0 and st == "network_error":
             return None, (f"接続が不安定なため {total:,}連 で止まりました。"
                           "少し待ってからもう一度お試しください（引いた分は反映済みです）。")
@@ -779,12 +778,9 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
             return None, "接続が不安定なため実行できませんでした。少し待ってからもう一度お試しください。"
         if st == "api_error":
             return None, describe_tsum_api_failure("プレミアムBOX+", res.get("resp"), f, missing_data=True)
-        if st == "insufficient_coin":
-            return None, f"コインが足りないため引けませんでした（所持 {res.get('have', 0):,}）。先にコインを増やしてからお試しください。"
-        if st == "draw_error":
-            return None, ("プレミアムBOX+の抽選をサーバーに拒否されました。\n"
-                          "開催中の別のガチャに切り替わった可能性があります。\n"
-                          f"[詳細] {str(res.get('resp'))[:150]}")
+        if st == "stopped":
+            return None, ("プレミアムBOX+を1回も引けませんでした（メダルが足りないか、サーバーに断られました）。"
+                          + left_s + f"\n[詳細] {str(res.get('resp'))[:150]}")
         return None, f"プレミアムBOX+を引けませんでした（status={st}）。もう一度お試しください。"
 
     if progress:

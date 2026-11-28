@@ -90,9 +90,6 @@ MENUS = {
                          "desc": "開催中のセレクトBOXを完売まで引きます", "order": 30},
     "tsum_premium":     {"label": "プレミアム完売", "price": "tsum_premium",
                          "desc": "プレミアムガチャを完売まで引きます", "order": 31},
-    "tsum_premium_plus": {"label": "プレミアムBOX+", "price": "tsum_premium_plus",
-                          "desc": "開催中のプレミアムBOX+を、引けるところまで（最後まで・コインがなくなるまで）引きます",
-                          "order": 32},
     "tsum_score":       {"label": "スコア指定", "price": "tsum_score", "value": (0, 2_147_483_647),
                          "unit": "点", "desc": "好きなスコアを指定できます", "order": 40},
     "tsum_score_max":   {"label": "スコアMAX", "price": "tsum_score_max",
@@ -106,6 +103,12 @@ MENUS = {
     "tsum_guest_create": {"label": "ゲストアカウント生成", "price": "tsum_guest_create",
                           "desc": "新しいゲストアカウントを作り、引き継ぎ情報を発行します", "order": 70},
 }
+
+# プレミアムBOX+（メダルで引く）。支払い方法の番号（TSUM_PREMIUM_PLUS_PAYTYPE）が設定されたときだけメニューに出す
+if os.environ.get("TSUM_PREMIUM_PLUS_PAYTYPE", "").strip():
+    MENUS["tsum_premium_plus"] = {"label": "プレミアムBOX+", "price": "tsum_premium_plus",
+                                  "desc": "開催中のプレミアムBOX+を、メダルで引けるところまで引きます",
+                                  "order": 32}
 
 # 1つの注文で選べないもの（ゲスト生成は新規アカウントを作るメニューなので単独）
 SOLO_MENUS = ("tsum_guest_create",)

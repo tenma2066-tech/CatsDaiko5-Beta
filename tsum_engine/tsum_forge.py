@@ -891,6 +891,78 @@ class Forge:
             return {"status": "complete", "draws": drawn}
         return {"status": "max_reached", "draws": drawn}
 
+    _WALLET_KEYS = ("bmedal", "bcoin", "bruby", "pruby")
+
+    @classmethod
+    def _wallet(cls, resp):
+        ui = (resp.get("userinfo") if isinstance(resp, dict) else None) or {}
+        return {k: ui.get(k) for k in cls._WALLET_KEYS}
+
+    def draw_with_medals(self, gachaid, paytype, max_draws=5000, sleep_s=0, log=print, on_progress=None):
+        """メダルで引くガチャを、引けなくなるまで引く（10連 → 断られたら単発 → 断られたら終わり）。
+        最初に引けた回で、減ったのがメダルだけかを確かめる。コインやルビーが減った・メダルが減らない
+        なら、その場で止める（支払い方法の指定違いを1回分の被害で止めるため）。"""
+        info = self.get_info()
+        if not isinstance(info, dict):
+            return {"status": "network_error", "draws": 0}
+        before = self._wallet(info)
+        if before["bmedal"] is None:
+            return {"status": "api_error", "draws": 0, "resp": info}
+        if self.gacha_compflg(gachaid, info) == 1:
+            return {"status": "already_complete", "draws": 0, "medal": before["bmedal"]}
+        drawn = 0
+        multi = True
+        checked = False
+        medal = before["bmedal"]
+        self.quiet = True
+        if on_progress:
+            try:
+                on_progress(0, medal, False)
+            except Exception:
+                pass
+        while drawn < max_draws:
+            r = self.gacha_multi(gachaid, paytype) if multi else self.gacha_single(gachaid, paytype)
+            if isinstance(r, dict) and r.get("retcode") in (6, 8) and self.refresh_session():
+                r = self.gacha_multi(gachaid, paytype) if multi else self.gacha_single(gachaid, paytype)
+            if r is None:
+                return {"status": "network_error", "draws": drawn, "medal": medal}
+            if isinstance(r, dict) and r.get("retcode") == 0:
+                n = 10 if multi else 1
+                after = self._wallet(r)
+                if after["bmedal"] is None:
+                    after = self._wallet(self.get_info())
+                if not checked:
+                    checked = True
+                    spent_other = any(before[k] is not None and after[k] is not None and after[k] < before[k]
+                                      for k in ("bcoin", "bruby", "pruby"))
+                    medal_down = after["bmedal"] is not None and after["bmedal"] < before["bmedal"]
+                    if spent_other or not medal_down:
+                        if log:
+                            log(f"  メダル以外で支払われた可能性 before={before} after={after} paytype={paytype}")
+                        return {"status": "wrong_currency", "draws": drawn + n, "before": before, "after": after}
+                drawn += n
+                if after["bmedal"] is not None:
+                    medal = after["bmedal"]
+                if on_progress and (drawn % 100 == 0 or drawn <= 10 or not multi):
+                    try:
+                        on_progress(drawn, medal, not multi)
+                    except Exception:
+                        pass
+                if sleep_s:
+                    time.sleep(sleep_s)
+                continue
+            if is_version_reject(r):
+                return {"status": "api_error", "draws": drawn, "resp": r}
+            if self.gacha_compflg(gachaid) == 1:
+                return {"status": "complete", "draws": drawn, "medal": medal}
+            if multi:
+                multi = False
+                if log:
+                    log(f"  10連が終了 → 単発に切替（{drawn}連時点） resp={str(r)[:150]}")
+                continue
+            return {"status": "stopped", "draws": drawn, "medal": medal, "resp": str(r)[:200]}
+        return {"status": "max_reached", "draws": drawn, "medal": medal}
+
     def fill_coins(self, cap=200_000_000):
         info = self.get_info()
         cur = (info.get("userinfo") or {}).get("bcoin") or 0
