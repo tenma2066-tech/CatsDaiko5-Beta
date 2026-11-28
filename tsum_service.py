@@ -92,6 +92,8 @@ MENUS = {
                          "desc": "開催中のセレクトBOXを完売まで引きます", "order": 30},
     "tsum_premium":     {"label": "プレミアム完売", "price": "tsum_premium",
                          "desc": "プレミアムガチャを完売まで引きます", "order": 31},
+    "tsum_pickup":      {"label": "ピックアップガチャMAX", "price": "tsum_pickup",
+                         "desc": "開催中のピックアップガチャを、上限（天井の15回）までコインで引きます", "order": 33},
     "tsum_score":       {"label": "スコア指定", "price": "tsum_score", "value": (0, 2_147_483_647),
                          "unit": "点", "desc": "好きなスコアを指定できます", "order": 40},
     "tsum_score_max":   {"label": "スコアMAX", "price": "tsum_score_max",
@@ -239,6 +241,8 @@ def _forge_kwargs(menu: str, qty: dict) -> dict:
         return {"box": DEFAULT_SELECT_BOX_ID}
     if menu == "tsum_premium":
         return {"gacha_full": DEFAULT_PREMIUM_GACHA_ID}
+    if menu == "tsum_pickup":
+        return {"gacha_pickup": True}
     if menu == "tsum_premium_plus":
         return {"gacha_plus": DEFAULT_PREMIUM_PLUS_GACHA_ID, "gacha_plus_count": int(qty[menu])}
     raise ValueError(f"不明なメニュー: {menu}")

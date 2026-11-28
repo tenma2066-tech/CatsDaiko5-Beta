@@ -1399,3 +1399,110 @@ class TsumOrphans(unittest.TestCase):
         self.assertIsNone(new_id)
         self.assertIn("入り直せません", err)
         self.assertEqual(len(T.orphans()), 1)
+
+
+
+class PickupGacha(unittest.TestCase):
+    """ピックアップガチャ（コインで引く・上限15回）"""
+
+    NOW = 1795000000
+    ROWS = [{"gachaid": 11, "type": 11, "name": "プレミアムBOX", "currprice": 30000},
+            {"gachaid": 501, "type": 70, "name": "ピックアップガチャ(ミッキー)", "currprice": 30000, "maxcnt": 15,
+             "startdt": str(NOW - 100), "enddt": str(NOW + 100)},
+            {"gachaid": 502, "type": 70, "name": "ピックアップガチャ(終了ずみ)", "currprice": 30000, "maxcnt": 15,
+             "startdt": str(NOW - 900), "enddt": str(NOW - 500)}]
+
+    def _core(self):
+        return NewMenus._core()
+
+    def _server(self, coin, already=0, limit=15, price=30000, presents=False, medal_cost=0):
+        Forge = NewMenus._core().Forge
+        st = {"coin": coin, "medal": 100, "used": already, "calls": 0, "fills": []}
+        rows = self.ROWS
+
+        class Fake:
+            _WALLET_KEYS = Forge._WALLET_KEYS
+            _wallet = Forge.__dict__["_wallet"].__get__(None, Forge)
+            _retmsg = staticmethod(Forge.__dict__["_retmsg"].__func__)
+            draw_pickup = Forge.draw_pickup
+            def get_mast(self_):
+                return {"retcode": 0, "gachamst": rows}
+            def _ui(self_):
+                return {"userinfo": {"bmedal": st["medal"], "bcoin": st["coin"], "bruby": 0, "pruby": 0}}
+            def get_info(self_):
+                return self_._ui()
+            def resources(self_, info=None):
+                return {"bcoin": st["coin"]}
+            def fill_coins(self_, cap=0):
+                st["fills"].append(cap); st["coin"] = max(st["coin"], cap)
+            def refresh_session(self_):
+                return True
+            def gacha_single(self_, gid, paytype):
+                st["calls"] += 1
+                if presents:
+                    return {"retcode": 37, "retmsg": "ツムのプレゼントがあります。"}
+                if st["used"] >= limit:
+                    return {"retcode": 30, "retmsg": "これ以上引けません"}
+                if st["coin"] < price:
+                    return {"retcode": 22, "retmsg": "コインが不足しています"}
+                st["coin"] -= price; st["used"] += 1; st["medal"] -= medal_cost
+                return dict(retcode=0, **self_._ui())
+        return Fake(), st
+
+    def _run(self, f, auto_fill=False):
+        c = self._core()
+        c._GACHA_CACHE.update(ts=0.0, ids=None)
+        with patch.object(c.time, "time", lambda: self.NOW):
+            return c.forge_sync(gacha_pickup=True, sess={"userid": "1"}, f=f, auto_fill_coins=auto_fill)
+
+    def test_menu_price_kwargs(self):
+        self.assertIn("tsum_pickup", T.MENUS)
+        self.assertIn("tsum_pickup", pricing.PRICES)
+        with patch.object(T, "_core", fake_core()):
+            self.assertEqual(T._forge_kwargs("tsum_pickup", {}), {"gacha_pickup": True})
+
+    def test_draws_exactly_15_and_skips_closed_gacha(self):
+        f, st = self._server(coin=1_000_000)
+        res, msg = self._run(f)
+        self.assertEqual((res["draws"], st["calls"], st["coin"]), (15, 15, 1_000_000 - 450_000))
+        self.assertIn("上限の15回まで引きました", msg)
+        self.assertNotIn("終了ずみ", msg)
+
+    def test_already_drawn_some_stops_at_server_limit(self):
+        f, st = self._server(coin=1_000_000, already=10)
+        res, msg = self._run(f)
+        self.assertEqual(res["draws"], 5)
+        self.assertIn("5回引いたところで上限になりました", msg)
+
+    def test_not_enough_coins_sends_only_affordable_draws(self):
+        f, st = self._server(coin=100_000)
+        res, msg = self._run(f)
+        self.assertEqual((res["draws"], st["calls"]), (3, 3))     # 4回目は送らない
+        self.assertIn("コインが足りず 3回で止まりました", msg)
+
+    def test_no_coins_at_all_is_failure(self):
+        f, st = self._server(coin=10)
+        res, msg = self._run(f)
+        self.assertIsNone(res)
+        self.assertEqual(st["calls"], 0)
+
+    def test_auto_fill_tops_up_coins(self):
+        f, st = self._server(coin=10)
+        res, msg = self._run(f, auto_fill=True)
+        self.assertEqual(res["draws"], 15)
+        self.assertEqual(st["fills"], [10 + 450_000])
+
+    def test_stops_if_medals_go_down(self):
+        f, st = self._server(coin=1_000_000, medal_cost=1)
+        res, msg = self._run(f)
+        self.assertIsNone(res)
+        self.assertEqual(st["calls"], 1)
+        self.assertIn("コイン以外が減った", msg)
+
+    def test_not_running_lists_open_gachas(self):
+        f, st = self._server(coin=1_000_000)
+        f.get_mast = lambda: {"retcode": 0, "gachamst": [self.ROWS[0]]}
+        res, msg = self._run(f)
+        self.assertIsNone(res)
+        self.assertIn("開催されていない", msg)
+        self.assertIn("プレミアムBOX(type11)", msg)

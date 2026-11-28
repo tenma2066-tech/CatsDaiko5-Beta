@@ -315,6 +315,7 @@ def _cached_gacha_ids(f, ttl=600):
     by_type = {}
     plus_by_name = None
     plus_row = None
+    pickups = []
     for g in rows:
         if not isinstance(g, dict):
             continue
@@ -324,6 +325,9 @@ def _cached_gacha_ids(f, ttl=600):
         except Exception:
             continue
         by_type.setdefault(t, gid)
+        # ピックアップガチャは名前で見分ける。開催期間の外のものは除く
+        if _is_pickup_name(g.get("name")) and _gacha_is_open(g, now):
+            pickups.append(g)
         # プレミアムBOX+ は名前で見分ける（「BOX+」「BOX＋」「BOXプラス」のどれか。全角・小文字も同じとみなす）
         if plus_by_name is None:
             for v in g.values():
@@ -339,8 +343,11 @@ def _cached_gacha_ids(f, ttl=600):
            "premium_plus": plus_by_name or by_type.get(plus_type),
            "premium_plus_by": "name" if plus_by_name else ("type" if by_type.get(plus_type) else None),
            "premium_plus_row": plus_row or next((g for g in rows if isinstance(g, dict)
-                                                 and str(g.get("type")) == str(plus_type)), None)}
-    if ids["premium"] or ids["box"] or ids["premium_plus"]:
+                                                 and str(g.get("type")) == str(plus_type)), None),
+           "pickups": pickups,
+           "open_names": [f"{str(g.get('name') or '')[:24]}(type{g.get('type')})" for g in rows
+                          if isinstance(g, dict) and _gacha_is_open(g, now)][:12]}
+    if ids["premium"] or ids["box"] or ids["premium_plus"] or pickups:
         _GACHA_CACHE["ids"] = ids
         _GACHA_CACHE["ts"] = now
     return ids
@@ -367,6 +374,24 @@ def premium_plus_price(f, gachaid):
         return price if price > 0 else None
     except Exception:
         return None
+
+
+def _is_pickup_name(text):
+    t = unicodedata.normalize("NFKC", str(text or "")).upper().replace(" ", "")
+    return "ピックアップ" in t or "PICKUP" in t
+
+
+def _gacha_is_open(row, now=None):
+    """開催期間（startdt〜enddt）の中か。日時が読めないものは開催中として扱う。"""
+    now = now or time.time()
+    try:
+        s, e = int(row.get("startdt") or 0), int(row.get("enddt") or 0)
+    except (TypeError, ValueError):
+        return True
+    return (not s or s <= now) and (not e or now < e)
+
+
+PICKUP_MAX_DRAWS = 15   # ピックアップガチャの天井（1つのガチャで引ける回数の上限）
 
 
 def _is_box_plus_name(text):
@@ -413,7 +438,7 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                login_id=None, password=None, captcha_solver=None, proxy=None, sess=None, f=None,
                pin_notice=None, gacha_full=None, on_login=None, stage_box=None, progress=None,
                is_guest=False, auto_fill_coins=None, all_tsum_lv=False, nickname=None, gacha_plus=None,
-               gacha_plus_count=None, medal_chunk_start=None):
+               gacha_plus_count=None, medal_chunk_start=None, gacha_pickup=None):
     if auto_fill_coins is None:
         auto_fill_coins = is_coin_free()
     # stage_box: 失敗がログイン段階か実行段階かを呼び出し元に伝えるための箱
@@ -749,6 +774,79 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
         if st == "max_reached":
             return None, f"上限まで引きましたが完売しませんでした（{res.get('draws','-')}連）。もう一度お試しください。"
         return None, f"プレミアムガチャの完売に失敗しました（status={st}）。もう一度お試しください。"
+
+    if gacha_pickup:
+        try:
+            rows = list((_cached_gacha_ids(f) or {}).get("pickups") or [])
+        except Exception as _pe:
+            _dbg(f"[pickup] ガチャ一覧の取得例外: {_pe}")
+            rows = []
+        if not rows:
+            # 名前で見つけられなかったときに原因が分かるよう、開催中のガチャの名前を一緒に返す
+            names = (_GACHA_CACHE.get("ids") or {}).get("open_names") or []
+            return None, ("現在ピックアップガチャが開催されていないため実行できません。"
+                          + (("\n[開催中のガチャ] " + " ／ ".join(names)) if names else ""))
+        if progress:
+            progress.update(act_stage, "ピックアップガチャを引いています...", force=True)
+        cap_cfg = int(CONFIG.get("pickup_max_draws", PICKUP_MAX_DRAWS))
+        out_lines, total, any_fail = [], 0, ""
+        for row in rows:
+            gid = int(row["gachaid"])
+            name = str(row.get("name") or gid)[:30]
+            price = int(row.get("currprice") or row.get("listprice") or 0) or None
+            mx = int(row.get("maxcnt") or 0) or cap_cfg
+            _dbg(f"[pickup] gachaid={gid} name={name!r} type={row.get('type')} 値段={price} maxcnt={row.get('maxcnt')} → 上限{mx}回")
+            if auto_fill_coins and price:
+                try:
+                    cur_c = f.resources()["bcoin"]
+                    if cur_c < price * mx:
+                        if progress:
+                            progress.update(act_stage, "ガチャ用コインを補充中...", force=True)
+                        f.fill_coins(cap=cur_c + price * mx)
+                except Exception as _fe:
+                    _dbg(f"[pickup] fill_coins例外: {_fe}")
+
+            def _on_pick_p(drawn, cur_coin, _name=name, _mx=mx):
+                if progress:
+                    progress.update(act_stage, f"{_name}: {drawn} / {_mx}回 (残コイン: {cur_coin:,})")
+
+            res = f.draw_pickup(gid, price=price, max_draws=mx, log=_dbg, on_progress=_on_pick_p)
+            st = res.get("status")
+            n = int(res.get("draws") or 0)
+            total += n
+            _dbg(f"[pickup] 結果 gachaid={gid} status={st} detail={res}")
+            if st == "done":
+                out_lines.append(f"{name}：上限の{n}回まで引きました")
+            elif st == "limit" and n > 0:
+                out_lines.append(f"{name}：{n}回引いたところで上限になりました")
+            elif st == "limit":
+                out_lines.append(f"{name}：すでに上限まで引いてあるか、いまは引けません"
+                                 f"（{str(res.get('msg') or '')[:60] or 'retcode=' + str(res.get('retcode'))}）")
+            elif st == "no_coin":
+                out_lines.append(f"{name}：コインが足りず {n}回で止まりました"
+                                 f"（所持 {int(res.get('coin') or 0):,} ／ 1回 {int(res.get('price') or 0):,}）")
+                any_fail = any_fail or "コインが足りません。先にコインを増やしてからお試しください。"
+            elif st == "present_pending":
+                out_lines.append(f"{name}：{n}回で止まりました（プレゼントBOXに未受け取りのツムがあります）")
+                any_fail = any_fail or "ゲームでプレゼントを受け取ってから、もう一度ご注文ください。"
+                break
+            elif st == "wrong_currency":
+                return None, ("ピックアップガチャを引いたところ、コイン以外が減った可能性があるため止めました。"
+                              "お手数ですがゲーム内でメダル・ルビーをお確かめのうえ、お問い合わせください。")
+            elif st == "network_error":
+                out_lines.append(f"{name}：接続が不安定なため {n}回で止まりました")
+                any_fail = any_fail or "少し待ってからもう一度お試しください（引いた分は反映済みです）。"
+                break
+            elif st == "api_error":
+                return None, describe_tsum_api_failure("ピックアップガチャ", res.get("resp"), f, missing_data=True)
+            else:
+                out_lines.append(f"{name}：{n}回で止まりました（status={st}）")
+        body = "\n".join(out_lines)
+        if total <= 0 and any_fail:
+            return None, body + "\n" + any_fail
+        tail = "\n完了しました。\nまたのご利用をお待ちしております。"
+        return {"status": "done", "draws": total}, (f"ピックアップガチャを合計 {total}回 引きました\n" + body
+                                                    + (("\n" + any_fail) if any_fail else "") + tail)
 
     if gacha_plus is not None:
         gacha_plus, _st = resolve_gacha_id(f, "premium_plus", gacha_plus)
@@ -1233,7 +1331,8 @@ def _save_guest_transfer(sess, old_migration_id, new_id, new_pw):
 
 def forge_sync_guest(migration_id, password, score=None, coin=None, exp=None, medal=None,
                      tsumid=860, tsum_lv=None, box=None, proxy=None, gacha_full=None,
-                     progress=None, auto_fill_coins=None, gacha_plus=None, gacha_plus_count=None, **_ignore):
+                     progress=None, auto_fill_coins=None, gacha_plus=None, gacha_plus_count=None,
+                     gacha_pickup=None, **_ignore):
     if not migration_id or not password:
         return None, "引き継ぎ番号とパスワードを入力してください。", {"moved": False}
     if progress:
@@ -1281,7 +1380,7 @@ def forge_sync_guest(migration_id, password, score=None, coin=None, exp=None, me
             result_obj, text = forge_sync(score=score, coin=coin, exp=exp, medal=medal, tsumid=tsumid,
                                           tsum_lv=tsum_lv, box=box, proxy=g_proxy, sess=sess, f=f,
                                           gacha_full=gacha_full, gacha_plus=gacha_plus,
-                                          gacha_plus_count=gacha_plus_count,
+                                          gacha_plus_count=gacha_plus_count, gacha_pickup=gacha_pickup,
                                           progress=progress, is_guest=True,
                                           auto_fill_coins=auto_fill_coins)
     except Exception:

@@ -1017,6 +1017,81 @@ class Forge:
                 time.sleep(sleep_s)
         return _done("max_reached")
 
+    def draw_pickup(self, gachaid, price=None, max_draws=15, paytype=1, sleep_s=0, log=print, on_progress=None):
+        """ピックアップガチャ（コインで引く・回数の上限あり）を、上限まで単発で引く。
+        - 上限（max_draws）を超えては送らない。足りないコインの回も送らない。
+        - 引くたびに所持品を見比べ、コインが減っていない／メダル・ルビーが減ったら止める。
+        - サーバーに断られたらそこで終わり（すでに上限まで引いてあるアカウントは、1回目で断られる）。
+        戻り値の status: done（上限まで引いた）／limit（サーバーがもう引かせない）／no_coin／
+          present_pending／wrong_currency／stopped／network_error／api_error"""
+        info = self.get_info()
+        if not isinstance(info, dict):
+            return {"status": "network_error", "draws": 0}
+        w = self._wallet(info)
+        if w["bcoin"] is None:
+            return {"status": "api_error", "draws": 0, "resp": info}
+        start_coin = int(w["bcoin"] or 0)
+        coin = start_coin
+        price = int(price) if price else None
+        drawn = 0
+        self.quiet = True
+        if log:
+            log(f"  [pickup] 開始 gachaid={gachaid} 値段={price} 上限={max_draws} wallet={w}")
+
+        def _done(status, **extra):
+            out = {"status": status, "draws": drawn, "coin": coin, "price": price, "spent_coin": start_coin - coin}
+            out.update(extra)
+            return out
+
+        while drawn < max_draws:
+            if price and coin < price:
+                return _done("no_coin")
+            before = dict(w)
+            r = self.gacha_single(gachaid, paytype)
+            if isinstance(r, dict) and r.get("retcode") == 6 and self.refresh_session():
+                r = self.gacha_single(gachaid, paytype)
+            if r is None:
+                return _done("network_error")
+            rc = r.get("retcode") if isinstance(r, dict) else None
+            if rc != 0:
+                msg = self._retmsg(r)
+                if log:
+                    log(f"  [pickup] 断られた retcode={rc} msg={msg!r} （{drawn}回時点）")
+                if is_version_reject(r):
+                    return _done("api_error", resp=r)
+                if rc in (6, 8, 602) or "タイトル" in msg:
+                    self.refresh_session()
+                if rc == 37 or "プレゼント" in msg:
+                    return _done("present_pending", retcode=rc, msg=msg)
+                if "コイン" in msg and "不足" in msg:
+                    return _done("no_coin", retcode=rc, msg=msg)
+                # それ以外の拒否は「もう引けない（上限）」として扱い、理由を一緒に返す
+                return _done("limit", retcode=rc, msg=msg)
+            after = self._wallet(r)
+            if after["bcoin"] is None:
+                after = self._wallet(self.get_info())
+            spent = {k: (before[k] or 0) - (after[k] or 0) for k in self._WALLET_KEYS
+                     if before[k] is not None and after[k] is not None}
+            drawn += 1
+            if after["bcoin"] is not None:
+                coin = int(after["bcoin"])
+            if spent.get("bmedal", 0) > 0 or spent.get("bruby", 0) > 0 or spent.get("pruby", 0) > 0 \
+                    or spent.get("bcoin", 0) <= 0:
+                if log:
+                    log(f"  [pickup] コイン以外が減った／コインが減っていない spent={spent} → 中止")
+                return _done("wrong_currency", spent=spent)
+            if not price:
+                price = int(spent["bcoin"])
+            w = after
+            if on_progress:
+                try:
+                    on_progress(drawn, coin)
+                except Exception:
+                    pass
+            if sleep_s:
+                time.sleep(sleep_s)
+        return _done("done")
+
     def fill_coins(self, cap=200_000_000):
         info = self.get_info()
         cur = (info.get("userinfo") or {}).get("bcoin") or 0
