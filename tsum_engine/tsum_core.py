@@ -774,11 +774,13 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
             res = f.draw_with_medals(int(gacha_plus), price=price, paytype=paytype, max_draws=max_draws,
                                      log=_dbg, on_progress=_on_plus_p)
         else:
-            # 回数の指定あり：1回分ずつ「足りないメダルを出す → 引く」をくり返す。
-            # まとめて出さないのは、メダルを一度に大量に持たせないため（1回の量は premium_box_plus_batch 連ぶん）。
+            # 回数の指定あり：「メダルを45万枚まで出す → 使い切るまで引く」を、指定の回数になるまでくり返す。
+            # 45万枚はゲーム内のメダル上限（premium_box_plus_medal_cap）。これを超えては持たせない。
             if not price:
                 return None, "プレミアムBOX+の値段をゲームから取得できませんでした。少し待ってからもう一度お試しください。"
-            batch = max(1, int(CONFIG.get("premium_box_plus_batch", 40)))
+            medal_cap = max(price, int(CONFIG.get("premium_box_plus_medal_cap", 450_000)))
+            batch = max(1, medal_cap // price)       # 1万メダル×45連＝45万枚
+            fill_fail = 0
             base = {"n": 0}
             done_n, spent_all, added_all = 0, 0, 0
             res = {"status": "max_reached", "draws": 0, "price": price}
@@ -792,6 +794,7 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                 have = int(f._wallet(f.get_info()).get("bmedal") or 0)
                 short = n * price - have
                 if short > 0:
+                    short = max(short, min(medal_cap, (want - done_n) * price) - have)   # 出すときは上限いっぱいまで
                     if progress:
                         progress.update(act_stage, f"メダルを {short:,}枚 用意しています（{done_n:,} / {want:,}連）...", force=True)
                     _dbg(f"[premium_plus] メダル補充 所持={have:,} 必要={n * price:,} 不足={short:,}")
@@ -799,11 +802,22 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                                              auto_fill_coins=auto_fill_coins, stage_box=stage_box)
                     have2 = int(f._wallet(f.get_info()).get("bmedal") or 0)
                     added_all += max(0, have2 - have)
+                    if have2 < price and fill_fail < 2:
+                        # 1回で諦めない：入り直して、もう一度出してみる
+                        fill_fail += 1
+                        _dbg(f"[premium_plus] メダル補充に失敗（{fill_fail}回目）→ 入り直して再試行 text={str(mtext)[:150]}")
+                        try:
+                            f.refresh_session()
+                        except Exception:
+                            pass
+                        time.sleep(1)
+                        continue
                     if have2 < price:
                         _dbg(f"[premium_plus] メダル補充に失敗 所持={have2:,} text={str(mtext)[:150]}")
                         res = {"status": "medal_fill_failed", "draws": 0, "medal": have2, "price": price,
                                "detail": str(mtext or "").replace("またのご利用をお待ちしております。", "").strip()[:200]}
                         break
+                    fill_fail = 0
                     n = min(n, have2 // price)      # 出せた分だけ引く
                 base["n"] = done_n
                 res = f.draw_with_medals(int(gacha_plus), price=price, paytype=paytype, max_draws=n,
@@ -811,6 +825,7 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                 got = int(res.get("draws") or 0)
                 done_n += got
                 spent_all += int(res.get("spent_medal") or 0)
+                _dbg(f"[premium_plus] {done_n:,} / {want:,}連 まで完了（この回 {got}連・status={res.get('status')}）")
                 if got < n or res.get("status") not in ("max_reached", "done"):
                     break
             res = dict(res, draws=done_n, spent_medal=spent_all, added_medal=added_all, want=want)

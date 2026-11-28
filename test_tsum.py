@@ -1080,17 +1080,32 @@ class PremiumBoxPlusCount(unittest.TestCase):
     def test_real_account_1754_medals_30_draws(self):
         c, f, st = self._setup(medal=1754)
         res, msg = self._run(c, f, 30)
-        self.assertEqual(st["fills"], [300000 - 1754])         # 足りない分だけ出す
+        self.assertEqual(st["fills"], [300000 - 1754])         # 30連ぶんに足りない分だけ出す
         self.assertEqual((res["status"], res["draws"], st["medal"]), ("count_done", 30, 0))
         self.assertIn("30連 引きました", msg)
         self.assertIn("使ったメダル: 300,000枚", msg)
 
-    def test_100_draws_go_in_rounds_of_40(self):
+    def test_100_draws_fill_450k_each_round(self):
         c, f, st = self._setup(medal=0)
         res, msg = self._run(c, f, 100)
-        self.assertEqual(st["rounds"], [40, 40, 20])
-        self.assertEqual(st["fills"], [400000, 400000, 200000])   # その都度、次の分だけ
-        self.assertEqual(res["draws"], 100)
+        self.assertEqual(st["rounds"], [45, 45, 10])
+        self.assertEqual(st["fills"], [450000, 450000, 100000])   # 使い切るたびに45万枚（最後は残りの分だけ）
+        self.assertEqual((res["draws"], st["medal"]), (100, 0))
+
+    def test_fill_failure_is_retried_before_giving_up(self):
+        c, f, st = self._setup(medal=0)
+        f.refresh_session = lambda: True
+        real_fake = c.forge_sync
+        fails = {"n": 2}
+        def flaky(**kw):
+            if kw.get("gacha_plus") is None and fails["n"] > 0:
+                fails["n"] -= 1
+                return None, "送信に失敗しました。"
+            return real_fake(**kw)
+        c.forge_sync = flaky
+        with patch.object(c.time, "sleep", lambda s: None):
+            res, msg = self._run(c, f, 90)
+        self.assertEqual(res["draws"], 90)
 
     def test_enough_medals_adds_nothing_and_keeps_the_rest(self):
         c, f, st = self._setup(medal=750000)
