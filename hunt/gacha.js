@@ -23,6 +23,10 @@ const BANNERS = [
     cost1: 150, cost10: 1500, upUR: ['sora', 'midori'], upSR: ['yomogi', 'aoi'], color: '#5cb2ff' },
   { id: 'thunder', name: '雷と紫電', sub: 'ピックアップ', desc: 'UR キララ・シグレの出る確率アップ！ SR コハク・シズクもアップ。',
     cost1: 150, cost10: 1500, upUR: ['kirara', 'shigure'], upSR: ['kohaku', 'shizuku'], color: '#f6d256' },
+  { id: 'night', name: '宵闇と紅炎', sub: '新キャラ', desc: 'UR ヨル・エンジュの出る確率アップ！ SR スミレ・ツバキもアップ。',
+    cost1: 150, cost10: 1500, upUR: ['yoru', 'enju'], upSR: ['sumire', 'tsubaki'], color: '#8a4ad6' },
+  { id: 'shrine', name: '常磐の社', sub: '新キャラ', desc: 'UR トキワの出る確率アップ！ SR ヒスイ・コガネ・ルリもアップ。',
+    cost1: 150, cost10: 1500, upUR: ['tokiwa'], upSR: ['hisui', 'kogane', 'ruri'], color: '#4fbf8f' },
   { id: 'beginner', name: 'はじめての10連', sub: '1回だけ', desc: '1回だけ引ける半額の10連。SR 以上が1体確定。',
     cost10: 750, once: true, color: '#6fd58a' },
 ];

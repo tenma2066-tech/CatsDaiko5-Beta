@@ -20,7 +20,7 @@ t('属性のすくみ', () => {
   assert.strictEqual(E.elemMul('blue', 'red'), 1.3); assert.strictEqual(E.elemMul('yellow', 'purple'), 1.3);
   assert.strictEqual(E.elemMul('purple', 'yellow'), 1.3); assert.strictEqual(E.elemMul('red', 'yellow'), 1);
 });
-t('キャラは R5・SR6・UR5。どのキャラも 通常攻撃・アビリティ・必殺技・奥義 とセット・条件を持つ', () => {
+t('キャラは R5・SR11・UR8。どのキャラも 通常攻撃・アビリティ・必殺技・奥義 とセット・条件を持つ', () => {
   const by = { R: 0, SR: 0, UR: 0 };
   for (const [k, c] of Object.entries(E.CHARACTERS)) {
     by[c.rarity]++;
@@ -28,7 +28,7 @@ t('キャラは R5・SR6・UR5。どのキャラも 通常攻撃・アビリテ�
     assert.ok(c.set.name && c.cond.name && c.cond.trig, k);
     for (const sk of c.skills) if (sk.target === 'enemy' || sk.target === 'enemyArea' || sk.target === 'ally') assert.ok(sk.range >= 1, k + sk.name);
   }
-  assert.deepStrictEqual(by, { R: 5, SR: 6, UR: 5 });
+  assert.deepStrictEqual(by, { R: 5, SR: 11, UR: 8 });
   assert.deepStrictEqual(E.R_KEYS, ['kagari', 'minamo', 'touka', 'raiga', 'shion']);
 });
 t('ステージ: 草原5つ＋特別2つ。敵と岩は戦場の中で重ならない', () => {
@@ -148,6 +148,8 @@ const TEAMS = {
   'R5人': E.R_KEYS,
   'SR中心': ['homura', 'yomogi', 'aoi', 'kohaku', 'yukari'],
   'UR5人': ['akatsuki', 'sora', 'midori', 'kirara', 'shigure'],
+  '新SR　': ['tsubaki', 'hisui', 'kogane', 'sumire', 'ruri'],
+  '新UR＋': ['enju', 'tokiwa', 'yoru', 'kagari', 'shion'],
 };
 for (const [label, keys] of Object.entries(TEAMS)) {
   const row = [];
