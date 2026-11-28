@@ -412,7 +412,8 @@ def is_coin_free(guild_id=None):
 def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=None, box=None,
                login_id=None, password=None, captcha_solver=None, proxy=None, sess=None, f=None,
                pin_notice=None, gacha_full=None, on_login=None, stage_box=None, progress=None,
-               is_guest=False, auto_fill_coins=None, all_tsum_lv=False, nickname=None, gacha_plus=None):
+               is_guest=False, auto_fill_coins=None, all_tsum_lv=False, nickname=None, gacha_plus=None,
+               gacha_plus_count=None):
     if auto_fill_coins is None:
         auto_fill_coins = is_coin_free()
     # stage_box: 失敗がログイン段階か実行段階かを呼び出し元に伝えるための箱
@@ -767,8 +768,54 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
                 mode_str = "単発" if is_single else "10連"
                 progress.update(act_stage, f"プレミアムBOX+引出中 ({mode_str}): {drawn:,}連 (残メダル: {cur_medal:,})")
 
-        res = f.draw_with_medals(int(gacha_plus), price=price, paytype=paytype, max_draws=max_draws,
-                                 log=_dbg, on_progress=_on_plus_p)
+        want = int(gacha_plus_count) if gacha_plus_count else None
+        if want is None:
+            # 回数の指定なし：持っているメダルがなくなるまで引く（メダルは足さない）
+            res = f.draw_with_medals(int(gacha_plus), price=price, paytype=paytype, max_draws=max_draws,
+                                     log=_dbg, on_progress=_on_plus_p)
+        else:
+            # 回数の指定あり：1回分ずつ「足りないメダルを出す → 引く」をくり返す。
+            # まとめて出さないのは、メダルを一度に大量に持たせないため（1回の量は premium_box_plus_batch 連ぶん）。
+            if not price:
+                return None, "プレミアムBOX+の値段をゲームから取得できませんでした。少し待ってからもう一度お試しください。"
+            batch = max(1, int(CONFIG.get("premium_box_plus_batch", 40)))
+            base = {"n": 0}
+            done_n, spent_all, added_all = 0, 0, 0
+            res = {"status": "max_reached", "draws": 0, "price": price}
+
+            def _on_round_p(drawn, cur_medal, is_single):
+                if progress:
+                    progress.update(act_stage, f"プレミアムBOX+引出中: {base['n'] + drawn:,} / {want:,}連 (残メダル: {cur_medal:,})")
+
+            while done_n < want:
+                n = min(batch, want - done_n)
+                have = int(f._wallet(f.get_info()).get("bmedal") or 0)
+                short = n * price - have
+                if short > 0:
+                    if progress:
+                        progress.update(act_stage, f"メダルを {short:,}枚 用意しています（{done_n:,} / {want:,}連）...", force=True)
+                    _dbg(f"[premium_plus] メダル補充 所持={have:,} 必要={n * price:,} 不足={short:,}")
+                    mres, mtext = forge_sync(medal=short, tsumid=tsumid, sess=sess, f=f, is_guest=is_guest,
+                                             auto_fill_coins=auto_fill_coins, stage_box=stage_box)
+                    have2 = int(f._wallet(f.get_info()).get("bmedal") or 0)
+                    added_all += max(0, have2 - have)
+                    if have2 < price:
+                        _dbg(f"[premium_plus] メダル補充に失敗 所持={have2:,} text={str(mtext)[:150]}")
+                        res = {"status": "medal_fill_failed", "draws": 0, "medal": have2, "price": price,
+                               "detail": str(mtext or "").replace("またのご利用をお待ちしております。", "").strip()[:200]}
+                        break
+                    n = min(n, have2 // price)      # 出せた分だけ引く
+                base["n"] = done_n
+                res = f.draw_with_medals(int(gacha_plus), price=price, paytype=paytype, max_draws=n,
+                                         log=_dbg, on_progress=_on_round_p)
+                got = int(res.get("draws") or 0)
+                done_n += got
+                spent_all += int(res.get("spent_medal") or 0)
+                if got < n or res.get("status") not in ("max_reached", "done"):
+                    break
+            res = dict(res, draws=done_n, spent_medal=spent_all, added_medal=added_all, want=want)
+            if done_n >= want:
+                res["status"] = "count_done"
         st = res.get("status") if isinstance(res, dict) else ""
         total = int(res.get("draws") or 0) if isinstance(res, dict) else 0
         _dbg(f"[premium_plus] 結果 status={st} detail={res}")
@@ -777,6 +824,14 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
         left_s = f"\n残りメダル: {left:,}枚" if isinstance(left, int) else ""
         used_s = f"\n使ったメダル: {int(res.get('spent_medal') or 0):,}枚" if total > 0 else ""
         tail = "\n完了しました。\nまたのご利用をお待ちしております。"
+        if st == "count_done":
+            return res, f"プレミアムBOX+を {total:,}連 引きました" + used_s + left_s + tail
+        if want is not None and total > 0 and st in ("done", "max_reached", "medal_fill_failed", "no_medal"):
+            return res, (f"プレミアムBOX+を {total:,}連 引きました（ご指定 {want:,}連のうち。残り {want - total:,}連は"
+                         "メダルを用意できず引けませんでした）" + used_s + left_s + tail)
+        if st == "medal_fill_failed":
+            return None, ("プレミアムBOX+を引くためのメダルを用意できませんでした。" + left_s
+                          + (f"\n[詳細] {res.get('detail')}" if res.get("detail") else ""))
         if st == "done":
             return res, f"プレミアムBOX+をメダルがなくなるまで引きました（{total:,}連）" + used_s + left_s + tail
         if st == "max_reached":
@@ -1155,7 +1210,7 @@ def _save_guest_transfer(sess, old_migration_id, new_id, new_pw):
 
 def forge_sync_guest(migration_id, password, score=None, coin=None, exp=None, medal=None,
                      tsumid=860, tsum_lv=None, box=None, proxy=None, gacha_full=None,
-                     progress=None, auto_fill_coins=None, gacha_plus=None, **_ignore):
+                     progress=None, auto_fill_coins=None, gacha_plus=None, gacha_plus_count=None, **_ignore):
     if not migration_id or not password:
         return None, "引き継ぎ番号とパスワードを入力してください。", {"moved": False}
     if progress:
@@ -1203,6 +1258,7 @@ def forge_sync_guest(migration_id, password, score=None, coin=None, exp=None, me
             result_obj, text = forge_sync(score=score, coin=coin, exp=exp, medal=medal, tsumid=tsumid,
                                           tsum_lv=tsum_lv, box=box, proxy=g_proxy, sess=sess, f=f,
                                           gacha_full=gacha_full, gacha_plus=gacha_plus,
+                                          gacha_plus_count=gacha_plus_count,
                                           progress=progress, is_guest=True,
                                           auto_fill_coins=auto_fill_coins)
     except Exception:

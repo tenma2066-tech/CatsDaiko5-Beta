@@ -979,7 +979,11 @@ class PremiumBoxPlus(unittest.TestCase):
         self.assertIn("tsum_premium_plus", T.MENUS)
         self.assertIn("tsum_premium_plus", pricing.PRICES)
         with patch.object(T, "_core", fake_core()):
-            self.assertEqual(T._forge_kwargs("tsum_premium_plus", {}), {"gacha_plus": 0})
+            self.assertEqual(T._forge_kwargs("tsum_premium_plus", {"tsum_premium_plus": "30"}),
+                             {"gacha_plus": 0, "gacha_plus_count": 30})
+        self.assertEqual(T.value_limits("tsum_premium_plus"), (1, T.PREMIUM_PLUS_MAX_DRAWS))
+        self.assertIn("範囲", T.validate_order(["tsum_premium_plus"], {"tsum_premium_plus": "0"})[2])
+        self.assertEqual(T.validate_order(["tsum_premium_plus"], {"tsum_premium_plus": "25"})[2], "")
         self.assertEqual(T.sort_menus(["tsum_premium_plus", "tsum_medal_max", "tsum_coin", "tsum_medal"]),
                          ["tsum_coin", "tsum_medal", "tsum_medal_max", "tsum_premium_plus"])
 
@@ -1028,6 +1032,90 @@ class PremiumBoxPlus(unittest.TestCase):
             res, msg = self._run(c, f)
             self.assertEqual(res is not None, ok, result)
             self.assertIn(text, msg)
+
+
+
+class PremiumBoxPlusCount(unittest.TestCase):
+    """回数を指定して引く：足りないメダルをその都度出してから引く"""
+
+    PRICE = 10000
+
+    def _setup(self, medal, fill_limit=None, presents_after=None):
+        c = NewMenus._core()
+        st = {"medal": medal, "fills": [], "rounds": [], "drawn": 0}
+        price = self.PRICE
+
+        class FakeForge:
+            _wallet = staticmethod(lambda info: {"bmedal": st["medal"], "bcoin": 0, "bruby": 0, "pruby": 0})
+            def get_mast(self_):
+                return {"retcode": 0, "gachamst": [dict(PremiumBoxPlus.ROW)]}
+            def get_info(self_):
+                return {}
+            def draw_with_medals(self_, gid, price=None, paytype=None, max_draws=0, **kw):
+                st["rounds"].append(max_draws)
+                n = min(max_draws, st["medal"] // price)
+                status = "max_reached"
+                if presents_after is not None and st["drawn"] + n > presents_after:
+                    n = max(0, presents_after - st["drawn"]); status = "present_pending"
+                st["medal"] -= n * price; st["drawn"] += n
+                return {"status": status if n == max_draws or status == "present_pending" else "done",
+                        "draws": n, "medal": st["medal"], "price": price, "spent_medal": n * price}
+        real = c.forge_sync
+
+        def fake_sync(**kw):
+            if kw.get("gacha_plus") is not None:
+                return real(**kw)
+            add = kw["medal"] if fill_limit is None else min(kw["medal"], max(0, fill_limit - sum(st["fills"])))
+            st["fills"].append(add); st["medal"] += add
+            return ({"retcode": 0}, "ok") if add else (None, "送信に失敗しました。")
+        c._GACHA_CACHE.update(ts=0.0, ids=None)
+        self.addCleanup(setattr, c, "forge_sync", real)
+        c.forge_sync = fake_sync
+        return c, FakeForge(), st
+
+    def _run(self, c, f, count):
+        with patch.dict(os.environ, {"TSUM_PREMIUM_PLUS_PAYTYPE": ""}):
+            return c.forge_sync(gacha_plus=0, gacha_plus_count=count, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+
+    def test_real_account_1754_medals_30_draws(self):
+        c, f, st = self._setup(medal=1754)
+        res, msg = self._run(c, f, 30)
+        self.assertEqual(st["fills"], [300000 - 1754])         # 足りない分だけ出す
+        self.assertEqual((res["status"], res["draws"], st["medal"]), ("count_done", 30, 0))
+        self.assertIn("30連 引きました", msg)
+        self.assertIn("使ったメダル: 300,000枚", msg)
+
+    def test_100_draws_go_in_rounds_of_40(self):
+        c, f, st = self._setup(medal=0)
+        res, msg = self._run(c, f, 100)
+        self.assertEqual(st["rounds"], [40, 40, 20])
+        self.assertEqual(st["fills"], [400000, 400000, 200000])   # その都度、次の分だけ
+        self.assertEqual(res["draws"], 100)
+
+    def test_enough_medals_adds_nothing_and_keeps_the_rest(self):
+        c, f, st = self._setup(medal=750000)
+        res, msg = self._run(c, f, 5)
+        self.assertEqual(st["fills"], [])
+        self.assertEqual((res["draws"], st["medal"]), (5, 700000))
+
+    def test_fill_runs_short_draws_what_it_can_and_says_so(self):
+        c, f, st = self._setup(medal=0, fill_limit=250000)
+        res, msg = self._run(c, f, 60)
+        self.assertEqual(res["draws"], 25)
+        self.assertIn("25連 引きました（ご指定 60連のうち", msg)
+
+    def test_fill_fails_completely(self):
+        c, f, st = self._setup(medal=1754, fill_limit=0)
+        res, msg = self._run(c, f, 10)
+        self.assertIsNone(res)
+        self.assertIn("メダルを用意できませんでした", msg)
+        self.assertEqual(st["rounds"], [])
+
+    def test_presents_stop_midway(self):
+        c, f, st = self._setup(medal=0, presents_after=50)
+        res, msg = self._run(c, f, 100)
+        self.assertEqual(res["draws"], 50)
+        self.assertIn("50連 引いたところで止まりました", msg)
 
 
 class DrawWithMedals(unittest.TestCase):

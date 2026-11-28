@@ -106,10 +106,11 @@ MENUS = {
                           "desc": "新しいゲストアカウントを作り、引き継ぎ情報を発行します", "order": 70},
 }
 
+PREMIUM_PLUS_MAX_DRAWS = int(os.environ.get("TSUM_PREMIUM_PLUS_MAX_DRAWS", "1000"))
 # プレミアムBOX+（メダルで引く）。メダルを使うので、同じ注文のメダル指定・メダルMAX（50・51）より後に実行する
 MENUS["tsum_premium_plus"] = {"label": "プレミアムBOX+", "price": "tsum_premium_plus",
-                              "desc": "開催中のプレミアムBOX+を、持っているメダルがなくなるまで引きます"
-                                      "（1回1万メダル。メダル指定・メダルMAXと一緒に選ぶと、増やしてから引きます）",
+                              "value": (1, PREMIUM_PLUS_MAX_DRAWS), "unit": "回",
+                              "desc": "開催中のプレミアムBOX+を、指定した回数だけ引きます（必要なメダルは自動で用意します）",
                               "order": 55}
 
 # 1つの注文で選べないもの（ゲスト生成は新規アカウントを作るメニューなので単独）
@@ -239,7 +240,7 @@ def _forge_kwargs(menu: str, qty: dict) -> dict:
     if menu == "tsum_premium":
         return {"gacha_full": DEFAULT_PREMIUM_GACHA_ID}
     if menu == "tsum_premium_plus":
-        return {"gacha_plus": DEFAULT_PREMIUM_PLUS_GACHA_ID}
+        return {"gacha_plus": DEFAULT_PREMIUM_PLUS_GACHA_ID, "gacha_plus_count": int(qty[menu])}
     raise ValueError(f"不明なメニュー: {menu}")
 
 
