@@ -3808,3 +3808,23 @@ DYA_ASSETS_DIR=/path/to/dya_assets node build.js online
 click ハンドラと表示判定の両方から外した。CPU 戦・オンライン対戦とも、ストライク＋長打7以上の
 球が来るたびにボタンが出る。同じ球での二度押し防止（`_hrPending` 中は return）と、10秒で
 `_hrPending` を倒す安全弁は維持。Chromium でオンライン扱い（is_online=1）で連続使用できることを確認。両 HTML 再ビルド。
+
+---
+
+## 2026-11-28 再読み込みが遅い件: HTML をキャッシュ再検証（304）＋事前圧縮に
+
+### 原因
+`serveHtml` が 15.9MB の HTML を `cache-control: no-store` で返していたので、再読み込みのたびに全量（Caddy の都度 gzip で約 9.4MB）を送り直していた。
+
+### 変更（proxy.js のみ。HTML の再ビルドなし）
+- `loadHtml` のキャッシュに ETag（配信バイトの sha1）と Last-Modified を持たせた
+- 応答は `cache-control: private, no-cache` + ETag + Last-Modified + `vary: Accept-Encoding`
+- `If-None-Match` が一致（`W/` や Caddy が付ける `-gzip`/`-br`/`-zstd` の後ろ付けも同一視）、または `If-Modified-Since` が新しければ 304（本文なし）
+- 圧縮版を一度だけ作って使い回す: br（品質9）7.3MB / gzip（level 9）9.4MB。Content-Encoding を付けて返すので Caddy は再圧縮しない
+- 起動直後に両 HTML を読み込み・圧縮しておく（デプロイ直後の最初の人も待たない）
+- HTML を差し替えると mtime/size が変わり ETag も変わる → 新しい版が配られる
+
+### 確認
+- curl: 200（br 7,651,167B）→ 同じ ETag で 304 / 0B、Caddy 風 `W/"…-gzip"` でも 304、違う ETag は 200。br・gzip・無圧縮の中身は完全一致。`/dya/__proxy/` 書換も維持
+- Chromium（ディスクキャッシュあり）: 初回 200 → 再読み込み 2 回とも 304
+- Caddy を挟んだ実機での確認はまだ（このサンドボックスに Caddy がない）

@@ -11,6 +11,8 @@ const tls = require('tls');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const zlib = require('zlib');
+const crypto = require('crypto');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -616,7 +618,7 @@ function loadHtml(htmlPath, cb) {
   fs.stat(htmlPath, (err, st) => {
     if (err) return cb(err);
     const hit = htmlCache.get(htmlPath);
-    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return cb(null, hit.buf);
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return cb(null, hit.buf, hit);
     fs.readFile(htmlPath, (err2, raw) => {
       if (err2) return cb(err2);
       let buf = raw;
@@ -624,10 +626,42 @@ function loadHtml(htmlPath, cb) {
         try { buf = Buffer.from(rewriteHtml(raw.toString('utf8'), htmlPath), 'utf8'); }
         catch (e) { return cb(e); }
       }
-      htmlCache.set(htmlPath, { mtimeMs: st.mtimeMs, size: st.size, buf });
-      cb(null, buf);
+      // 再読み込みのたびに 16MB を送り直さないよう、ETag で 304 を返す。
+      // 圧縮版は一度だけ作って使い回す（Caddy の都度 gzip をやめる。br は gzip より約 2MB 小さい）。
+      const entry = {
+        mtimeMs: st.mtimeMs, size: st.size, buf,
+        etag: '"' + crypto.createHash('sha1').update(buf).digest('base64url').slice(0, 22) + '"',
+        lastModified: new Date(Math.floor(st.mtimeMs / 1000) * 1000).toUTCString(),
+        gz: null, br: null,
+      };
+      htmlCache.set(htmlPath, entry);
+      zlib.gzip(buf, { level: 9 }, (e, out) => { if (!e) entry.gz = out; });
+      zlib.brotliCompress(buf, { params: {
+        [zlib.constants.BROTLI_PARAM_QUALITY]: 9,
+        [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length,
+      } }, (e, out) => { if (!e) entry.br = out; });
+      cb(null, buf, entry);
     });
   });
+}
+
+// If-None-Match の照合。W/ や、途中の圧縮で付く -gzip / -br / -zstd の後ろ付けも同じものとみなす。
+function etagMatches(header, etag) {
+  if (!header) return false;
+  const core = etag.replace(/"/g, '');
+  return header.split(',').some((t) => {
+    t = t.trim();
+    if (t === '*') return true;
+    t = t.replace(/^W\//, '').replace(/"/g, '').replace(/-(gzip|br|zstd|deflate)$/, '');
+    return t === core;
+  });
+}
+
+function pickEncoding(req, entry) {
+  const ae = String(req.headers['accept-encoding'] || '');
+  if (entry.br && /\bbr\b/.test(ae)) return ['br', entry.br];
+  if (entry.gz && /\bgzip\b/.test(ae)) return ['gzip', entry.gz];
+  return [null, entry.buf];
 }
 
 function serveHtml(req, res, id, htmlPath, label, buildHint) {
@@ -635,7 +669,7 @@ function serveHtml(req, res, id, htmlPath, label, buildHint) {
   const ua = shortStr(req.headers['user-agent'] || '', 80);
   log('HTML', id, `→ GET ${req.url}  (${label})  ip=${ip}  ua="${ua}"`);
   const startedAt = Date.now();
-  loadHtml(htmlPath, (err, buf) => {
+  loadHtml(htmlPath, (err, buf, entry) => {
     const ms = Date.now() - startedAt;
     if (err) {
       log('ERR', id, `✗ HTML load fail: ${err.message}  (${ms}ms)`);
@@ -643,13 +677,29 @@ function serveHtml(req, res, id, htmlPath, label, buildHint) {
       res.end('Failed to load ' + path.basename(htmlPath) + ': ' + err.message + '\nRun: ' + buildHint);
       return;
     }
-    res.writeHead(200, {
+    const common = {
+      'cache-control': 'private, no-cache',
+      'etag': entry.etag,
+      'last-modified': entry.lastModified,
+      'vary': 'Accept-Encoding',
+    };
+    const inm = req.headers['if-none-match'];
+    const ims = req.headers['if-modified-since'];
+    if (etagMatches(inm, entry.etag) || (!inm && ims && Date.parse(ims) >= Date.parse(entry.lastModified))) {
+      res.writeHead(304, common);
+      res.end();
+      log('HTML', id, `← 304  ${label}  (キャッシュ有効)  ${ms}ms`);
+      return;
+    }
+    const [enc, body] = pickEncoding(req, entry);
+    const headers = Object.assign({
       'content-type': 'text/html; charset=utf-8',
-      'cache-control': 'no-store',
-      'content-length': buf.length,
-    });
-    res.end(buf);
-    log('HTML', id, `← 200  ${label}  out=${fmtBytes(buf.length)}  ${ms}ms`);
+      'content-length': body.length,
+    }, common);
+    if (enc) headers['content-encoding'] = enc;
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : body);
+    log('HTML', id, `← 200  ${label}  out=${fmtBytes(body.length)}${enc ? ' (' + enc + ')' : ''}  ${ms}ms`);
   });
 }
 
@@ -1053,6 +1103,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 server.listen(PORT, HOST, () => {
+  // 起動直後に HTML を読み込み・圧縮しておく（最初の人が待たないように）
+  [ONLINE_HTML_PATH, OFFLINE_HTML_PATH].forEach((p) => loadHtml(p, () => {}));
   console.log('');
   console.log('========================================================');
   console.log('  ダイナマイト野球 オンラインプロキシ 起動完了');
