@@ -348,9 +348,9 @@ def _cached_gacha_ids(f, ttl=600):
 
 _PAYTYPE_FILE = os.path.join(PROJECT_ROOT, "premium_plus_paytype.json")
 # 試す順番。どれがメダル払いかは試して確かめる
-# 1 はコインのガチャで使う番号だが、サーバーがガチャの種類で通貨を決めている可能性があるので最初に試す
-# （コインで払われた場合も、単発1回分のコインで止まる）
-PAYTYPE_CANDIDATES = (1, 2, 3, 4, 5, 0, 6, 7)
+# 実機の確認（2026-11-28）: 1〜3 はサーバーが受け付ける番号、4・5・6・7・0 は「入力パラメータでエラー」
+# （retcode 8・タイトルに戻される＝セッションが壊れて引き継ぎ発行も失敗する）ので試さない。
+PAYTYPE_CANDIDATES = (1, 2, 3)
 
 
 def premium_plus_paytype():
@@ -792,6 +792,9 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
             elif pst == "spent_ruby":
                 return None, ("確認中にルビーで1回引かれた可能性があるため止めました。"
                               "お手数ですがお問い合わせください。")
+            elif pst == "present_pending":
+                return None, ("ゲーム内のプレゼントBOXに、受け取っていないツムがあるため引けませんでした。"
+                              "ゲームでプレゼントを受け取ってから、もう一度ご注文ください。")
             elif pst == "network_error":
                 return None, "接続が不安定なため実行できませんでした。少し待ってからもう一度お試しください。"
             elif pst == "api_error":

@@ -353,6 +353,11 @@ table.price{width:100%;border-collapse:collapse;font-size:14px}.price td{padding
 <label for="sg">長時間の枠（ぷにぷにの長い周回・{{ ops.slot_limits.long[0] }}〜{{ ops.slot_limits.long[1] }}）</label><input id="sg" name="long" inputmode="numeric" maxlength="1" value="{{ ops.slots.long if ops.slots.long is not none else '' }}">
 <button class="btn pri full">保存</button></form></div>
 
+<div class="card"><h2>ツムツム：引き継ぎを出せなかったアカウント</h2><p class="sub">代行のあと新しい引き継ぎ番号を発行できず、控えだけ残ったアカウントです。「再発行」でゲームに入り直して新しい番号を出します。出た番号とパスワードは上のお知らせ欄に1回だけ表示されるので、お客さんに伝えてください。</p>
+{% for o in ops.tsum_orphans %}<div class="hl"><div class="tx"><code>{{ o.userid }}</code><div class="l2">{{ o.ts }}{% if o.orig %}・元の番号 {{ o.orig }}{% endif %}{% if not o.has_token %}・ログイン情報なし{% endif %}</div></div>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="tsum_orphan_issue"><input type="hidden" name="idx" value="{{ o.idx }}"><button class="btn pri" style="padding:4px 10px;font-size:12px" data-confirm="このアカウントの引き継ぎ番号を新しく発行します。よろしいですか？">再発行</button></form></div>
+{% else %}<div class="empty">ありません</div>{% endfor %}</div>
+
 <div class="card"><h2>お客さんの受付停止</h2><p class="sub">いたずら・不正が続く相手の、新しい注文と意見箱の投稿を止めます（実績の入力と、支払い済みの注文の結果は止めません）。USERID はブラウザごとの番号で、Cookie を消すと変わります。IP は回線ごとなので、同じ回線のほかの人も止まることがあります。注文の詳細からも追加できます。</p>
 {% for b in ops.blocks %}<div class="hl"><div class="tx"><span class="chip">{{ 'USERID' if b.kind == 'uid' else 'IP' }}</span> <code>{{ b.value }}</code><div class="l2">{{ b.until_ja }}{% if b.note %}・{{ b.note }}{% endif %}</div></div>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="block_remove"><input type="hidden" name="kind" value="{{ b.kind }}"><input type="hidden" name="value" value="{{ b.value }}"><button class="btn" style="padding:4px 10px;font-size:12px">解除</button></form></div>

@@ -7,6 +7,7 @@
 - 注文の保存・読み込み（アカウント情報の形が崩れないこと）
 - 画像認証（CAPTCHA）の受け渡し
 """
+import json
 import os
 import types
 import unittest
@@ -1011,7 +1012,7 @@ class PremiumBoxPlus(unittest.TestCase):
                                   probe={"status": "found", "paytype": 4, "medal": 90, "tried": []})
             res, msg = self._run(c, f, paytype="")
             self.assertEqual(seen["paytype"], 4)
-            self.assertEqual(seen["probe"][0], 1)
+            self.assertEqual(seen["probe"], [1, 2, 3])
             self.assertIn("引けるところまで引きました（21連）", msg)
             self.assertEqual(c.premium_plus_paytype(), 4)   # 次からは保存した番号を使う
 
@@ -1119,25 +1120,102 @@ class DrawWithMedals(unittest.TestCase):
         st["ruby"] = 1
         self.assertEqual(f.probe_medal_paytype(9, (3,), log=None)["status"], "has_ruby")
 
-    def test_probe_retries_after_session_drop(self):
+    def _probe_with(self, responses, cands, relogin=True):
         f, st = self._forge(medal=1000, cost=100, stock=100)
         st["ruby"] = 0
         calls = []
         orig = f._draw
         def single(gid, pt):
             calls.append(pt)
-            if len(calls) == 1:
-                return {"retcode": 8}
-            return orig(1) if pt == 4 else {"retcode": 37, "retmsg": "x"}
+            r = responses.get(pt, {"retcode": 99})
+            return orig(1) if r == "ok" else dict(r)
         f.gacha_single = single
-        f.refresh_session = lambda: True
+        f.refresh_session = lambda: relogin
         f.probe_medal_paytype = NewMenus._core().Forge.probe_medal_paytype.__get__(f)
-        r = f.probe_medal_paytype(9, (4,), log=None)
-        self.assertEqual((r["status"], r["paytype"]), ("found", 4))
-        self.assertEqual(calls, [4, 4])
+        return f.probe_medal_paytype(9, cands, log=None), calls
+
+    def test_probe_stops_on_pending_presents(self):
+        # 実機のログ：1〜3 は retcode 37「ツムのプレゼントがあります。一度ホームに戻ります。」
+        msg = "ツムのプレゼントがあります。\n一度ホームに戻ります。"
+        r, calls = self._probe_with({1: {"retcode": 37, "retmsg": msg}}, (1, 2, 3))
+        self.assertEqual(r["status"], "present_pending")
+        self.assertEqual(calls, [1])
+
+    def test_probe_relogs_after_param_error_and_goes_on(self):
+        r, calls = self._probe_with({1: {"retcode": 8, "retmsg": "入力パラメータで"}, 2: "ok"}, (1, 2, 3))
+        self.assertEqual((r["status"], r["paytype"]), ("found", 2))
+        self.assertEqual(calls, [1, 2])
+
+    def test_probe_gives_up_when_relogin_fails(self):
+        r, calls = self._probe_with({1: {"retcode": 8}}, (1, 2, 3), relogin=False)
+        self.assertEqual(r["status"], "not_found")
+        self.assertEqual(calls, [1])
+
+    def test_candidates_are_only_known_valid_numbers(self):
+        self.assertEqual(NewMenus._core().PAYTYPE_CANDIDATES, (1, 2, 3))
 
     def test_stops_after_one_draw_if_rubies_were_spent(self):
         f, st = self._forge(medal=10**6, cost=100, stock=100, ruby_cost=1)
         r = f.draw_with_medals(9, 2, log=None)
         self.assertEqual(r["status"], "wrong_currency")
         self.assertEqual(st["calls"], 1)
+
+
+
+class TsumOrphans(unittest.TestCase):
+    """引き継ぎを出せなかったアカウントの控え：一覧と再発行"""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "tsum_guest_orphans.json")
+        with open(self.path, "w", encoding="utf-8") as fh:
+            json.dump([{"ts": "2026-11-28 13:55:11", "orig_migration_id": "abcd1234", "uuid": "u",
+                        "userToken": "tok", "userid": "1234569625", "hash": "h", "checkval": "old"}], fh)
+        self.p = patch.object(T, "engine_dir", lambda: self.tmp.name)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+        self.tmp.cleanup()
+
+    def _core(self, issue_ok=True, relogin_ok=True):
+        saved = {}
+
+        class F:
+            def __init__(self_, **kw):
+                self_.checkval, self_.hash, self_.userid = "", "", kw.get("userid")
+            def get_public_key(self_):
+                pass
+            def refresh_session(self_):
+                self_.checkval, self_.hash = "new", "h2"
+                return relogin_ok
+
+        def issue(sess, proxies):
+            saved["checkval"] = sess["checkval"]
+            return ("newid123", "pw999") if issue_ok else (None, "だめ")
+        c = types.SimpleNamespace(Forge=F, _game_api_proxy=lambda p: None, _proxies_dict=lambda p: None,
+                                  tsum_guest=types.SimpleNamespace(guest_issue_transfer=issue),
+                                  _save_guest_transfer=lambda *a: saved.setdefault("transfer", a))
+        return c, saved
+
+    def test_list_masks_and_reissue_marks_resolved(self):
+        rows = T.orphans()
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn("1234569625", rows[0]["userid"])
+        c, saved = self._core()
+        with patch.object(T, "core", lambda: c):
+            new_id, pw, err = T.reissue_orphan(rows[0]["idx"])
+        self.assertEqual((new_id, pw, err), ("newid123", "pw999", ""))
+        self.assertEqual(saved["checkval"], "new")      # 入り直した値で発行している
+        self.assertEqual(T.orphans(), [])
+        with patch.object(T, "core", lambda: c):
+            self.assertIn("発行済み", T.reissue_orphan(0)[2])
+
+    def test_reissue_reports_relogin_failure(self):
+        c, _ = self._core(relogin_ok=False)
+        with patch.object(T, "core", lambda: c):
+            new_id, pw, err = T.reissue_orphan(0)
+        self.assertIsNone(new_id)
+        self.assertIn("入り直せません", err)
+        self.assertEqual(len(T.orphans()), 1)

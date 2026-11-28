@@ -1956,16 +1956,17 @@ ADMIN_TAB = {"restart_save": "settings", "restart_official": "settings", "pp_log
 
 
 OPS_ACTIONS = ("order_note", "block_add", "block_remove", "block_order", "notice_save", "sale_save", "pause_save", "slots_save",
-               "faq_add", "faq_delete", "job_stop", "job_cancel", "job_front")
+               "faq_add", "faq_delete", "job_stop", "job_cancel", "job_front", "tsum_orphan_issue")
 ORDER_ACTIONS = ("order_note", "block_order")   # 注文の詳細だけから行う操作：終わったら、その詳細を開き直す
-ADMIN_TAB.update({k: "ops" for k in ("block_add", "block_remove", "notice_save", "sale_save", "pause_save", "slots_save")},
+ADMIN_TAB.update({k: "ops" for k in ("block_add", "block_remove", "notice_save", "sale_save", "pause_save", "slots_save",
+                                      "tsum_orphan_issue")},
                  faq_add="box", faq_delete="box", job_stop="home", job_cancel="home", job_front="home", order_note="history",
                  block_order="history", order_recheck="orders", order_start="orders")
 AUDIT_LABELS = {"login": "ログイン", "login_step1": "ログイン（1段目）", "login_failed": "ログイン失敗", "logout": "ログアウト",
                 "order_paid": "支払い済みにした", "order_dead": "注文を停止した", "order_hold": "保留に戻した", "order_recheck": "PayPayに再確認",
                 "order_start": "実行を開始", "order_note": "メモ・返金を保存", "block_add": "受付停止を追加", "block_remove": "受付停止を解除",
                 "block_order": "注文のお客さんを受付停止", "notice_save": "お知らせを変更", "sale_save": "セールを変更", "pause_save": "一時停止を変更",
-                "slots_save": "実行枠の数を変更", "faq_add": "Q&Aの回答を追加", "faq_delete": "Q&Aの回答を削除", "job_stop": "実行を止めた",
+                "slots_save": "実行枠の数を変更", "tsum_orphan_issue": "ツムツムの引き継ぎを再発行", "faq_add": "Q&Aの回答を追加", "faq_delete": "Q&Aの回答を削除", "job_stop": "実行を止めた",
                 "job_cancel": "順番待ちを取り消した", "job_front": "順番待ちを先頭へ", "price_save": "料金を変更", "maint_save": "メンテナンス表示を変更",
                 "coupon_free_issue": "無料クーポンを発行", "coupon_revoke": "クーポンを取り消し", "review_hide": "実績を非表示", "review_show": "実績を再表示",
                 "review_words_save": "実績に載せない言葉を変更", "box_done": "意見箱：対応済み", "box_undo": "意見箱：未対応に戻す", "box_delete": "意見箱：削除",
@@ -2046,6 +2047,11 @@ def _ops_action(action: str) -> str:
                 now = (len(_slots), len(_long_slots))
             pend = (want["normal"] is not None and now[0] != want["normal"]) or (want["long"] is not None and now[1] != want["long"])
             return f"実行枠を保存しました（いま ふつう {now[0]}・長時間 {now[1]}）。" + ("動いている実行が終わると、残りも減ります。" if pend else "")
+        if action == "tsum_orphan_issue":
+            new_id, new_pw, err = tsum_service.reissue_orphan(int(f.get("idx") or -1))
+            if err:
+                return "引き継ぎを再発行できませんでした：" + err
+            return f"引き継ぎを再発行しました。引き継ぎ番号 {new_id} ／ パスワード {new_pw}（お客さんにお伝えください。この画面を離れると消えます）"
         if action == "faq_add":
             admin_ops.faq_add(f.get("shop", "all"), f.get("q", ""), f.get("a", ""))
             return "Q&A の回答を追加しました。チャットが、この答えも使うようになります。"
@@ -2430,7 +2436,8 @@ def _admin_post(token):
         session["admin_flash"] = msg
         return redirect("/admin")
     if action not in ("unlock", "unlock_2fa", "unlock_cancel", "lock"):
-        _audit(action, _audit_target(), msg)
+        # 再発行した引き継ぎのパスワードは記録に残さない（画面にだけ出す）
+        _audit(action, _audit_target(), msg.split("／")[0] if action == "tsum_orphan_issue" else msg)
     elif action == "lock":
         _audit("logout", "", "管理者モードを終了しました")
     session["admin_flash"] = msg
@@ -2816,6 +2823,7 @@ def _admin_page(msg):
                    "slot_limits": admin_ops.SLOT_LIMITS,
                    "jobs": admin_ops.job_summary(),
                    "faq": admin_ops.faq_list(),
+                   "tsum_orphans": tsum_service.orphans(),
                    "paused_count": len(st["paused"].get("shops", [])) + len(st["paused"].get("menus", []))}
         except Exception:  # noqa: BLE001
             _log_orders.exception("ops view failed")

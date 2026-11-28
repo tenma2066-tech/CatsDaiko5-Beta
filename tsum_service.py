@@ -10,10 +10,12 @@
   リポジトリの中には書き込まない。
 - アカウント情報（メールアドレス・パスワード・引き継ぎ番号）はログに出さない。
 """
+import json
 import os
 import shutil
 import sys
 import threading
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ENGINE_SOURCE = os.path.join(_HERE, "tsum_engine")
@@ -448,11 +450,35 @@ def _create_guest(c, progress, log):
     return sess, forge, ""
 
 
-def _issue_transfer(c, sess, old_id, progress, log):
+def _relogin(c, sess, forge=None) -> bool:
+    """引き継ぎ発行の前に、ゲームに入り直して sess の checkval / hash を新しくする。
+    代行の途中で「タイトルに戻ります」と言われると、古い値のままでは発行が通らない。"""
+    if not (sess or {}).get("userToken"):
+        return False
+    try:
+        f = forge or c.Forge(userid=sess["userid"], hashv=sess.get("hash", ""), checkval=sess.get("checkval", ""),
+                             proxy=c._game_api_proxy(None), user_token=sess.get("userToken"))
+        if forge is None:
+            f.get_public_key()
+        if not f.refresh_session():
+            return False
+        sess["checkval"] = f.checkval
+        sess["hash"] = f.hash
+        if getattr(f, "userid", None):
+            sess["userid"] = str(f.userid)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _issue_transfer(c, sess, old_id, progress, log, forge=None):
     """新しい引き継ぎ番号・パスワードを発行して控えに残す。戻り値は (番号, パスワード)。"""
     progress.update(5, "新しい引き継ぎ情報を発行しています…", force=True)
     proxies = c._proxies_dict(None)
-    for _ in range(3):
+    for attempt in range(3):
+        if attempt == 1:
+            log("引き継ぎ情報の発行に失敗したため、ゲームに入り直してもう一度試します…")
+            _relogin(c, sess, forge)
         try:
             new_id, new_pw = c.tsum_guest.guest_issue_transfer(sess, proxies)
         except Exception:  # noqa: BLE001
@@ -468,6 +494,54 @@ def _issue_transfer(c, sess, old_id, progress, log):
     c._save_orphan_guest(sess, old_id)
     log("新しい引き継ぎ情報の発行に失敗しました（セッションは控えに保存しました）。")
     return None, None
+
+
+# ---------------------------------------------------------------- 発行できなかったアカウントの控え
+def orphans() -> list:
+    """引き継ぎ情報を発行できなかったアカウントの控え（新しい順）。管理画面に出す分だけ返す。"""
+    path = os.path.join(engine_dir(), "tsum_guest_orphans.json")
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            data = json.load(fh) or []
+    except (OSError, ValueError):
+        return []
+    rows = []
+    for i, d in enumerate(data):
+        if isinstance(d, dict) and not d.get("resolved"):
+            rows.append({"idx": i, "ts": d.get("ts", ""), "userid": _mask(str(d.get("userid") or "")),
+                         "orig": _mask(str(d.get("orig_migration_id") or "")), "has_token": bool(d.get("userToken"))})
+    return list(reversed(rows))
+
+
+def reissue_orphan(idx: int):
+    """控えのアカウントにゲームで入り直し、新しい引き継ぎ番号を発行する。戻り値は (番号, パスワード, エラー文)。"""
+    c = core()
+    path = os.path.join(engine_dir(), "tsum_guest_orphans.json")
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            data = json.load(fh) or []
+        d = data[int(idx)]
+    except (OSError, ValueError, IndexError, TypeError):
+        return None, None, "控えが見つかりません。"
+    if d.get("resolved"):
+        return None, None, "この控えはもう発行済みです。"
+    sess = {k: d.get(k) for k in ("uuid", "userToken", "userid", "hash", "checkval", "migrated_userKey")}
+    if not _relogin(c, sess):
+        return None, None, "ゲームに入り直せませんでした（ログイン情報が古くなっている可能性があります）。"
+    try:
+        new_id, info = c.tsum_guest.guest_issue_transfer(sess, c._proxies_dict(None))
+    except Exception as exc:  # noqa: BLE001
+        return None, None, f"発行に失敗しました（{type(exc).__name__}）。"
+    if not new_id:
+        return None, None, f"発行に失敗しました（{info}）。"
+    c._save_guest_transfer(sess, d.get("orig_migration_id"), new_id, info)
+    d["resolved"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    d["new_id"] = new_id
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return new_id, info, ""
 
 
 def run_order(mode: str, login_id: str, password: str, menus, qty: dict,
@@ -525,7 +599,7 @@ def run_order(mode: str, login_id: str, password: str, menus, qty: dict,
         out["done"] = 1
 
     if out["moved"]:
-        out["transfer"], out["confirm"] = _issue_transfer(c, sess, login_id if mode == "guest" else "", prog, log)
+        out["transfer"], out["confirm"] = _issue_transfer(c, sess, login_id if mode == "guest" else "", prog, log, forge)
         if not out["transfer"] and not out["error"]:
             out["error"] = ("代行は完了しましたが、新しい引き継ぎ情報を発行できませんでした。"
                             "注文番号を管理者にお伝えください。")

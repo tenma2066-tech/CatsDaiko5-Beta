@@ -921,12 +921,6 @@ class Forge:
         for pt in candidates:
             before = w
             r = self.gacha_single(gachaid, pt)
-            if isinstance(r, dict) and r.get("retcode") in (6, 8):
-                # セッションが切れた（タイトルに戻された）。入り直して同じ番号をもう一度試す
-                ok = self.refresh_session()
-                if not ok:
-                    self.get_info()
-                r = self.gacha_single(gachaid, pt)
             if r is None:
                 return {"status": "network_error", "tried": tried}
             if not (isinstance(r, dict) and r.get("retcode") == 0):
@@ -934,7 +928,16 @@ class Forge:
                 msg = " ".join(str(r.get(k)) for k in ("retmsg", "message", "errmsg", "error", "msg")
                                if isinstance(r, dict) and r.get(k))
                 tried.append({"paytype": pt, "result": "rejected", "retcode": rc, "msg": msg[:120],
-                              "keys": sorted(r.keys())[:20] if isinstance(r, dict) else None})
+                              "link": str(r.get("link"))[:80] if isinstance(r, dict) else None,
+                              "retsubcode": r.get("retsubcode") if isinstance(r, dict) else None})
+                if rc == 37 or "プレゼント" in msg:
+                    # 「ツムのプレゼントがあります。一度ホームに戻ります。」番号の問題ではないので、ここで止める
+                    return {"status": "present_pending", "tried": tried}
+                if rc in (6, 8):
+                    # 入力エラー・タイトルに戻された。続けるとセッションが壊れるので入り直してから次へ
+                    if not self.refresh_session():
+                        return {"status": "not_found", "tried": tried}
+                    w = self._wallet(self.get_info())
                 continue
             after = self._wallet(r)
             if after["bmedal"] is None:
