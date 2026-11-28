@@ -45,6 +45,8 @@ services:
       DYA_ENABLED: ${DYA_ENABLED:-0}
       # ミニゲーム（下の osero）のカードをトップのメニューに出すか。remote-setup.sh が .env に書く。
       OSERO_ENABLED: ${OSERO_ENABLED:-0}
+      # ミニゲーム（下の hunt＝彩狩）のカードをトップのメニューに出すか。remote-setup.sh が .env に書く。
+      HUNT_ENABLED: ${HUNT_ENABLED:-0}
     extra_hosts:
       # app コンテナから、ホストで動く Tor（SOCKS 9050）へ届かせるため
       - "host.docker.internal:host-gateway"

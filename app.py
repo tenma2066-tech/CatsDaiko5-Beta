@@ -41,7 +41,7 @@ from contextlib import ExitStack
 from collections import deque
 from types import SimpleNamespace
 
-from flask import Flask, Response, g, jsonify, redirect, render_template_string, request, session
+from flask import Flask, Response, g, jsonify, redirect, render_template_string, request, send_file, session
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape as xml_escape
 
@@ -3284,11 +3284,36 @@ def _site() -> str:
     return f"{scheme}://{request.host}"
 
 
+# ミニゲーム「チンチロ」（chinchiro/index.html。1つのファイルで動く。通信はしない）。
+# 中にスクリプトが書かれた作りなので、この画面だけ専用の方針（CSP）にする：中のスクリプトと Google Fonts だけ許し、外への通信・埋め込みは止める。
+CHINCHIRO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chinchiro", "index.html")
+CHINCHIRO_CSP = "; ".join((
+    "default-src 'none'", "script-src 'unsafe-inline'", "style-src 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src https://fonts.gstatic.com", "img-src data: blob:", "connect-src 'none'", "media-src 'none'",
+    "object-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"))
+
+
+@app.get("/chinchiro")
+def chinchiro_redirect():
+    return redirect("/chinchiro/", 308)
+
+
+@app.get("/chinchiro/")
+def chinchiro_page():
+    if not site_config.CHINCHIRO_ENABLED or not os.path.isfile(CHINCHIRO_FILE):
+        return Response("not found", status=404, mimetype="text/plain")
+    resp = send_file(CHINCHIRO_FILE, mimetype="text/html", conditional=True, max_age=0)
+    resp.headers["Content-Security-Policy"] = CHINCHIRO_CSP
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
+
+
 @app.get("/robots.txt")
 def robots_txt():
     return Response(
         "User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n"
-        "Disallow: /status/\nDisallow: /health\nDisallow: /dya/\nDisallow: /osero/\nDisallow: /hunt/\n"
+        "Disallow: /status/\nDisallow: /health\nDisallow: /dya/\nDisallow: /osero/\nDisallow: /hunt/\nDisallow: /chinchiro/\n"
         f"Sitemap: {_site()}/sitemap.xml\n",
         mimetype="text/plain",
     )

@@ -218,7 +218,7 @@ fi
 
 # 4.9) ミニゲーム。ソースがそろったものだけ起動する（COMPOSE_PROFILES に足す）。
 #      dya は暗証番号（.env の DYA_PIN）も必要。osero は外部通信なしのため暗証番号なしで公開してよい。
-sed -i '/^COMPOSE_PROFILES=/d; /^DYA_ENABLED=/d; /^OSERO_ENABLED=/d' .env
+sed -i '/^COMPOSE_PROFILES=/d; /^DYA_ENABLED=/d; /^OSERO_ENABLED=/d; /^HUNT_ENABLED=/d' .env
 PROFILES=""
 # --- ダイナマイト野球（dya）---
 if [ -f "$APP_DIR/src/dya/proxy.js" ] && [ -f "$APP_DIR/src/dya/Dockerfile" ] && grep -Eq '^DYA_PIN=[0-9]{4,12}$' .env; then
@@ -247,9 +247,11 @@ fi
 # --- 彩狩（hunt）---
 if [ -f "$APP_DIR/src/hunt/server.js" ] && [ -f "$APP_DIR/src/hunt/Dockerfile" ]; then
   PROFILES="${PROFILES:+$PROFILES,}hunt"
+  echo "HUNT_ENABLED=1" >> .env
   echo "hunt: enabled (/hunt/)"
 else
   docker compose --profile hunt rm -sf hunt >/dev/null 2>&1 || true
+  echo "HUNT_ENABLED=0" >> .env
   echo "hunt: disabled (no source)"
 fi
 [ -n "$PROFILES" ] && echo "COMPOSE_PROFILES=$PROFILES" >> .env

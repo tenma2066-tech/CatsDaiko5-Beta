@@ -12,6 +12,7 @@ from cryptography.fernet import Fernet
 
 import admin_2fa
 import app as A
+import site_config
 import paypay_gateway as G
 
 GOOD = "ツムツムの結果画面に、かかった時間も出るとうれしいです。"
@@ -63,7 +64,8 @@ class FeedbackBox(Base):
         page = self.c.get("/box").get_data(as_text=True)
         self.assertIn("意見・質問箱", page)
         self.assertIn('href="/box"', self.c.get("/").get_data(as_text=True))
-        self.assertEqual(self.c.get("/").get_data(as_text=True).count('class="gamecard"'), 7)   # 7つ目のメニュー
+        with patch.object(site_config, "CHINCHIRO_ENABLED", False):   # ミニゲームのカードを除いた、お店のメニューの数
+            self.assertEqual(self.c.get("/").get_data(as_text=True).count('class="gamecard"'), 7)   # 7つ目のメニュー
         self.assertIn("/box</loc>", self.c.get("/sitemap.xml").get_data(as_text=True))
 
     def test_saves_and_only_admin_reads(self):

@@ -36,6 +36,13 @@ DYA_PATH = "/dya/"
 # サーバーにソース（osero/server.js）があるとき remote-setup.sh が OSERO_ENABLED=1 にする。0 ならカードを出さない。
 OSERO_ENABLED = _env("OSERO_ENABLED", "0") == "1"
 OSERO_PATH = "/osero/"
+# ミニゲーム「彩狩」（別コンテナの hunt を Caddy が /hunt/ に回す。deploy/vps/）。
+# サーバーにソース（hunt/server.js）があるとき remote-setup.sh が HUNT_ENABLED=1 にする。0 ならカードを出さない。
+HUNT_ENABLED = _env("HUNT_ENABLED", "0") == "1"
+HUNT_PATH = "/hunt/"
+# ミニゲーム「チンチロ」（chinchiro/index.html をお店のアプリがそのまま返す。通信なし）。0 ならカードも画面も出さない。
+CHINCHIRO_ENABLED = _env("CHINCHIRO_ENABLED", "1") != "0"
+CHINCHIRO_PATH = "/chinchiro/"
 
 REVIEW_MIN_CHARS = 20            # 感想の最小文字数
 REVIEW_MAX_CHARS = 400
@@ -83,5 +90,6 @@ def template_context() -> dict:
             "google_verification": GOOGLE_SITE_VERIFICATION, "review_post_id": REVIEW_POST_ID,
             "flow_images": flow_images(), "og": og_images(),
             "reviews_on": REVIEWS_ENABLED, "dya_enabled": DYA_ENABLED, "dya_path": DYA_PATH,
-            "osero_enabled": OSERO_ENABLED, "osero_path": OSERO_PATH, "past_reviews_url": past_reviews_url(),
+            "osero_enabled": OSERO_ENABLED, "osero_path": OSERO_PATH,
+            "hunt_enabled": HUNT_ENABLED, "hunt_path": HUNT_PATH, "chinchiro_enabled": CHINCHIRO_ENABLED, "chinchiro_path": CHINCHIRO_PATH, "past_reviews_url": past_reviews_url(),
             "review_min": REVIEW_MIN_CHARS, "review_max": REVIEW_MAX_CHARS}

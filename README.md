@@ -15,6 +15,9 @@
 | `/source` | ソースコード購入（この仕組み一式の zip） | `templates/extra.html` | `source_pack.py` |
 | `/reviews` | 実績（完了したお客さんの星5段階の評価と感想） | `templates/reviews.html` | 入力欄は `static/review.js` |
 | `/dya/` | ミニゲーム（ダイナマイト野球・暗証番号つき。VPS だけ） | dya-proxy のランチャー | 別コンテナ `dya`（`docs/VPS_DEPLOY.md`） |
+| `/osero/` | ミニゲーム（UltraOSERO・6人まで。VPS だけ） | `osero/` | 別コンテナ `osero` |
+| `/hunt/` | ミニゲーム（彩狩・ひとりでも協力でも。VPS だけ） | `hunt/` | 別コンテナ `hunt`。カードは `HUNT_ENABLED` |
+| `/chinchiro/` | ミニゲーム（チンチロ・1ファイル・通信なし） | `chinchiro/index.html` | お店のアプリがそのまま返す（専用の CSP）。`CHINCHIRO_ENABLED=0` で隠す |
 | `/admin` | 管理画面（PayPay 接続・注文・料金・クーポン・メンテ表示） | `templates/admin.html` | — |
 
 右下の「質問する」は AI の Q&A チャット（`qa_bot.py`）。鍵（`ANTHROPIC_API_KEY`）が無ければ固定の案内文になります。
