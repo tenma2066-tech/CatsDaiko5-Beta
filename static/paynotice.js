@@ -35,7 +35,7 @@
     if (!paypay) {   /* PayPay を止めているあいだは、目立つように伝える */
       var off = document.createElement("p");
       off.style.cssText = "margin:0 0 10px;padding:8px 10px;border-radius:10px;background:#fdecec;color:#b42323;font-weight:800;font-size:14px";
-      off.textContent = "⚠ PayPay は現在、一時的にご利用いただけません。Kyash でお支払いください。";
+      off.textContent = "⚠ PayPay は使えなくなりました。お支払いは Kyash でお願いします🙇";
     }
     if (offPct > 0) {
       var deal = document.createElement("p");
@@ -46,6 +46,23 @@
       dealSub.textContent = "お支払いの金額から自動で割り引きます（支援BOXは対象外）";
       deal.append(dealSub);
     }
+    /* Kyash を知らない人向けの、たたんで読める説明 */
+    var what = document.createElement("details");
+    what.style.cssText = "margin:0 0 14px;border:1px solid #e2e6ee;border-radius:10px;padding:8px 12px;background:#f7f9fc";
+    var wsum = document.createElement("summary");
+    wsum.textContent = "Kyash（キャッシュ）ってなに？";
+    wsum.style.cssText = "cursor:pointer;font-weight:700;font-size:14px;color:#17181c";
+    var wp = document.createElement("p");
+    wp.style.cssText = "margin:8px 0 0;font-size:13px;line-height:1.75;color:#3a4150";
+    wp.textContent = "スマホで使える、無料のお財布アプリです。銀行口座・コンビニ・セブン銀行ATM・他のカードからお金をチャージして、相手に「送金リンク」を送って支払えます。App Store / Google Play で「Kyash」と検索すると入れられます。";
+    var wsteps = document.createElement("ol");
+    wsteps.style.cssText = "margin:8px 0 0;padding-left:1.3em;font-size:13px;line-height:1.7;color:#3a4150";
+    ["Kyashアプリを入れて、使う分だけチャージする",
+     "表示された金額ちょうどの送金リンクを作る",
+     "そのリンク（https://kyash.me/payments/…）をコピーして、お支払い画面に貼る"].forEach(function (t) {
+      var li = document.createElement("li"); li.textContent = t; wsteps.append(li);
+    });
+    what.append(wsum, wp, wsteps);
     var ok = document.createElement("button");
     ok.type = "button";
     ok.textContent = "OK";
@@ -55,7 +72,7 @@
     ok.addEventListener("click", close);
     wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
     document.addEventListener("keydown", onKey);
-    box.append(h, p, ol, note, ok);
+    box.append(h, p, ol, note, what, ok);
     if (!paypay) p.after(off);
     if (offPct > 0) (paypay ? p : off).after(deal);
     wrap.append(box);
