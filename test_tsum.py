@@ -946,3 +946,86 @@ class WorkerCaptcha(unittest.TestCase):
         with patch.object(A, "_worker_pipe", pipe), patch.object(A, "_publish_job"), \
              patch.object(A, "TSUM_CAPTCHA_WAIT", 0):
             self.assertEqual(A._tsum_captcha(job, b"PNG"), "")
+
+
+class PremiumBoxPlus(unittest.TestCase):
+    """プレミアムBOX+：ガチャの見つけ方と「引けるところまで」の結果"""
+
+    def _core(self):
+        return NewMenus._core()
+
+    def _mast(self, rows):
+        return {"retcode": 0, "gachamst": rows}
+
+    def _forge(self, c, rows, results, coins=1_000_000):
+        seen = {"ids": [], "fills": 0}
+
+        class FakeForge:
+            def get_mast(self_):
+                return self._mast(rows)
+            def resources(self_, info=None):
+                return {"bcoin": coins}
+            def fill_coins(self_, cap=0):
+                seen["fills"] += 1
+            def complete_box(self_, gid, **kw):
+                seen["ids"].append(gid)
+                return results.pop(0)
+        c._GACHA_CACHE.update(ts=0.0, ids=None)
+        return FakeForge(), seen
+
+    def test_menu_price_and_kwargs(self):
+        self.assertIn("tsum_premium_plus", T.MENUS)
+        self.assertIn("tsum_premium_plus", pricing.PRICES)
+        with patch.object(T, "_core", fake_core()):
+            self.assertEqual(T._forge_kwargs("tsum_premium_plus", {}), {"gacha_plus": T.DEFAULT_PREMIUM_PLUS_GACHA_ID})
+
+    def test_name_match(self):
+        c = self._core()
+        for name in ("プレミアムBOX+", "プレミアムＢＯＸ＋", "プレミアムbox +", "プレミアムBOXプラス"):
+            self.assertTrue(c._is_box_plus_name(name), name)
+        self.assertFalse(c._is_box_plus_name("プレミアムBOX"))
+
+    def test_found_by_name_before_type(self):
+        c = self._core()
+        rows = [{"gachaid": 11, "type": 11, "name": "プレミアムBOX"},
+                {"gachaid": 64, "type": 64, "name": "ハピネスBOX"},
+                {"gachaid": 77, "type": 70, "name": "プレミアムBOX+"}]
+        f, seen = self._forge(c, rows, [{"status": "complete", "draws": 120}])
+        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        self.assertEqual(seen["ids"], [77])
+        self.assertIn("最後まで引きました（120連）", msg)
+
+    def test_type_fallback_and_not_running(self):
+        c = self._core()
+        f, seen = self._forge(c, [{"gachaid": 11, "type": 11}, {"gachaid": 64, "type": 64}],
+                              [{"status": "complete", "draws": 10}])
+        c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        self.assertEqual(seen["ids"], [64])
+        f, seen = self._forge(c, [{"gachaid": 11, "type": 11}], [])
+        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        self.assertIsNone(res)
+        self.assertIn("開催されていない", msg)
+
+    def test_coins_ran_out_is_success_with_count(self):
+        c = self._core()
+        f, _ = self._forge(c, [{"gachaid": 64, "type": 64}], [{"status": "coin_ran_out", "draws": 33, "coin": 0}])
+        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        self.assertIsNotNone(res)
+        self.assertIn("コインがなくなるまで引きました（33連）", msg)
+
+    def test_refill_adds_up_draws(self):
+        c = self._core()
+        f, seen = self._forge(c, [{"gachaid": 64, "type": 64}],
+                              [{"status": "coin_ran_out", "draws": 100}, {"status": "coin_ran_out", "draws": 100},
+                               {"status": "complete", "draws": 7}], coins=0)
+        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=True)
+        self.assertEqual(res["draws"], 207)
+        self.assertEqual(seen["fills"], 3)
+        self.assertIn("207連", msg)
+
+    def test_nothing_drawn_is_failure(self):
+        c = self._core()
+        f, _ = self._forge(c, [{"gachaid": 64, "type": 64}], [{"status": "insufficient_coin", "have": 0, "need": 30000, "draws": 0}])
+        res, msg = c.forge_sync(gacha_plus=0, sess={"userid": "1"}, f=f, auto_fill_coins=False)
+        self.assertIsNone(res)
+        self.assertIn("コインが足りない", msg)

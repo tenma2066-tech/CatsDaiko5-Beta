@@ -13,6 +13,7 @@ import json
 import os
 import time
 import traceback
+import unicodedata
 
 import requests  # noqa: F401  抜き出した部分が requests.exceptions を使う
 
@@ -312,6 +313,7 @@ def _cached_gacha_ids(f, ttl=600):
     if not isinstance(rows, list) or not rows:
         return None
     by_type = {}
+    plus_by_name = None
     for g in rows:
         if not isinstance(g, dict):
             continue
@@ -321,14 +323,28 @@ def _cached_gacha_ids(f, ttl=600):
         except Exception:
             continue
         by_type.setdefault(t, gid)
+        # プレミアムBOX+ は名前で見分ける（「BOX+」「BOX＋」「BOXプラス」のどれか。全角・小文字も同じとみなす）
+        if plus_by_name is None:
+            for v in g.values():
+                if isinstance(v, str) and _is_box_plus_name(v):
+                    plus_by_name = gid
+                    break
     box_id = by_type.get(41)
     if not box_id and CONFIG.get("box_fallback_premium_box"):
         box_id = by_type.get(64)
-    ids = {"premium": by_type.get(11), "box": box_id, "has_select_box": bool(by_type.get(41))}
-    if ids["premium"] or ids["box"]:
+    plus_type = int(CONFIG.get("premium_box_plus_type", 64))
+    ids = {"premium": by_type.get(11), "box": box_id, "has_select_box": bool(by_type.get(41)),
+           "premium_plus": plus_by_name or by_type.get(plus_type),
+           "premium_plus_by": "name" if plus_by_name else ("type" if by_type.get(plus_type) else None)}
+    if ids["premium"] or ids["box"] or ids["premium_plus"]:
         _GACHA_CACHE["ids"] = ids
         _GACHA_CACHE["ts"] = now
     return ids
+
+
+def _is_box_plus_name(text):
+    t = unicodedata.normalize("NFKC", str(text)).upper().replace(" ", "")
+    return "BOX+" in t or "BOXプラス" in t
 
 
 def resolve_gacha_id(f, kind, fallback):
@@ -369,7 +385,7 @@ def is_coin_free(guild_id=None):
 def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=None, box=None,
                login_id=None, password=None, captcha_solver=None, proxy=None, sess=None, f=None,
                pin_notice=None, gacha_full=None, on_login=None, stage_box=None, progress=None,
-               is_guest=False, auto_fill_coins=None, all_tsum_lv=False, nickname=None):
+               is_guest=False, auto_fill_coins=None, all_tsum_lv=False, nickname=None, gacha_plus=None):
     if auto_fill_coins is None:
         auto_fill_coins = is_coin_free()
     # stage_box: 失敗がログイン段階か実行段階かを呼び出し元に伝えるための箱
@@ -705,6 +721,71 @@ def forge_sync(score=None, coin=None, exp=None, medal=None, tsumid=860, tsum_lv=
         if st == "max_reached":
             return None, f"上限まで引きましたが完売しませんでした（{res.get('draws','-')}連）。もう一度お試しください。"
         return None, f"プレミアムガチャの完売に失敗しました（status={st}）。もう一度お試しください。"
+
+    if gacha_plus is not None:
+        gacha_plus, _st = resolve_gacha_id(f, "premium_plus", gacha_plus)
+        if _st == "not_running":
+            return None, "現在プレミアムBOX+が開催されていないため実行できません。"
+        if not gacha_plus:
+            return None, "プレミアムBOX+の情報をゲームから取得できませんでした。少し待ってからもう一度お試しください。"
+        if progress:
+            progress.update(act_stage, "プレミアムBOX+を引いています...", force=True)
+
+        total = 0
+        res = None
+        for _refill_try in range(5):
+            if auto_fill_coins:
+                try:
+                    cur_c = f.resources()["bcoin"]
+                    if cur_c < 300_000:
+                        if progress:
+                            progress.update(act_stage, "ガチャ用コインを補充中 (3000万)...", force=True)
+                        _dbg(f"[premium_plus] コイン不足検知: 現在={cur_c:,} -> 3000万補充")
+                        f.fill_coins(cap=cur_c + 30_000_000)
+                except Exception as _fe:
+                    _dbg(f"[premium_plus] fill_coins例外: {_fe}")
+
+            def _on_plus_p(drawn, cur_coin, is_single, _base=total):
+                if progress:
+                    mode_str = "単発" if is_single else "10連"
+                    progress.update(act_stage, f"プレミアムBOX+引出中 ({mode_str}): {_base + drawn:,}連 (残コイン: {cur_coin:,})")
+
+            # 単発でも引けるよう、所持コインの下限は単発1回分にする
+            res = f.complete_box(int(gacha_plus), min_coin=30_000, sleep_s=0, log=_dbg, on_progress=_on_plus_p)
+            st = res.get("status")
+            total += int(res.get("draws") or 0)
+            if st in ("coin_ran_out", "insufficient_coin") and auto_fill_coins and _refill_try < 4:
+                _dbg(f"[premium_plus] コイン不足({st})のため補充して再開 (試行{_refill_try+2}/5)")
+                continue
+            break
+
+        st = res.get("status") if isinstance(res, dict) else ""
+        _dbg(f"[premium_plus] gachaid={gacha_plus} status={st} total={total} detail={res}")
+        if isinstance(res, dict):
+            res["draws"] = total
+        tail = "\n完了しました。\nまたのご利用をお待ちしております。"
+        if st in ("complete", "already_complete"):
+            if total <= 0:
+                return res, "プレミアムBOX+はすでに最後まで引き終わっています。" + tail
+            return res, f"プレミアムBOX+を最後まで引きました（{total:,}連）" + tail
+        if total > 0 and st in ("coin_ran_out", "insufficient_coin"):
+            return res, f"プレミアムBOX+をコインがなくなるまで引きました（{total:,}連）" + tail
+        if total > 0 and st in ("draw_error", "max_reached"):
+            return res, f"プレミアムBOX+を引けるところまで引きました（{total:,}連。それ以上はサーバーが受け付けませんでした）" + tail
+        if total > 0 and st == "network_error":
+            return None, (f"接続が不安定なため {total:,}連 で止まりました。"
+                          "少し待ってからもう一度お試しください（引いた分は反映済みです）。")
+        if st == "network_error":
+            return None, "接続が不安定なため実行できませんでした。少し待ってからもう一度お試しください。"
+        if st == "api_error":
+            return None, describe_tsum_api_failure("プレミアムBOX+", res.get("resp"), f, missing_data=True)
+        if st == "insufficient_coin":
+            return None, f"コインが足りないため引けませんでした（所持 {res.get('have', 0):,}）。先にコインを増やしてからお試しください。"
+        if st == "draw_error":
+            return None, ("プレミアムBOX+の抽選をサーバーに拒否されました。\n"
+                          "開催中の別のガチャに切り替わった可能性があります。\n"
+                          f"[詳細] {str(res.get('resp'))[:150]}")
+        return None, f"プレミアムBOX+を引けませんでした（status={st}）。もう一度お試しください。"
 
     if progress:
         progress.update(act_stage, "代行処理を実行しています...", force=True)
@@ -1055,7 +1136,7 @@ def _save_guest_transfer(sess, old_migration_id, new_id, new_pw):
 
 def forge_sync_guest(migration_id, password, score=None, coin=None, exp=None, medal=None,
                      tsumid=860, tsum_lv=None, box=None, proxy=None, gacha_full=None,
-                     progress=None, auto_fill_coins=None, **_ignore):
+                     progress=None, auto_fill_coins=None, gacha_plus=None, **_ignore):
     if not migration_id or not password:
         return None, "引き継ぎ番号とパスワードを入力してください。", {"moved": False}
     if progress:
@@ -1102,7 +1183,8 @@ def forge_sync_guest(migration_id, password, score=None, coin=None, exp=None, me
                 progress.update(3, "代行処理を実行中...", force=True)
             result_obj, text = forge_sync(score=score, coin=coin, exp=exp, medal=medal, tsumid=tsumid,
                                           tsum_lv=tsum_lv, box=box, proxy=g_proxy, sess=sess, f=f,
-                                          gacha_full=gacha_full, progress=progress, is_guest=True,
+                                          gacha_full=gacha_full, gacha_plus=gacha_plus,
+                                          progress=progress, is_guest=True,
                                           auto_fill_coins=auto_fill_coins)
     except Exception:
         traceback.print_exc()

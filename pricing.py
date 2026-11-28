@@ -10,7 +10,7 @@ PRICES = {"chara": 50, "crash": 50, "ban_guarantee": 500, "clone": 100, "other":
           # ツムツム代行（別の大メニュー。1メニューごとの料金）
           "tsum_coin": 50, "tsum_coin_max": 50, "tsum_level_max": 50, "tsum_score": 50, "tsum_score_max": 50,
           "tsum_tsum_lv": 50, "tsum_tsum_lv_pick": 50, "tsum_all_lv": 300, "tsum_medal": 50, "tsum_medal_max": 50,
-          "tsum_nickname": 50, "tsum_box": 100, "tsum_premium": 100, "tsum_guest_create": 30,
+          "tsum_nickname": 50, "tsum_box": 100, "tsum_premium": 100, "tsum_premium_plus": 100, "tsum_guest_create": 30,
           # ぷにぷに代行（3つ目の大メニュー）
           "puni_account": 50, "puni_aged": 100, "puni_farm_10": 50, "puni_hour": 100,
           "puni_hitodama": 50, "puni_coin_gacha": 60, "puni_stage_clear": 50,
@@ -29,7 +29,7 @@ PRICE_LABELS = {"chara": "キャラ指定（1体・1項目ごと）", "crash": "
                 "tsum_tsum_lv_pick": "ツム：指定ツムをレベルMAX", "tsum_all_lv": "ツム：全ツムをレベルMAX",
                 "tsum_medal": "ツム：メダル指定", "tsum_medal_max": "ツム：メダルMAX", "tsum_nickname": "ツム：ニックネーム変更",
                 "tsum_box": "ツム：セレクトBOX完売",
-                "tsum_premium": "ツム：プレミアム完売", "tsum_guest_create": "ツム：ゲストアカウント生成",
+                "tsum_premium": "ツム：プレミアム完売", "tsum_premium_plus": "ツム：プレミアムBOX+", "tsum_guest_create": "ツム：ゲストアカウント生成",
                 "puni_account": "ぷに：アカウント作成（1件）", "puni_aged": "ぷに：久垢作成（1件）",
                 "puni_farm_10": "ぷに：自動周回（10周ごと）", "puni_hour": "ぷに：回し放題（1時間ごと）",
                 "puni_hitodama": "ぷに：ひとだま補充", "puni_coin_gacha": "ぷに：コインガチャ回し切り",

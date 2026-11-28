@@ -90,6 +90,9 @@ MENUS = {
                          "desc": "開催中のセレクトBOXを完売まで引きます", "order": 30},
     "tsum_premium":     {"label": "プレミアム完売", "price": "tsum_premium",
                          "desc": "プレミアムガチャを完売まで引きます", "order": 31},
+    "tsum_premium_plus": {"label": "プレミアムBOX+", "price": "tsum_premium_plus",
+                          "desc": "開催中のプレミアムBOX+を、引けるところまで（最後まで・コインがなくなるまで）引きます",
+                          "order": 32},
     "tsum_score":       {"label": "スコア指定", "price": "tsum_score", "value": (0, 2_147_483_647),
                          "unit": "点", "desc": "好きなスコアを指定できます", "order": 40},
     "tsum_score_max":   {"label": "スコアMAX", "price": "tsum_score_max",
@@ -110,6 +113,8 @@ SOLO_MENUS = ("tsum_guest_create",)
 # 既定のガチャID（開催中のIDはゲームから取り直す。取れなかったときだけこの値を使う）
 DEFAULT_SELECT_BOX_ID = int(os.environ.get("TSUM_SELECT_BOX_ID", "12006012"))
 DEFAULT_PREMIUM_GACHA_ID = int(os.environ.get("TSUM_PREMIUM_GACHA_ID", "12006007"))
+# プレミアムBOX+ はゲームのガチャ一覧から名前（BOX+）か種類で探す。見つからないときだけこの ID を使う（0 = 使わない）
+DEFAULT_PREMIUM_PLUS_GACHA_ID = int(os.environ.get("TSUM_PREMIUM_PLUS_GACHA_ID", "0"))
 
 # ゲーム側が「セット中のマイツムを使う」と解釈する値
 MYTSUM_AUTO = 0
@@ -228,6 +233,8 @@ def _forge_kwargs(menu: str, qty: dict) -> dict:
         return {"box": DEFAULT_SELECT_BOX_ID}
     if menu == "tsum_premium":
         return {"gacha_full": DEFAULT_PREMIUM_GACHA_ID}
+    if menu == "tsum_premium_plus":
+        return {"gacha_plus": DEFAULT_PREMIUM_PLUS_GACHA_ID}
     raise ValueError(f"不明なメニュー: {menu}")
 
 
