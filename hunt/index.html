@@ -574,7 +574,7 @@ select.sel{width:100%;height:42px;background:#0a0f22;color:var(--ink);border:1px
     <div class="stack" id="fGuest">
       <div class="field"><input id="name" maxlength="12" placeholder="なまえ（12文字まで）" autocomplete="off"></div>
       <button id="bGuest" class="btn pri"><i class="gem"></i>ゲストではじめる<i class="gem"></i></button>
-      <div class="note" style="margin:0">ゲストは R のキャラ5人で遊べます。ガチャ・報酬・記録はログインすると使えます。</div>
+      <div class="note" style="margin:0">ゲストでも、ガチャ・報酬・ステージなど全部遊べます（彩石 10,000 個つき）。ただし、ページを読み直すと消えます。ずっと残したいときは新規登録してください。</div>
     </div>
     <div class="stack hidden" id="fAuth">
       <div class="field"><input id="user" maxlength="12" placeholder="ユーザー名（3〜12文字）" autocomplete="username"></div>
@@ -740,10 +740,11 @@ const AUTO_BOOST = 1.6;   // オート中は演出を少し速く
 function syncSpeed() { speed = userSpeed * (amAuto() ? AUTO_BOOST : 1); }
 
 /* ---------------- 通信 ---------------- */
+const PAGE = Math.random().toString(36).slice(2) + Date.now().toString(36);   // このページを開いているあいだの印（読み直すと変わり、ゲストのデータは消える）
 function connect() {
   const base = location.pathname.endsWith('/') ? location.pathname : location.pathname.replace(/[^/]*$/, '');
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + base + 'ws');
-  ws.onopen = () => send({ t: 'hello', token: store.get('hunt_token'), name: $('name').value || store.get('hunt_name') || '', session: store.get('hunt_session') || undefined });
+  ws.onopen = () => send({ t: 'hello', page: PAGE, token: store.get('hunt_token'), name: $('name').value || store.get('hunt_name') || '', session: store.get('hunt_session') || undefined });
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } onMsg(m); };
   ws.onclose = () => { toast('接続が切れました。つなぎ直しています…'); setTimeout(connect, 1500); };
 }
@@ -760,14 +761,16 @@ function onMsg(m) {
       try { guestDeck = JSON.parse(store.get('hunt_gdeck') || 'null'); } catch (e) { guestDeck = null; }
       if (!Array.isArray(guestDeck)) guestDeck = defs.rKeys.slice();
       setAcct(m.me);
-      if (!room && (m.me || store.get('hunt_guest') === '1')) { if (!m.me && guestDeck) send({ t: 'deck', keys: guestDeck }); goHome(); }
+      if (!room && m.me) goHome();
+      else if (!room && !m.me && store.get('hunt_guest') === '1') send({ t: 'guest', name: $('name').value.trim() || store.get('hunt_name') || '' });   // 前もゲストだった: 新しいゲストではじめる
       break;
     case 'auth':
       $('bAuth').disabled = false;
       if (m.error) { toast(m.error); break; }
       store.set('hunt_session', m.session || null); setAcct(m.me); $('pass').value = '';
-      if (m.me) { store.set('hunt_guest', null); toast(m.created ? `ようこそ、${m.me.name} さん！ 彩石 ${3000} をどうぞ` : `おかえりなさい、${m.me.name} さん`); goHome(); }
-      else { toast('ログアウトしました'); show('title'); }
+      if (m.me && m.guest) { store.set('hunt_guest', '1'); toast('ゲストで遊んでいます（ページを読み直すと消えます）'); goHome(); }
+      else if (m.me) { store.set('hunt_guest', null); toast(m.created ? `ようこそ、${m.me.name} さん！ 彩石 ${(10000).toLocaleString()} をどうぞ` : `おかえりなさい、${m.me.name} さん`); goHome(); }
+      else { store.set('hunt_guest', null); toast(m.left ? 'タイトルに戻りました（ゲストのデータは消えました）' : 'ログアウトしました'); show('title'); }
       break;
     case 'me': setAcct(m.me); break;
     case 'guestDeck': guestDeck = m.deck; store.set('hunt_gdeck', JSON.stringify(m.deck)); refreshScreens(); break;
@@ -804,9 +807,9 @@ function refreshScreens() {
   for (const el of document.querySelectorAll('[data-stones]')) el.textContent = n;
   $('hStones').textContent = n; $('hStoneP').classList.toggle('hidden', !acct);
   $('hWho').textContent = acct ? acct.name : ($('name').value.trim() || 'ゲスト');
-  $('hTag').textContent = acct ? `勝利 ${acct.wins} ／ キャラ ${Object.keys(acct.chars).length}人` : 'ゲスト（R のキャラのみ・記録なし）';
+  $('hTag').textContent = acct ? (acct.guest ? `ゲスト・読み直すと消えます ／ キャラ ${Object.keys(acct.chars).length}人` : `勝利 ${acct.wins} ／ キャラ ${Object.keys(acct.chars).length}人`) : 'ゲスト';
   $('hDaily').classList.toggle('hidden', !(acct && acct.daily));
-  $('hOut').textContent = acct ? 'ログアウト' : 'タイトルへ';
+  $('hOut').textContent = acct && !acct.guest ? 'ログアウト' : 'タイトルへ';
   const ready = acct ? acct.achievements.filter((x) => x.state === 'ready').length : 0;
   setBadge($('mAch'), ready ? ready : '');
   if (!$('home').classList.contains('hidden')) drawHome();
@@ -821,13 +824,13 @@ function setTab(m) {
   $('fGuest').classList.toggle('hidden', m !== 'guest'); $('fAuth').classList.toggle('hidden', m === 'guest');
   $('bAuth').textContent = m === 'register' ? 'この内容で登録する' : 'ログイン';
   $('pass').autocomplete = m === 'register' ? 'new-password' : 'current-password';
-  $('authNote').textContent = m === 'register' ? '登録すると彩石 3,000 個（10連2回ぶん）を贈ります。パスワードは忘れると元に戻せません。ほかのサービスと同じものは使わないでください。' : 'ログインすると、ガチャ・報酬・ステージの記録が使えます。';
+  $('authNote').textContent = m === 'register' ? '登録すると彩石 10,000 個（10連6回ぶん以上）を贈ります。パスワードは忘れると元に戻せません。ほかのサービスと同じものは使わないでください。' : 'ログインすると、ガチャ・報酬・ステージの記録が使えます。';
 }
 $('tGuest').onclick = () => setTab('guest'); $('tLogin').onclick = () => setTab('login'); $('tReg').onclick = () => setTab('register');
 $('bAuth').onclick = () => { const u = $('user').value.trim(), p = $('pass').value; if (!u || !p) return toast('ユーザー名とパスワードを入力してください'); $('bAuth').disabled = true; send({ t: authMode === 'register' ? 'register' : 'login', user: u, pass: p }); setTimeout(() => { $('bAuth').disabled = false; }, 6000); };
 $('pass').onkeydown = (e) => { if (e.key === 'Enter') $('bAuth').click(); };
-$('bGuest').onclick = () => { const n = $('name').value.trim(); store.set('hunt_name', n); store.set('hunt_guest', '1'); send({ t: 'name', name: n }); send({ t: 'deck', keys: guestDeck || defs.rKeys }); goHome(); };
-$('hOut').onclick = () => { if (acct) send({ t: 'logout' }); else { store.set('hunt_guest', null); show('title'); } };
+$('bGuest').onclick = () => { const n = $('name').value.trim(); store.set('hunt_name', n); send({ t: 'guest', name: n }); };
+$('hOut').onclick = () => { if (acct && acct.guest && !confirm('タイトルに戻ると、ゲストのデータ（キャラ・彩石・記録）は消えます。よろしいですか？')) return; if (acct) send({ t: 'logout' }); else { store.set('hunt_guest', null); show('title'); } };
 $('hDaily').onclick = () => send({ t: 'daily' });
 $('mAch').onclick = () => { if (!acct) return toast('実績はログインすると使えます'); send({ t: 'me' }); drawAch(); $('achv').classList.remove('hidden'); };
 $('bAchClose').onclick = () => $('achv').classList.add('hidden');

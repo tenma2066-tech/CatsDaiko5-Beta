@@ -17,7 +17,7 @@ const NAME_RE = /^[A-Za-z0-9_぀-ヿ㐀-鿿ｦ-ﾟ]{3,12}$/;   // 英数字・�
 const PASS_MIN = 6, PASS_MAX = 64;
 const MAX_SESSIONS = 5;
 const SCRYPT = { N: 16384, r: 8, p: 1, len: 32 };
-const START_STONES = 3000;   // はじめての人への贈り物（10連2回ぶん）
+const START_STONES = 10000;   // はじめての人への贈り物（10連6回ぶん以上）
 const DAILY_STONES = 300;    // ログインボーナス（日本時間で1日1回）
 
 const owned = (u) => Object.keys(u.chars || {});
@@ -87,7 +87,18 @@ function create(dataDir) {
     if (!u.log) u.log = [];
     return u;
   }
-  const get = (k) => (db.users[k] ? ensure(db.users[k]) : null);
+  /* ゲスト: ログインした人と同じデータを持つが、サーバーのメモリにだけ置く（ファイルには書かない）。キーは # で始まる */
+  const guests = new Map(), GUEST_MAX = 5000;
+  const isGuest = (k) => typeof k === 'string' && k[0] === '#';
+  function guest(name) {
+    if (guests.size >= GUEST_MAX) guests.delete(guests.keys().next().value);   // いちばん古いゲストから消す
+    const k = '#' + crypto.randomBytes(9).toString('hex');
+    guests.set(k, ensure({ name: String(name || 'ゲスト'), guest: true, created: Date.now(), stones: 0 }));
+    return k;
+  }
+  const dropGuest = (k) => { if (isGuest(k)) guests.delete(k); };
+  const renameGuest = (k, name) => { const u = guests.get(k); if (u) u.name = String(name || 'ゲスト'); };
+  const get = (k) => (isGuest(k) ? guests.get(k) || null : db.users[k] ? ensure(db.users[k]) : null);
 
   function checkInput(name, pw) {
     if (typeof name !== 'string' || !NAME_RE.test(name.normalize('NFKC'))) return 'ユーザー名は 3〜12文字（英数字・ひらがな・カタカナ・漢字）で入力してください。';
@@ -141,7 +152,7 @@ function create(dataDir) {
     const u = get(k); if (!u) return null;
     const s = u.stats;
     return {
-      name: u.name, stones: u.stones, hunts: s.hunts, wins: s.wins, breaks: s.breaks, pulls: s.pulls || 0,
+      name: u.name, guest: !!u.guest, stones: u.stones, hunts: s.hunts, wins: s.wins, breaks: s.breaks, pulls: s.pulls || 0,
       chars: u.chars, deck: u.deck, stages: u.stages, pity: u.pity, beginnerUsed: !!u.beginnerUsed,
       daily: u.daily !== jstDay(), log: u.log.slice(-20),
       achievements: ACHIEVEMENTS.map((a) => ({ id: a.id, name: a.name, desc: a.desc, reward: a.reward,
@@ -244,8 +255,8 @@ function create(dataDir) {
     return !!(u && stageCleared(u, prev));
   }
 
-  const nameOf = (k) => (db.users[k] ? db.users[k].name : '');
-  return { register, login, resume, logout, profile, record, claim, daily, setDeck, pull, partyOf, stageOpen, nameOf, flush,
+  const nameOf = (k) => { const u = isGuest(k) ? guests.get(k) : db.users[k]; return u ? u.name : ''; };
+  return { guest, dropGuest, renameGuest, isGuest, guestCount: () => guests.size, register, login, resume, logout, profile, record, claim, daily, setDeck, pull, partyOf, stageOpen, nameOf, flush,
            count: () => Object.keys(db.users).length };
 }
 

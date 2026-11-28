@@ -163,7 +163,7 @@ function roomView(r, p) {
   return {
     t: 'room', code: r.code, stage: r.stage, public: r.public, phase: r.phase, solo: !!r.solo, host: r.players[0] ? r.players[0].id : null,
     you: p.id, max: MAX_PLAYERS,
-    players: r.players.map((x) => ({ id: x.id, name: x.name, online: online(x), member: !!x.user, auto: !!x.auto, deck: deckOf(x).map((d) => d.key) })),
+    players: r.players.map((x) => ({ id: x.id, name: x.name, online: online(x), member: !!x.user && !accounts.isGuest(x.user), auto: !!x.auto, deck: deckOf(x).map((d) => d.key) })),
   };
 }
 function sendRoom(r) { for (const p of r.players) if (p.conn) p.conn.send(roomView(r, p)); notifyLobby(); }
@@ -313,9 +313,12 @@ function handle(c, m) {
       players.set(token, p);
     }
     if (m.name) p.name = cleanName(m.name);
+    const page = typeof m.page === 'string' ? m.page.slice(0, 40) : '';
+    if (p.page !== page && accounts.isGuest(p.user)) { accounts.dropGuest(p.user); p.user = null; }   // 再読み込み: ゲストのデータは消える
+    p.page = page;
     p.conn = c; c.player = p; p.seen = Date.now();
     const su = accounts.resume(m.session);
-    if (su) { p.user = su; p.session = m.session; p.name = accounts.nameOf(su); } else if (m.session) { p.user = null; p.session = null; }
+    if (su) { if (accounts.isGuest(p.user)) accounts.dropGuest(p.user); p.user = su; p.session = m.session; p.name = accounts.nameOf(su); } else if (m.session && !accounts.isGuest(p.user)) { p.user = null; p.session = null; }
     c.send({ t: 'welcome', token: p.token, id: p.id, name: p.name, defs: DEFS, me: p.user ? accounts.profile(p.user) : null, badSession: !!(m.session && !su) });
     if (p.room) {
       const r = p.room;
@@ -339,7 +342,16 @@ function handle(c, m) {
     return true;
   };
   switch (m.t) {
-    case 'name': if (!p.user) { p.name = cleanName(m.name); if (r) sendRoom(r); } break;
+    case 'name': if (!p.user || accounts.isGuest(p.user)) { p.name = cleanName(m.name); if (p.user) accounts.renameGuest(p.user, p.name); if (r) sendRoom(r); } break;
+    case 'guest': {   // ゲストではじめる: ログインした人と同じように遊べる（再読み込みで消える）
+      if (p.user && !accounts.isGuest(p.user)) { c.send({ t: 'auth', me: accounts.profile(p.user) }); break; }
+      if (m.name) p.name = cleanName(m.name);
+      if (!p.user) p.user = accounts.guest(p.name); else accounts.renameGuest(p.user, p.name);
+      p.session = null;
+      c.send({ t: 'auth', me: accounts.profile(p.user), guest: true });
+      if (r) sendRoom(r);
+      break;
+    }
     case 'register':
     case 'login': {
       if (p.authBusy) break;
@@ -349,6 +361,7 @@ function handle(c, m) {
       fn(m.user, m.pass).then((res) => {
         p.authBusy = false;
         if (res.error) { if (p.conn) p.conn.send({ t: 'auth', error: res.error }); return; }
+        if (accounts.isGuest(p.user)) accounts.dropGuest(p.user);
         p.user = res.user; p.session = res.session; p.name = accounts.nameOf(res.user);
         if (p.conn) p.conn.send({ t: 'auth', session: res.session, me: accounts.profile(res.user), created: m.t === 'register' });
         if (p.room) sendRoom(p.room);
@@ -356,8 +369,10 @@ function handle(c, m) {
       break;
     }
     case 'logout':
-      if (p.user) { accounts.logout(p.user, p.session); p.user = null; p.session = null; }
-      c.send({ t: 'auth', session: null, me: null });
+      { const was = accounts.isGuest(p.user);
+        if (was) accounts.dropGuest(p.user); else if (p.user) accounts.logout(p.user, p.session);
+        p.user = null; p.session = null;
+        c.send({ t: 'auth', session: null, me: null, left: was }); }
       break;
     case 'me': sendMe(p); break;
     case 'claim': {
@@ -480,7 +495,7 @@ function onClose(c) {
 setInterval(() => {
   const now = Date.now();
   for (const p of players.values()) {
-    if (!p.conn && now - p.seen > IDLE_ROOM_MS) { leaveRoom(p); players.delete(p.token); }
+    if (!p.conn && now - p.seen > IDLE_ROOM_MS) { leaveRoom(p); if (accounts.isGuest(p.user)) accounts.dropGuest(p.user); players.delete(p.token); }
   }
   for (const r of rooms.values()) {
     if (r.players.every((x) => !online(x)) && now - r.touched > IDLE_ROOM_MS) dropRoom(r);
